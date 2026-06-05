@@ -61,6 +61,14 @@ const normalizeOrder = (o) => ({
 });
 
 const ROLES      = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
+const ADMIN_CATS = {
+  "Gestión":["Circular informativa","Acta de reunión","Carta a residente","Aviso general","Otro"],
+  "Finanzas":["Pago de gastos comunes","Deuda morosa","Cotización","Factura proveedor","Fondo de reserva","Otro"],
+  "Documentos":["Solicitud de certificado","Reglamento interno","Contrato proveedor","Permiso municipal","Otro"],
+  "Comité":["Convocatoria reunión","Acuerdo de comité","Votación","Otro"],
+  "Legal":["Reclamo residente","Infracción reglamento","Denuncia","Mediación","Otro"],
+  "Proveedores":["Solicitud de cotización","Evaluación proveedor","Término de contrato","Otro"],
+};
 const STATUSES   = ["Ingresada","En revision","Asignada","En proceso","Resuelta","Cerrada","Rechazada"];
 const PRIORITIES = ["Emergencia","Alta","Media","Baja"];
 const STATUS_COLOR   = {Ingresada:"#6366f1","En revision":"#f59e0b",Asignada:"#3b82f6","En proceso":"#8b5cf6",Resuelta:"#10b981",Cerrada:"#6b7280",Rechazada:"#ef4444"};
@@ -691,10 +699,26 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
   };
-  const applyAsgn=()=>{
+  const applyAsgn=async()=>{
     if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
     upd({assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:r.status,to:"Asignada"});
     showToast("Responsable asignado");
+    // Buscar el correo del usuario asignado en Supabase
+    try {
+      const res = await fetch(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(asgn)}&active=eq.true&select=*`,{
+        headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}
+      });
+      const usuarios = await res.json();
+      const usuario = usuarios&&usuarios[0];
+      if(usuario?.email){
+        addEmail({
+          requestId:r.id,date:new Date().toISOString(),to:usuario.email,
+          subject:"[CondoAdmin] Se te asignó la solicitud "+r.code,
+          type:"Asignacion",status:"Enviado",
+          body:`Hola ${usuario.nombre},\n\nSe te ha asignado una nueva solicitud:\n\n📋 DETALLE\n──────────────────────────\nCódigo: ${r.code}\nSolicitante: ${r.requesterName}\nTeléfono: ${r.requesterPhone||"No indicado"}\nTorre: ${r.tower} / Unidad: ${r.unit}\nCategoría: ${r.category} - ${r.subcategory}\nPrioridad: ${r.priority}\n\nDescripción:\n${r.description}\n──────────────────────────\nIngresa a CondoAdmin para gestionar esta solicitud.`
+        });
+      }
+    } catch(e){ console.error("Error buscando usuario asignado:",e); }
   };
   const addCmt=()=>{
     if(!comment.trim())return;
@@ -875,6 +899,13 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const initTower=actTowers[0]||{name:""};
   const isAdminRole=role==="Administrador"||role==="Administrador Edificio";
   const [tipoReporte,setTipoReporte]=useState(isAdminRole?"Administrativo":"Incidencia");
+
+  // Categorías según tipo
+  const adminCatList=Object.keys(ADMIN_CATS);
+  const initAdminCat=adminCatList[0];
+  const [adminCat,setAdminCat]=useState(initAdminCat);
+  const [adminSub,setAdminSub]=useState(ADMIN_CATS[initAdminCat][0]);
+
   const [f,setF]=useState({
     requesterName:session?.nombre||"",
     requesterEmail:session?.email||"",
@@ -902,8 +933,8 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     if(!validate())return;
     const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
     const nr=normalizeReq({id:code,code,createdAt:now,...f,
-      category:tipoReporte==="Administrativo"?"Administrativo":f.category,
-      subcategory:tipoReporte==="Administrativo"?"Administrativo":f.subcategory,
+      category:tipoReporte==="Administrativo"?adminCat:f.category,
+      subcategory:tipoReporte==="Administrativo"?adminSub:f.subcategory,
       status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
       attachmentsInitial:prevs.map(p=>({id:"a"+uid(),requestId:code,type:"inicial",name:p.name,date:now,user:f.requesterName,preview:p.url,comment:""})),
@@ -952,6 +983,12 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
           <div style={fg}><label style={lbl}>Unidad *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={e=>set("unit",e.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
           <div style={fg}><label style={lbl}>Categoria</label><select style={selSt} value={f.category} onChange={e=>{const c=actCats.find(x=>x.name===e.target.value);set("category",e.target.value);set("subcategory",c&&c.subs.length?c.subs[0]:"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
           <div style={fg}><label style={lbl}>Subcategoria</label><select style={selSt} value={f.subcategory} onChange={e=>set("subcategory",e.target.value)}>{(curCat?curCat.subs:[]).map(s=><option key={s}>{s}</option>)}</select></div>
+        </>}
+
+        {/* Categorías administrativas */}
+        {isAdminRole&&tipoReporte==="Administrativo"&&<>
+          <div style={fg}><label style={lbl}>Categoría</label><select style={selSt} value={adminCat} onChange={e=>{setAdminCat(e.target.value);setAdminSub(ADMIN_CATS[e.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
+          <div style={fg}><label style={lbl}>Subcategoría</label><select style={selSt} value={adminSub} onChange={e=>setAdminSub(e.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
         </>}
 
         {/* Descripcion siempre visible */}

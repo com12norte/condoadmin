@@ -36,7 +36,6 @@ const authSignOut = async (token) => {
   await fetch(`${SUPA_URL}/auth/v1/logout`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${token}`}});
 };
 
-// Normaliza un registro recibido de DB para garantizar campos obligatorios
 const normalizeReq = (r) => ({
   comments:[], history:[], relatedTasks:[], attachmentsInitial:[],
   attachmentsProgress:[], attachmentsClosure:[], emailLogIds:[],
@@ -61,7 +60,7 @@ const normalizeOrder = (o) => ({
   ...(o||{}),
 });
 
-const ROLES      = ["Administrador","Conserjeria","Residente","Comite","Proveedor"];
+const ROLES      = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
 const STATUSES   = ["Ingresada","En revision","Asignada","En proceso","Resuelta","Cerrada","Rechazada"];
 const PRIORITIES = ["Emergencia","Alta","Media","Baja"];
 const STATUS_COLOR   = {Ingresada:"#6366f1","En revision":"#f59e0b",Asignada:"#3b82f6","En proceso":"#8b5cf6",Resuelta:"#10b981",Cerrada:"#6b7280",Rechazada:"#ef4444"};
@@ -73,8 +72,10 @@ const MAT_STATUS = ["Por adquirir","Adquirido","Entregado"];
 const MAT_COLOR  = {"Por adquirir":"#f59e0b",Adquirido:"#6366f1",Entregado:"#10b981"};
 const INV_CATS   = ["Herramientas","Electrico","Plomeria","Pintura","Limpieza","Jardines","Perimetral","Motor","Otros"];
 const INV_UNITS  = ["unidad","caja","kg","litro","metro","rollo","par","juego"];
-const RESP_LIST  = ["Carlos Munoz","Ana Garcia","Pedro Soto","Maria Lopez","Jose Fernandez","Sin asignar"];
-const RESP_ASSIGNABLE = RESP_LIST.filter(r=>r!=="Sin asignar");
+const RESP_LIST_DEFAULT  = ["Carlos Munoz","Ana Garcia","Pedro Soto","Maria Lopez","Jose Fernandez","Sin asignar"];
+const RESP_ASSIGNABLE_DEFAULT = RESP_LIST_DEFAULT.filter(r=>r!=="Sin asignar");
+const getRespList  = (resps) => resps&&resps.length ? [...resps.filter(r=>r.active).map(r=>r.name),"Sin asignar"] : RESP_LIST_DEFAULT;
+const getRespAssignable = (resps) => resps&&resps.length ? resps.filter(r=>r.active).map(r=>r.name) : RESP_ASSIGNABLE_DEFAULT;
 const SECTOR_LIST= ["Torre A","Torre B","Torre C","Zona norte","Zona sur","Estacionamientos","Perimetro exterior","Jardines","Techumbres"];
 const URGENCY_LEVELS = ["Baja","Media","Alta","Critica"];
 const URGENCY_COLOR  = {Baja:"#6b7280",Media:"#f59e0b",Alta:"#f97316",Critica:"#ef4444"};
@@ -119,6 +120,7 @@ const CL_SECTIONS = [
 ];
 const PERMS = {
   Administrador:["create","viewAll","assign","changeStatus","closeCases","createTask","viewReports","viewEmails","manageConfig","comment","inspection","inventory","viewAs","manageWork","mantencion","mantRead"],
+  "Administrador Edificio":["create","viewAll","assign","changeStatus","closeCases","createTask","viewReports","viewEmails","comment","inspection","inventory","manageWork","mantencion","mantRead"],
   Conserjeria:["create","viewOps","changeStatusLimited","comment","inspection","inventory","manageWork","mantencion","mantRead"],
   Residente:["create","viewOwn"],
   Comite:["viewAll","viewReports","inspectionRead","inventoryRead","mantRead"],
@@ -188,12 +190,13 @@ function Tabs({tabs,active,onChange,accent}){
 }
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando datos...</div><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;}
 
-// ── LOGIN ─────────────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}) {
+  const [mode,setMode]=useState(null); // null | "residente" | "personal"
   const [email,setEmail]=useState("");
   const [pass,setPass]  =useState("");
   const [load,setLoad]  =useState(false);
   const [err,setErr]    =useState("");
+
   const submit = async () => {
     if (!email||!pass){setErr("Ingrese correo y contraseña");return;}
     setLoad(true);setErr("");
@@ -206,24 +209,79 @@ function LoginScreen({onLogin}) {
     } catch(e){setErr(e.message||"Credenciales incorrectas");}
     setLoad(false);
   };
-  return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f1f5f9",fontFamily:"system-ui,sans-serif"}}>
-      <div style={{background:"#fff",borderRadius:16,padding:"40px 32px",width:"100%",maxWidth:380,boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
+
+  const enterResidente = () => {
+    onLogin({id:"guest-residente",nombre:"Residente",email:"",rol:"Residente",token:null,openNewReq:true});
+  };
+
+  // ── PANTALLA INICIAL ────────────────────────────────────────────────────────
+  if (!mode) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f1f5f9",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:400}}>
+        <div style={{textAlign:"center",marginBottom:40}}>
+          <div style={{background:"#0f172a",borderRadius:16,width:64,height:64,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:28}}>🏢</div>
+          <div style={{fontWeight:700,fontSize:24,color:"#0f172a"}}>CondoAdmin</div>
+          <div style={{color:"#64748b",fontSize:14,marginTop:4}}>Sistema de Gestión de Condominios</div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <button onClick={()=>setMode("residente")} style={{background:"linear-gradient(135deg,#3b82f6,#1d4ed8)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(59,130,246,.35)",transition:"transform .15s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform="translateY(0)"}>
+            <div style={{fontSize:36,flexShrink:0}}>🏠</div>
+            <div style={{textAlign:"left"}}>
+              <div style={{color:"#fff",fontWeight:700,fontSize:17}}>Soy Residente</div>
+              <div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Crea o consulta tus solicitudes fácilmente</div>
+            </div>
+            <div style={{marginLeft:"auto",color:"#bfdbfe",fontSize:20}}>→</div>
+          </button>
+          <button onClick={()=>setMode("personal")} style={{background:"linear-gradient(135deg,#0f172a,#1e3a5f)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(0,0,0,.25)",transition:"transform .15s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform="translateY(0)"}>
+            <div style={{fontSize:36,flexShrink:0}}>🔑</div>
+            <div style={{textAlign:"left"}}>
+              <div style={{color:"#fff",fontWeight:700,fontSize:17}}>Acceso Personal</div>
+              <div style={{color:"#94a3b8",fontSize:12,marginTop:2}}>Administración, Conserjería, Comité</div>
+            </div>
+            <div style={{marginLeft:"auto",color:"#94a3b8",fontSize:20}}>→</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── LOGIN RESIDENTE ─────────────────────────────────────────────────────────
+  if (mode==="residente") return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <button onClick={()=>setMode(null)} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24,display:"flex",alignItems:"center",gap:6}}>← Volver</button>
         <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{background:"#0f172a",borderRadius:12,width:56,height:56,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:24}}>🏢</div>
-          <div style={{fontWeight:700,fontSize:22,color:"#0f172a"}}>CondoAdmin</div>
-          <div style={{color:"#64748b",fontSize:13,marginTop:4}}>Sistema de Gestión</div>
+          <div style={{fontSize:48,marginBottom:12}}>🏠</div>
+          <div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Acceso Residentes</div>
+          <div style={{color:"#bfdbfe",fontSize:13,marginTop:4}}>Ingresa directo para crear tu solicitud</div>
+        </div>
+        <button onClick={enterResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,.15)"}}>
+          Ingresar como Residente →
+        </button>
+        <div style={{color:"#bfdbfe",fontSize:11,textAlign:"center",marginTop:16}}>No necesitas contraseña</div>
+      </div>
+    </div>
+  );
+
+  // ── LOGIN PERSONAL ──────────────────────────────────────────────────────────
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0f172a",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <button onClick={()=>{setMode(null);setErr("");}} style={{background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",color:"#94a3b8",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24,display:"flex",alignItems:"center",gap:6}}>← Volver</button>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:48,marginBottom:12}}>🔑</div>
+          <div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Acceso Personal</div>
+          <div style={{color:"#64748b",fontSize:13,marginTop:4}}>Administración · Conserjería · Comité</div>
         </div>
         {err&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{err}</div>}
-        <div style={{marginBottom:14}}><label style={lbl}>Correo electrónico</label><input style={inp} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="correo@ejemplo.cl" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-        <div style={{marginBottom:24}}><label style={lbl}>Contraseña</label><input style={inp} type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-        <button style={{width:"100%",padding:"12px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submit} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
+        <div style={{marginBottom:14}}><label style={{...lbl,color:"#94a3b8"}}>Correo electrónico</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="correo@ejemplo.cl" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+        <div style={{marginBottom:24}}><label style={{...lbl,color:"#94a3b8"}}>Contraseña</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+        <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submit} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
       </div>
     </div>
   );
 }
 
-// ── APP ROOT ──────────────────────────────────────────────────────────────────
 export default function App() {
   const mob = useMob();
   const [session,setSession]=useState(null);
@@ -249,7 +307,7 @@ export default function App() {
 
   const er = session ? (viewAs||session.rol) : "Residente";
   const showToast = (msg,type) => { setToast({msg,type:type||"success"}); setTimeout(()=>setToast(null),3200); };
-  const handleLogin  = (user) => { setSession(user); };
+  const handleLogin  = (user) => { setSession(user); if(user.openNewReq) setShowNew(true); };
   const handleLogout = async () => {
     if (session?.token) authSignOut(session.token).catch(()=>{});
     setSession(null); setViewAs(null); setView("dashboard");
@@ -271,7 +329,6 @@ export default function App() {
           dbGet("despachos","?order=id.asc"),
           dbGet("config","?select=*"),
         ]);
-        // Normalizar datos al cargar para garantizar campos obligatorios
         if(rR)  setReqs(rR.map(r=>normalizeReq(r.data)).filter(Boolean));
         if(rT)  setTasks(rT.map(r=>normalizeTask(r.data)).filter(Boolean));
         if(rI)  setInv(rI.map(r=>r.data).filter(Boolean));
@@ -289,7 +346,6 @@ export default function App() {
     })();
   },[session]);
 
-  // Persist helpers con manejo de errores mejorado
   const persistReq  = async(item)=>{
     try { await dbPost("solicitudes",{id:item.id,code:item.code,created_at:item.createdAt,data:item}); }
     catch { try { await dbPatch("solicitudes",item.id,{data:item}); } catch(e){ console.error("persistReq",e); } }
@@ -348,10 +404,39 @@ export default function App() {
   const setTowersDB = updater => setTowers(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("towers",next);return next;});
   const setRespsDB  = updater => setResps(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("resps",next);return next;});
 
-  const addEmail = async(log)=>{
-    const item={id:"e"+uid(),...log};
-    setEmails(p=>[item,...p]);
+  const sendWhatsApp = async (phone, apikey, message) => {
+    if (!phone || !apikey) return;
+    try {
+      const encoded = encodeURIComponent(message);
+      await fetch(`https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encoded}&apikey=${apikey}`);
+    } catch(e) { console.error("Error enviando WhatsApp:", e); }
+  };
+
+  const EMAILJS_SERVICE_ID  = "service_vxhdrlx";
+  const EMAILJS_TEMPLATE_ID = "template_90tjafk";
+  const EMAILJS_PUBLIC_KEY  = "wKxD2rJHuftU7W";
+
+  const sendRealEmail = async (to, subject, body) => {
+    if (!to || !to.includes("@")) return;
+    try {
+      await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service_id:  EMAILJS_SERVICE_ID,
+          template_id: EMAILJS_TEMPLATE_ID,
+          user_id:     EMAILJS_PUBLIC_KEY,
+          template_params: { to_email: to, subject, message: body, from_name: "CondoAdmin" },
+        }),
+      });
+    } catch(e) { console.error("Error enviando email:", e); }
+  };
+
+  const addEmail = async (log) => {
+    const item = { id: "e"+uid(), ...log };
+    setEmails(p => [item, ...p]);
     await persistEmail(item);
+    await sendRealEmail(log.to, log.subject, log.body);
   };
 
   const go      = id => { setView(id); setSelReq(null); setNavOpen(false); };
@@ -389,11 +474,11 @@ export default function App() {
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100vh",fontFamily:"system-ui,sans-serif",background:"#f1f5f9",color:"#1e293b",overflow:"hidden"}}>
       {viewAs&&<div style={{background:"#7c3aed",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:100,fontSize:13}}><span>Visualizando como: <strong>{viewAs}</strong></span><button style={{...mkBtn("ghost",true),color:"#fff",border:"1px solid rgba(255,255,255,.4)"}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir</button></div>}
-      {mob&&<div style={{background:"#0f172a",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:60}}><div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={bdg("#fff","#1e3a5f")}>{er}</span><button style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}} onClick={()=>setNavOpen(p=>!p)}>{navOpen?"✕":"☰"}</button></div></div>}
+      {mob&&<div style={{background:"#0f172a",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:60}}><div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>CondoAdmin</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={bdg("#fff","#1e3a5f")}>{er}</span><button style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}} onClick={()=>setNavOpen(p=>!p)}>{navOpen?"✕":"☰"}</button></div></div>}
       <div style={{display:"flex",flex:1,overflow:"hidden"}}>
         {(!mob||navOpen)&&(
           <div style={{width:220,background:"#0f172a",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto",position:mob?"absolute":"relative",top:mob?40:0,left:0,bottom:0,zIndex:50}}>
-            {!mob&&<div style={{padding:"18px 14px 14px",borderBottom:"1px solid #1e293b"}}><div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div><div style={{color:"#64748b",fontSize:11,marginTop:2}}>Sistema de Gestion</div></div>}
+            {!mob&&<div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{padding:"18px 14px 14px",borderBottom:"1px solid #1e293b",cursor:"pointer"}}><div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div><div style={{color:"#64748b",fontSize:11,marginTop:2}}>Sistema de Gestion</div></div>}
             <nav style={{padding:"6px 0",flex:1}}>
               {navItems.map(n=>(
                 <div key={n.id} onClick={()=>go(n.id)} style={{padding:"10px 14px",cursor:"pointer",userSelect:"none",fontSize:13,color:isAct(n.id)?"#fff":"#94a3b8",background:isAct(n.id)?"#1e3a5f":"transparent",borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",fontWeight:isAct(n.id)?600:400}}>
@@ -433,28 +518,27 @@ export default function App() {
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
-            {view==="dashboard"   &&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
-            {view==="requests"    &&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers}/>}
-            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob}/>}
-            {view==="tasks"       &&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob}/>}
+            {view==="dashboard"   &&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} session={session}/>}
+            {view==="requests"    &&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} resps={resps}/>}
+            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} resps={resps}/>}
+            {view==="tasks"       &&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob} resps={resps}/>}
             {view==="provider"    &&<ProviderDash orders={orders} setOrders={setOrders} role={er} showToast={showToast} mob={mob}/>}
-            {view==="inspections" &&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} role={er} mob={mob}/>}
-            {view==="inventory"   &&<InvView inventory={inventory} setInv={setInvDB} dispatch={dispatch} setDispatch={setDispatchDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
-            {view==="mantencion"  &&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob}/>}
+            {view==="inspections" &&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} role={er} mob={mob} towers={towers}/>}
+            {view==="inventory"   &&<InvView inventory={inventory} setInv={setInvDB} dispatch={dispatch} setDispatch={setDispatchDB} reqs={reqs} role={er} showToast={showToast} mob={mob} resps={resps}/>}
+            {view==="mantencion"  &&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob} resps={resps}/>}
             {view==="emails"      &&<EmailsView logs={emails}/>}
-            {view==="reports"     &&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
+            {view==="reports"     &&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob} resps={resps}/>}
             {view==="config"      &&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} resps={resps} setResps={setRespsDB} showToast={showToast} session={session}/>}
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>setShowNew(false)} onOpen={openReq} cats={cats} towers={towers} resps={resps}/>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente")setView("requests");}} onOpen={openReq} cats={cats} towers={towers} resps={resps}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
     </div>
   );
 }
 
-// ── DASHBOARD ─────────────────────────────────────────────────────────────────
-function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
+function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,session}){
   const emerg=reqs.filter(r=>r.priority==="Emergencia"&&!["Cerrada","Rechazada"].includes(r.status));
   const recent=[...reqs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,5);
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,6);
@@ -498,8 +582,7 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
   );
 }
 
-// ── REQUEST LIST ──────────────────────────────────────────────────────────────
-function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers}){
+function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers,resps}){
   const [fi,setFi]=useState({status:"",priority:"",category:"",tower:"",q:""});
   const [sort,setSort]=useState("date");
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
@@ -564,8 +647,8 @@ function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers}){
   );
 }
 
-// ── REQUEST DETAIL ────────────────────────────────────────────────────────────
-function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,addEmail,showToast,onBack,setSelReq,mob}){
+function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,addEmail,showToast,onBack,setSelReq,mob,resps}){
+  const RESP_LIST=getRespList(resps);
   const r=reqs.find(x=>x.id===req.id)||req;
   const safeHistory=r.history||[];
   const safeComments=r.comments||[];
@@ -650,7 +733,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
         </div>
       )}
       {tab==="history"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Bitacora</div>{safeHistory.length===0?<Empty msg="Sin historial"/>:<div style={{position:"relative",paddingLeft:20}}>{[...safeHistory].reverse().map((h,i)=><div key={i} style={{position:"relative",paddingLeft:16,paddingBottom:14}}><div style={{width:9,height:9,borderRadius:"50%",background:h.to?STATUS_COLOR[h.to]:"#3b82f6",position:"absolute",left:0,top:4}}/>{i<safeHistory.length-1&&<div style={{position:"absolute",left:4,top:13,bottom:0,width:2,background:"#e2e8f0"}}/>}<div style={{fontSize:13,fontWeight:600}}>{h.action}</div>{h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div></div>)}</div>}</div>}
-      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin tareas"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva tarea</button>}</div>}
+      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} resps={resps}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin tareas"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva tarea</button>}</div>}
       {tab==="evidence"&&<div>{["inicial","avance","cierre"].map(type=><div key={type} style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Imagenes {type==="inicial"?"iniciales":type==="avance"?"de avance":"de cierre"}</div>{r.status!=="Cerrada"&&<button style={mkBtn("secondary",true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}</div>{myAtt(type).length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imagenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt(type).map((a,i)=><div key={a.id||i} style={{textAlign:"center"}}><img src={a.preview} alt={a.name} style={thumb} onError={e=>e.target.style.display="none"}/><div style={{fontSize:10,color:"#64748b",marginTop:3,maxWidth:70,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div></div>)}</div>}</div>)}</div>}
       {tab==="emails"&&<div style={card}>{myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span><span style={bdg("#10b981","#f0fdf4")}>{e.status}</span></div><div style={{fontSize:10,color:"#64748b",marginBottom:3}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4}}>{e.body}</div></div>)}</div>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
@@ -659,7 +742,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
   );
 }
 
-// ── TASK COMPONENTS ───────────────────────────────────────────────────────────
 function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
   const [exp,setExp]=useState(false);
   const [cmt,setCmt]=useState("");
@@ -694,8 +776,9 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
     </div>
   );
 }
-function TaskForm({requestId,setTasks,showToast,onClose}){
-  const [f,setF]=useState({title:"",desc:"",responsible:RESP_ASSIGNABLE[0],dueDate:"",priority:"Media"});
+function TaskForm({requestId,setTasks,showToast,onClose,resps}){
+  const RESP_ASSIGNABLE=getRespAssignable(resps);
+  const [f,setF]=useState({title:"",desc:"",responsible:RESP_ASSIGNABLE[0]||"",dueDate:"",priority:"Media"});
   const submit=()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
     setTasks(p=>[...p,{id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",...f}]);
@@ -736,7 +819,6 @@ function MatPanel({materials,setMaterials,readOnly}){
   );
 }
 
-// ── MODALS ────────────────────────────────────────────────────────────────────
 function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,setTasks}){
   const [previews,setPrev]=useState([]);const [comment,setCmt]=useState("");const fileRef=useRef();
   const handleFiles=e=>Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>setPrev(p=>[...p,{name:f.name,url:ev.target.result}]);r.readAsDataURL(f);});
@@ -804,7 +886,10 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   if(done)return <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"24px",marginTop:16,textAlign:"center"}}><h3 style={{margin:"0 0 6px"}}>Solicitud registrada</h3><div style={{...bdg("#10b981","#f0fdf4"),fontSize:15,padding:"5px 14px",display:"inline-flex",marginBottom:14}}>{done.code}</div><div style={{display:"flex",gap:8,justifyContent:"center"}}><button style={mkBtn("primary",true)} onClick={()=>{onClose();onOpen(done);}}>Ver detalle</button><button style={mkBtn("secondary",true)} onClick={onClose}>Cerrar</button></div></div></div>;
   return(
     <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:680,padding:"20px",marginTop:16,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>Nueva solicitud</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}>
+        <h3 style={{margin:0,fontSize:15}}>Nueva solicitud</h3>
+        <button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Telefono","text"]].map(([k,l,t])=><div key={k} style={fg}><label style={lbl}>{l}</label><input type={t} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={e=>set(k,e.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10,marginTop:2}}>{errs[k]}</div>}</div>)}
         <div style={fg}><label style={lbl}>Torre</label><select style={selSt} value={f.tower} onChange={e=>set("tower",e.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
@@ -814,7 +899,15 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripcion *</label><textarea style={{...inp,height:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={e=>set("description",e.target.value)} placeholder="Describa el problema..."/>{errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}</div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={{...selSt,color:PRIORITY_COLOR[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Franja horaria</label><select style={selSt} value={f.preferredTimeSlot} onChange={e=>set("preferredTimeSlot",e.target.value)}>{["Manana (9-13h)","Tarde (14-18h)","Cualquier hora","Inmediato"].map(s=><option key={s}>{s}</option>)}</select></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Imagenes (opcional)</label><input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/><button style={mkBtn("secondary",true)} onClick={()=>fileRef.current.click()}>Seleccionar</button>{prevs.length>0&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{prevs.map((p,i)=><div key={i} style={{position:"relative"}}><img src={p.url} alt={p.name} style={thumb}/><button onClick={()=>setPrevs(pr=>pr.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9}}>✕</button></div>)}</div>}</div>
+        <div style={{...fg,gridColumn:"1/-1"}}>
+          <label style={lbl}>Imagenes (opcional)</label>
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
+          <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}>
+            <div style={{fontSize:24,marginBottom:4}}>📷</div>
+            <div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div>
+          </div>
+          {prevs.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prevs.map((p,i)=><div key={i} style={{position:"relative"}}><img src={p.url} alt={p.name} style={{...thumb,width:72,height:56}}/><button onClick={()=>setPrevs(pr=>pr.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>)}</div>}
+        </div>
         <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={e=>set("accessPermission",e.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
         <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="conf" checked={f.confirm} onChange={e=>set("confirm",e.target.checked)}/><label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la informacion es correcta *</label>{errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}</div>
       </div>
@@ -824,8 +917,8 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   );
 }
 
-// ── TASKS VIEW ────────────────────────────────────────────────────────────────
-function TasksView({tasks,reqs,role,setTasks,showToast,mob}){
+function TasksView({tasks,reqs,role,setTasks,showToast,mob,resps}){
+  const RESP_ASSIGNABLE=getRespAssignable(resps);
   const [fi,setFi]=useState({status:"",responsible:"",q:""});
   const visible=tasks.filter(t=>(!fi.status||t.status===fi.status)&&(!fi.responsible||t.responsible===fi.responsible)&&(!fi.q||(t.title+" "+t.responsible).toLowerCase().includes(fi.q.toLowerCase())));
   return(
@@ -836,17 +929,15 @@ function TasksView({tasks,reqs,role,setTasks,showToast,mob}){
   );
 }
 
-// ── PROVIDER DASH ─────────────────────────────────────────────────────────────
 function ProviderDash({orders,setOrders,role,showToast,mob}){
   const [selOrder,setSelOrder]=useState(null);
-  const [fi,setFi]=useState({status:"",priority:""});
-  const visible=orders.filter(o=>(!fi.status||o.status===fi.status)&&(!fi.priority||o.priority===fi.priority));
+  const visible=orders;
   if(selOrder){const order=orders.find(o=>o.id===selOrder.id)||selOrder;return <WorkDetail order={order} setOrders={setOrders} showToast={showToast} role={role} mob={mob} onBack={()=>setSelOrder(null)}/>;}
   return(
     <div>
       <div style={{...card,background:"#1e3a5f",marginBottom:16}}><div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Panel de Proveedor</div><div style={{color:"#94a3b8",fontSize:12}}>Gestion de ordenes de trabajo</div></div>
       <Grid cols={4} mob={mob}><Kpi value={orders.filter(o=>o.status==="Pendiente").length} label="Pend. aceptacion" color="#f59e0b" mob={mob}/><Kpi value={orders.filter(o=>["Aceptado","Diagnostico","Ejecucion"].includes(o.status)).length} label="Activos" color="#3b82f6" mob={mob}/><Kpi value={orders.filter(o=>o.status==="Ejecutado").length} label="Ejecutados" color="#10b981" mob={mob}/><Kpi value={orders.filter(o=>o.status==="Cerrado").length} label="Cerrados" color="#6b7280" mob={mob}/></Grid>
-      {visible.length===0?<Empty msg="Sin ordenes de trabajo"/>:<div>{visible.map(o=><div key={o.id} style={{...card,borderLeft:"4px solid "+(WS_COLOR[o.status]||"#e2e8f0"),marginBottom:10,cursor:"pointer",padding:14}} onClick={()=>setSelOrder(o)}><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>{o.status==="Pendiente"&&<span style={{...bdg("#f59e0b","#fffbeb"),fontSize:10}}>REQUIERE ACEPTACION</span>}<span style={{fontWeight:700,color:"#6366f1",fontSize:12}}>{o.id}</span></div><div style={{fontWeight:600,fontSize:14,marginBottom:4}}>{o.title}</div><div style={{fontSize:11,color:"#64748b",marginBottom:8}}>{o.location}</div><div style={{display:"flex",gap:8}}><PBadge p={o.priority}/><SBadge s={o.status}/></div></div>)}</div>}
+      {visible.length===0?<Empty msg="Sin ordenes de trabajo"/>:<div>{visible.map(o=><div key={o.id} style={{...card,borderLeft:"4px solid "+(WS_COLOR[o.status]||"#e2e8f0"),marginBottom:10,cursor:"pointer",padding:14}} onClick={()=>setSelOrder(o)}><div style={{fontWeight:600,fontSize:14,marginBottom:4}}>{o.title}</div><div style={{fontSize:11,color:"#64748b",marginBottom:8}}>{o.location}</div><div style={{display:"flex",gap:8}}><PBadge p={o.priority}/><SBadge s={o.status}/></div></div>)}</div>}
     </div>
   );
 }
@@ -861,7 +952,7 @@ function WorkDetail({order,setOrders,showToast,role,mob,onBack}){
   const closeOrder=()=>{if(!o.photoAfter.length){showToast("Cargue foto del trabajo terminado","error");return;}upd({status:"Cerrado",history:[...o.history,{date:new Date().toISOString(),action:"Trabajo cerrado"}]});showToast("Orden cerrada","success");};
   return(
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={onBack}>← Volver</button><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?15:18,color:"#6366f1"}}>{o.id}</span><PBadge p={o.priority}/><SBadge s={o.status}/></div><div style={{fontSize:11,color:"#64748b"}}>{o.location}</div></div></div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={onBack}>← Volver</button><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?15:18,color:"#6366f1"}}>{o.id}</span><PBadge p={o.priority}/><SBadge s={o.status}/></div></div></div>
       {canEdit&&(isAdmin||role==="Proveedor")&&<div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
         {o.status==="Pendiente"&&<><button style={mkBtn("success")} onClick={()=>upd({status:"Aceptado",history:[...o.history,{date:new Date().toISOString(),action:"Aceptada"}]})}>Aceptar</button><button style={mkBtn("danger")} onClick={()=>upd({status:"Rechazado",history:[...o.history,{date:new Date().toISOString(),action:"Rechazada"}]})}>Rechazar</button></>}
         {o.status==="Aceptado"&&<button style={mkBtn("purple")} onClick={()=>advance("Diagnostico")}>Iniciar diagnostico</button>}
@@ -872,23 +963,22 @@ function WorkDetail({order,setOrders,showToast,role,mob,onBack}){
       <div style={card}><IR l="Titulo" v={o.title||"---"}/><IR l="Categoria" v={o.category||"---"}/><IR l="Ubicacion" v={o.location||"---"}/><IR l="Proveedor" v={o.provider||"---"}/></div>
       <div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>Fotos ANTES ({o.photoBefore.length})</div>{canEdit&&<><input ref={fileRefB} type="file" accept="image/*" style={{display:"none"}} onChange={e=>addPhoto("photoBefore",e)}/><button style={mkBtn("secondary",true)} onClick={()=>fileRefB.current.click()}>+ Foto</button></>}</div>
-        {o.photoBefore.length===0?<div style={{fontSize:12,color:"#94a3b8"}}>Sin fotos aun.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{o.photoBefore.map((img,i)=><img key={i} src={img} alt="antes" style={{...thumb,width:100,height:80}} onError={e=>e.target.style.display="none"}/>)}</div>}
+        {o.photoBefore.length===0?<div style={{fontSize:12,color:"#94a3b8"}}>Sin fotos.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{o.photoBefore.map((img,i)=><img key={i} src={img} alt="antes" style={{...thumb,width:100,height:80}}/>)}</div>}
       </div>
       <div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>Fotos DESPUES ({o.photoAfter.length})</div>{canEdit&&<><input ref={fileRefA} type="file" accept="image/*" style={{display:"none"}} onChange={e=>addPhoto("photoAfter",e)}/><button style={mkBtn("primary",true)} onClick={()=>fileRefA.current.click()}>+ Foto</button></>}</div>
-        {o.photoAfter.length===0?<div style={alrt("warning")}>Suba al menos una foto para cerrar la orden.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{o.photoAfter.map((img,i)=><img key={i} src={img} alt="despues" style={{...thumb,width:100,height:80}} onError={e=>e.target.style.display="none"}/>)}</div>}
+        {o.photoAfter.length===0?<div style={alrt("warning")}>Suba al menos una foto para cerrar la orden.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{o.photoAfter.map((img,i)=><img key={i} src={img} alt="despues" style={{...thumb,width:100,height:80}}/>)}</div>}
         {canEdit&&isAdmin&&o.status==="Ejecutado"&&<button style={{...mkBtn("success"),marginTop:10,width:"100%",justifyContent:"center"}} onClick={closeOrder}>Cerrar orden de trabajo</button>}
       </div>
     </div>
   );
 }
 
-// ── INSPECTIONS ───────────────────────────────────────────────────────────────
-function Inspections({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,mob}){
+function Inspections({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,mob,towers}){
   const [sub,setSub]=useState("list");const [selIns,setSelIns]=useState(null);
   const readOnly=!can(role,"inspection");
-  if(sub==="new")return <InspForm inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} addEmail={addEmail} showToast={showToast} role={role} onBack={()=>setSub("list")} mob={mob}/>;
-  if(sub==="detail"&&selIns){const ins=inspections.find(i=>i.id===selIns.id)||selIns;return <InspDetail inspection={normalizeInsp(ins)} inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} showToast={showToast} role={role} onBack={()=>setSub("list")} readOnly={readOnly} mob={mob}/>;}
+  if(sub==="new")return <InspForm inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} addEmail={addEmail} showToast={showToast} role={role} onBack={()=>setSub("list")} mob={mob} towers={towers}/>;
+  if(sub==="detail"&&selIns){const ins=inspections.find(i=>i.id===selIns.id)||selIns;return <InspDetail inspection={normalizeInsp(ins)} inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} showToast={showToast} role={role} onBack={()=>setSub("list")} readOnly={readOnly} mob={mob} towers={towers}/>;}
   return(
     <div>
       <Grid cols={4} mob={mob}>
@@ -913,9 +1003,11 @@ function Inspections({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,m
     </div>
   );
 }
-function InspForm({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,onBack,mob}){
+function InspForm({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,onBack,mob,towers}){
   const nowStr=new Date().toISOString().slice(0,16);
-  const [meta,setMeta]=useState({date:nowStr,inspector:role,sector:SECTOR_LIST[0],conclusion:""});
+  const towerSectors=(towers||[]).filter(t=>t.active).map(t=>t.label);
+  const allSectors=[...towerSectors,...SECTOR_LIST.filter(s=>!towerSectors.includes(s))];
+  const [meta,setMeta]=useState({date:nowStr,inspector:role,sector:allSectors[0]||SECTOR_LIST[0],conclusion:""});
   const [items,setItems]=useState(mkItems());const [actSec,setActSec]=useState("s1");
   const fileRef=useRef();const [pendImg,setPendImg]=useState(null);
   const setItem=(sid,name,field,val)=>{const k=sid+"_"+name;setItems(p=>({...p,[k]:{...p[k],[field]:val}}));};
@@ -940,7 +1032,7 @@ function InspForm({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,onBa
   return(
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}><button style={mkBtn("secondary",true)} onClick={onBack}>← Volver</button><div style={{fontWeight:700,fontSize:mob?15:18}}>Nueva Inspeccion</div></div>
-      <div style={card}><div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr 1fr",gap:10}}><div style={fg}><label style={lbl}>Fecha y hora</label><input type="datetime-local" style={inp} value={meta.date} onChange={e=>setMeta(p=>({...p,date:e.target.value}))}/></div><div style={fg}><label style={lbl}>Inspector</label><input style={inp} value={meta.inspector} onChange={e=>setMeta(p=>({...p,inspector:e.target.value}))}/></div><div style={fg}><label style={lbl}>Sector</label><select style={selSt} value={meta.sector} onChange={e=>setMeta(p=>({...p,sector:e.target.value}))}>{SECTOR_LIST.map(s=><option key={s}>{s}</option>)}</select></div></div></div>
+      <div style={card}><div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr 1fr",gap:10}}><div style={fg}><label style={lbl}>Fecha y hora</label><input type="datetime-local" style={inp} value={meta.date} onChange={e=>setMeta(p=>({...p,date:e.target.value}))}/></div><div style={fg}><label style={lbl}>Inspector</label><input style={inp} value={meta.inspector} onChange={e=>setMeta(p=>({...p,inspector:e.target.value}))}/></div><div style={fg}><label style={lbl}>Sector</label><select style={selSt} value={meta.sector} onChange={e=>setMeta(p=>({...p,sector:e.target.value}))}>{allSectors.map(s=><option key={s}>{s}</option>)}</select></div></div></div>
       <div style={{...card,padding:14,marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div style={{fontWeight:600,fontSize:12}}>Progreso: {answered}/{all.length}</div><div style={{display:"flex",gap:6}}><span style={bdg("#10b981","#f0fdf4")}>{all.filter(v=>v.state==="Bueno").length} ok</span><span style={bdg("#f59e0b","#fffbeb")}>{all.filter(v=>v.state==="Regular").length} reg.</span><span style={bdg("#ef4444","#fef2f2")}>{all.filter(v=>v.state==="Malo").length} malos</span></div></div><div style={{height:7,background:"#f1f5f9",borderRadius:99}}><div style={{height:7,background:pct===100?"#10b981":"#3b82f6",borderRadius:99,width:pct+"%",transition:"width .3s"}}/></div></div>
       <div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:12,paddingBottom:4}}>{CL_SECTIONS.map(s=>{const sm=s.items.map(n=>getItem(s.id,n)).filter(v=>v.state==="Malo").length;return <button key={s.id} style={mkBtn(actSec===s.id?"primary":"secondary",true)} onClick={()=>setActSec(s.id)}>{s.label.split(" ")[0]}{sm>0?" ["+sm+"]":""}</button>;})}</div>
       <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleImg}/>
@@ -1010,13 +1102,12 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
       {tab==="resumen"&&<div><Grid cols={4} mob={mob}><Kpi value={bues.length+regs.length+malos.length} label="Items revisados" color="#3b82f6" mob={mob}/><Kpi value={bues.length} label="Buenos" color="#10b981" mob={mob}/><Kpi value={regs.length} label="Regulares" color="#f59e0b" mob={mob}/><Kpi value={malos.length} label="Malos" color="#ef4444" mob={mob}/></Grid><div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Conclusion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{inspection.conclusion||"Sin conclusion."}</p></div></div>}
       {tab==="hallazgos"&&<div>{malos.length+regs.length===0?<Empty msg="Sin hallazgos"/>:[...malos,...regs].map(entry=>{const key=entry[0];const it=entry[1];const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);const isMalo=it.state==="Malo";return(<div key={key} style={{...card,borderLeft:"4px solid "+(isMalo?"#ef4444":"#f59e0b"),padding:12,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{name}</div><div style={{fontSize:10,color:"#64748b"}}>{sec&&sec.label}</div>{it.obs&&<p style={{fontSize:12,margin:"4px 0 0"}}>{it.obs}</p>}</div><div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}><span style={bdg(ITEM_COLOR[it.state],ITEM_COLOR[it.state]+"22")}>{it.state}</span>{it.urgency&&<span style={bdg(URGENCY_COLOR[it.urgency],URGENCY_COLOR[it.urgency]+"22")}>{it.urgency}</span>}</div></div><div style={{display:"flex",gap:6,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>{(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:54,height:42}}/>)}{it.reqId?<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>:(isMalo&&!readOnly&&<button style={mkBtn("danger",true)} onClick={()=>createReq(key,it)}>+ Crear solicitud</button>)}</div></div>);})}</div>}
       {tab==="checklist"&&<div>{CL_SECTIONS.map(sec=><div key={sec.id} style={{...card,marginBottom:8}}><div style={{fontWeight:700,fontSize:13,marginBottom:8}}>{sec.label}</div><table style={tbl}><thead><tr>{["Item","Estado","Observacion","Urgencia","Solicitud"].map(h=><th key={h} style={thSt}>{h}</th>)}</tr></thead><tbody>{sec.items.map(name=>{const it=safeItems[sec.id+"_"+name]||{};return(<tr key={name}><td style={tdSt}>{name}</td><td style={tdSt}>{it.state?<span style={bdg(ITEM_COLOR[it.state]||"#94a3b8",(ITEM_COLOR[it.state]||"#94a3b8")+"22")}>{it.state}</span>:"---"}</td><td style={tdSt}><span style={{fontSize:10,color:"#64748b"}}>{it.obs||"---"}</span></td><td style={tdSt}>{it.urgency?<span style={bdg(URGENCY_COLOR[it.urgency],URGENCY_COLOR[it.urgency]+"22")}>{it.urgency}</span>:"---"}</td><td style={tdSt}>{it.reqId?<span style={bdg("#10b981","#f0fdf4")}>{it.reqId}</span>:"---"}</td></tr>);})}</tbody></table></div>)}</div>}
-      {tab==="galeria"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Galeria</div>{imgs.length===0?<Empty msg="Sin imagenes"/>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:10}}>{imgs.map(entry=>{const key=entry[0];const it=entry[1];const name=key.split("_").slice(1).join("_");return(it.images||[]).map((img,i)=><div key={key+i} style={{textAlign:"center"}}><img src={img} alt={name} style={{width:"100%",height:90,objectFit:"cover",borderRadius:6,border:"1px solid #e2e8f0"}} onError={e=>e.target.style.display="none"}/><div style={{fontSize:9,color:"#64748b",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</div></div>);})}</div>}</div>}
+      {tab==="galeria"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Galeria</div>{imgs.length===0?<Empty msg="Sin imagenes"/>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:10}}>{imgs.map(entry=>{const key=entry[0];const it=entry[1];const name=key.split("_").slice(1).join("_");return(it.images||[]).map((img,i)=><div key={key+i} style={{textAlign:"center"}}><img src={img} alt={name} style={{width:"100%",height:90,objectFit:"cover",borderRadius:6,border:"1px solid #e2e8f0"}}/><div style={{fontSize:9,color:"#64748b",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</div></div>);})}</div>}</div>}
     </div>
   );
 }
 
-// ── INVENTORY ─────────────────────────────────────────────────────────────────
-function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob}){
+function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob,resps}){
   const [tab,setTab]=useState("stock");const [fi,setFi]=useState({cat:"",q:"",low:false});
   const [showForm,setShowForm]=useState(false);const [editItem,setEditItem]=useState(null);const [movement,setMov]=useState(null);const [showDis,setShowDis]=useState(null);
   const readOnly=can(role,"inventoryRead")&&!can(role,"inventory");
@@ -1041,7 +1132,7 @@ function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob}
       {tab==="dis"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Historial de designaciones</div>{dispatch.length===0?<Empty msg="Sin designaciones"/>:<table style={tbl}><thead><tr>{["Fecha","Insumo","Proveedor","Cantidad","Solicitud"].map(h=><th key={h} style={thSt}>{h}</th>)}</tr></thead><tbody>{[...dispatch].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((d,i)=>{const req=reqs.find(r=>r.id===d.requestId);return(<tr key={d.id||i}><td style={tdSt}><span style={{fontSize:11,color:"#64748b"}}>{fmt(d.date)}</span></td><td style={tdSt}><span style={{fontWeight:600}}>{d.invName}</span></td><td style={tdSt}>{d.provider}</td><td style={tdSt}><span style={{fontWeight:700,color:"#6366f1"}}>{d.qty} {d.unit}</span></td><td style={tdSt}>{req?<span style={bdg("#3b82f6","#eff6ff")}>{req.code}</span>:"---"}</td></tr>);})}</tbody></table>}</div>}
       {showForm&&<InvForm item={editItem} onSave={saveItem} onClose={()=>{setShowForm(false);setEditItem(null);}}/>}
       {movement&&<StockModal data={movement} onConfirm={adjStock} onClose={()=>setMov(null)}/>}
-      {showDis&&<DisModal item={showDis} reqs={reqs} onConfirm={confDis} onClose={()=>setShowDis(null)}/>}
+      {showDis&&<DisModal item={showDis} reqs={reqs} onConfirm={confDis} onClose={()=>setShowDis(null)} resps={resps}/>}
     </div>
   );
 }
@@ -1070,14 +1161,14 @@ function StockModal({data,onConfirm,onClose}){
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:380,padding:"20px",marginTop:16}}>
     <h3 style={{margin:"0 0 12px",fontSize:15}}>{isIn?"Ingreso":"Egreso"} - {data.item.name}</h3>
     <div style={{...alrt(isIn?"success":"error"),marginBottom:12}}>Stock actual: <strong>{data.item.stock} {data.item.unit}</strong></div>
-    <div style={fg}><label style={lbl}>Cantidad {!isIn&&<span style={{color:"#64748b",fontWeight:400}}>(max: {data.item.stock})</span>}</label><input type="number" min="1" max={max} style={inp} value={qty} onChange={e=>setQty(Math.max(1,+e.target.value))}/></div>
-    {!isIn&&qty>data.item.stock&&<div style={{...alrt("error"),marginBottom:8}}>Cantidad supera el stock disponible.</div>}
-    <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Resultante: <strong style={{color:resultante<0?"#ef4444":"inherit"}}>{resultante} {data.item.unit}</strong></div>
+    <div style={fg}><label style={lbl}>Cantidad</label><input type="number" min="1" max={max} style={inp} value={qty} onChange={e=>setQty(Math.max(1,+e.target.value))}/></div>
+    <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Resultante: <strong>{resultante} {data.item.unit}</strong></div>
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn(isIn?"success":"danger",true)} disabled={!isIn&&qty>data.item.stock} onClick={()=>onConfirm(data.item.id,isIn?safeQty:-safeQty)}>{isIn?"Confirmar ingreso":"Confirmar egreso"}</button></div>
   </div></div>);
 }
-function DisModal({item,reqs,onConfirm,onClose}){
-  const [f,setF]=useState({provider:RESP_ASSIGNABLE[0],qty:1,requestId:"",notes:""});
+function DisModal({item,reqs,onConfirm,onClose,resps}){
+  const RESP_ASSIGNABLE=getRespAssignable(resps);
+  const [f,setF]=useState({provider:RESP_ASSIGNABLE[0]||"",qty:1,requestId:"",notes:""});
   const actReqs=reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status));
   const ok=f.provider&&f.qty>=1&&f.qty<=item.stock;
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:500,padding:"20px",marginTop:16}}>
@@ -1085,31 +1176,29 @@ function DisModal({item,reqs,onConfirm,onClose}){
     <div style={{...alrt("success"),display:"flex",justifyContent:"space-between"}}><span><strong>{item.name}</strong></span><span>Stock: <strong>{item.stock} {item.unit}</strong></span></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:12}}>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Proveedor *</label><select style={selSt} value={f.provider} onChange={e=>setF(p=>({...p,provider:e.target.value}))}>{RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}</select></div>
-      <div style={fg}><label style={lbl}>Cantidad * (max: {item.stock})</label><input type="number" min="1" max={item.stock} style={{...inp,borderColor:f.qty>item.stock?"#ef4444":""}} value={f.qty} onChange={e=>setF(p=>({...p,qty:Math.max(1,+e.target.value)}))}/></div>
+      <div style={fg}><label style={lbl}>Cantidad * (max: {item.stock})</label><input type="number" min="1" max={item.stock} style={inp} value={f.qty} onChange={e=>setF(p=>({...p,qty:Math.max(1,+e.target.value)}))}/></div>
       <div style={fg}><label style={lbl}>Unidad</label><input style={{...inp,background:"#f9fafb",color:"#6b7280"}} value={item.unit} disabled/></div>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Solicitud asociada</label><select style={selSt} value={f.requestId} onChange={e=>setF(p=>({...p,requestId:e.target.value}))}><option value="">Sin asociar</option>{actReqs.map(r=><option key={r.id} value={r.id}>{r.code} - {r.category}</option>)}</select></div>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Notas</label><input style={inp} value={f.notes} onChange={e=>setF(p=>({...p,notes:e.target.value}))}/></div>
     </div>
-    {f.qty>item.stock&&<div style={{...alrt("error"),marginBottom:8}}>Cantidad supera el stock disponible.</div>}
     <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("purple",true)} onClick={()=>{if(!ok)return;onConfirm({invId:item.id,invName:item.name,provider:f.provider,qty:f.qty,unit:item.unit,requestId:f.requestId,notes:f.notes});}} disabled={!ok}>Confirmar</button></div>
   </div></div>);
 }
 
-// ── EMAILS ────────────────────────────────────────────────────────────────────
 function EmailsView({logs}){
   const [q,setQ]=useState("");
   const visible=[...logs].sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(e=>!q||((e.to||"")+(e.subject||"")+(e.requestId||"")).toLowerCase().includes(q.toLowerCase()));
   return(<div>
     <div style={{...card,padding:12,marginBottom:12}}><input style={inp} placeholder="Buscar..." value={q} onChange={e=>setQ(e.target.value)}/></div>
     <div style={card}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Bandeja de correos simulados</div><span style={bdg("#10b981","#f0fdf4")}>{logs.length} enviados</span></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Bandeja de correos</div><span style={bdg("#10b981","#f0fdf4")}>{logs.length} enviados</span></div>
       {visible.length===0?<Empty msg="Sin correos"/>:visible.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span><span style={bdg("#10b981","#f0fdf4")}>{e.status}</span></div><div style={{fontSize:10,color:"#64748b",marginBottom:3}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4}}>{e.body}</div></div>)}
     </div>
   </div>);
 }
 
-// ── REPORTS ───────────────────────────────────────────────────────────────────
-function Reports({reqs,tasks,inventory,mob}){
+function Reports({reqs,tasks,inventory,mob,resps}){
+  const RESP_ASSIGNABLE=getRespAssignable(resps);
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
   const maxCat=Math.max(...byCat.map(x=>x.n),1);
   const byResp=RESP_ASSIGNABLE.map(r=>({r,c:tasks.filter(t=>t.responsible===r).length})).sort((a,b)=>b.c-a.c);
@@ -1124,8 +1213,7 @@ function Reports({reqs,tasks,inventory,mob}){
   </div>);
 }
 
-// ── MANTENCION ────────────────────────────────────────────────────────────────
-function MantView({mant,setMant,reqs,role,showToast,addEmail,mob}){
+function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps}){
   const [sub,setSub]=useState("list");const [sel,setSel]=useState(null);const [showForm,setShowForm]=useState(false);const [editItem,setEdit]=useState(null);const [fi,setFi]=useState({cat:"",status:"",q:""});
   const readOnly=!can(role,"mantencion");
   const enriched=mant.map(m=>({...m,computedStatus:getMantStatus(m)}));
@@ -1153,11 +1241,11 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob}){
   };
   if(sub==="detail"&&sel){
     const item=normalizeMant(mant.find(m=>m.id===sel.id)||sel);
-    return <MantDetail item={item} mant={mant} setMant={setMant} reqs={reqs} role={role} showToast={showToast} addEmail={addEmail} mob={mob} readOnly={readOnly} onBack={()=>setSub("list")}/>;
+    return <MantDetail item={item} mant={mant} setMant={setMant} reqs={reqs} role={role} showToast={showToast} addEmail={addEmail} mob={mob} readOnly={readOnly} onBack={()=>setSub("list")} resps={resps}/>;
   }
   return(
     <div>
-      {vencidas>0&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><div><strong style={{color:"#dc2626"}}>{vencidas} mantencion(es) vencida(s)</strong><div style={{fontSize:12,color:"#ef4444"}}>Requieren atencion inmediata</div></div></div>}
+      {vencidas>0&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><div><strong style={{color:"#dc2626"}}>{vencidas} mantencion(es) vencida(s)</strong></div></div>}
       {porVencer>0&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><strong style={{color:"#92400e"}}>{porVencer} mantencion(es) vencen en los proximos 30 dias</strong></div>}
       <Grid cols={4} mob={mob}><Kpi value={vencidas} label="Vencidas" color="#ef4444" mob={mob}/><Kpi value={porVencer} label="Por vencer" color="#f59e0b" mob={mob}/><Kpi value={enEjec} label="En ejecucion" color="#6366f1" mob={mob}/><Kpi value={vigentes} label="Vigentes" color="#10b981" mob={mob}/></Grid>
       <div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar activo, proveedor..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/><select style={{...selSt,flex:1}} value={fi.cat} onChange={e=>setFi(p=>({...p,cat:e.target.value}))}><option value="">Todas las categorias</option>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select><select style={{...selSt,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos los estados</option>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>{!readOnly&&<button style={mkBtn("primary",true)} onClick={()=>{setEdit(null);setShowForm(true);}}>+ Nueva mantencion</button>}</div></div>
@@ -1166,28 +1254,23 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob}){
         const dayColor=daysLeft===null?"#374151":daysLeft<0?"#ef4444":daysLeft<=30?"#f59e0b":"#374151";
         return(<div key={m.id} style={{...card,borderLeft:"4px solid "+(MANT_SC[m.computedStatus]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>{setSel(m);setSub("detail");}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
-            <div style={{flex:1,minWidth:0}}><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span style={{fontWeight:700,color:"#6366f1",fontSize:11}}>{m.code}</span><span style={bdg("#6b7280","#f1f5f9")}>{m.tipo}</span></div><div style={{fontWeight:700,fontSize:14,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.asset}</div><div style={{fontSize:11,color:"#64748b"}}>{m.subcategory} - {m.location}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>Resp: <strong>{m.responsible}</strong> - {m.provider}</div></div>
-            <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end",flexShrink:0}}><MBadge m={m}/>{m.nextDate&&<div style={{fontSize:11,textAlign:"right"}}><div style={{color:"#64748b"}}>Vence: <strong style={{color:dayColor}}>{fmtD(m.nextDate)}</strong></div>{daysLeft!==null&&<div style={{color:dayColor,fontWeight:600,fontSize:10}}>{daysLeft<0?Math.abs(daysLeft)+" dias vencida":daysLeft===0?"Vence hoy":daysLeft+" dias restantes"}</div>}</div>}</div>
+            <div style={{flex:1,minWidth:0}}><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span style={{fontWeight:700,color:"#6366f1",fontSize:11}}>{m.code}</span><span style={bdg("#6b7280","#f1f5f9")}>{m.tipo}</span></div><div style={{fontWeight:700,fontSize:14,marginBottom:3}}>{m.asset}</div><div style={{fontSize:11,color:"#64748b"}}>{m.subcategory} - {m.location}</div></div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end",flexShrink:0}}><MBadge m={m}/>{m.nextDate&&<div style={{fontSize:11,textAlign:"right",color:dayColor,fontWeight:600}}>{daysLeft!==null&&(daysLeft<0?Math.abs(daysLeft)+" dias vencida":daysLeft+" dias restantes")}</div>}</div>
           </div>
           {!readOnly&&<div style={{display:"flex",gap:6,marginTop:10}} onClick={e=>e.stopPropagation()}><button style={mkBtn("secondary",true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button><button style={mkBtn("ghost",true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button></div>}
         </div>);
       })}</div>}
-      {showForm&&<MantForm item={editItem} reqs={reqs} onSave={saveMant} onClose={()=>{setShowForm(false);setEdit(null);}}/>}
+      {showForm&&<MantForm item={editItem} reqs={reqs} onSave={saveMant} onClose={()=>{setShowForm(false);setEdit(null);}} resps={resps}/>}
     </div>
   );
 }
-function MantForm({item,reqs,onSave,onClose}){
+function MantForm({item,reqs,onSave,onClose,resps}){
+  const RESP_LIST=getRespList(resps);
   const defCat=MANT_CATS[0];
   const [f,setF]=useState({asset:"",category:defCat,subcategory:MANT_SUBCATS[defCat][0],location:"",tipo:MANT_TIPOS[0],responsible:RESP_LIST[0],provider:"",lastDate:"",nextDate:"",costEstimated:"",costReal:"",description:"",status:"Vigente",requestId:"",...(item||{})});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const subs=MANT_SUBCATS[f.category]||[];
-  // Fix: al cambiar categoría resetear subcategoría si la actual no existe en la nueva
-  const handleCatChange=e=>{
-    const newCat=e.target.value;
-    const newSubs=MANT_SUBCATS[newCat]||[];
-    set("category",newCat);
-    if(!newSubs.includes(f.subcategory)) set("subcategory",newSubs[0]||"");
-  };
+  const handleCatChange=e=>{const nc=e.target.value;const ns=MANT_SUBCATS[nc]||[];set("category",nc);if(!ns.includes(f.subcategory))set("subcategory",ns[0]||"");};
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:600,padding:"20px",marginTop:16,marginBottom:16}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>{item?"Editar":"Nueva"} mantencion</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -1207,43 +1290,38 @@ function MantForm({item,reqs,onSave,onClose}){
     <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.asset.trim())return;onSave(f);}}>Guardar</button></div>
   </div></div>);
 }
-function MantDetail({item,mant,setMant,reqs,role,showToast,addEmail,mob,readOnly,onBack}){
+function MantDetail({item,mant,setMant,reqs,role,showToast,addEmail,mob,readOnly,onBack,resps}){
+  const RESP_LIST=getRespList(resps);
   const m=normalizeMant(mant.find(x=>x.id===item.id)||item);
   const st=getMantStatus(m);
   const [tab,setTab]=useState("info");const [cmt,setCmt]=useState("");const [showHistForm,setShowHistForm]=useState(false);const [showDocForm,setShowDocForm]=useState(false);
   const upd=ch=>setMant(p=>p.map(x=>x.id===m.id?{...x,...ch}:x));
   const addCmt=()=>{if(!cmt.trim())return;upd({comments:[...m.comments,{user:role,date:new Date().toISOString(),text:cmt}]});setCmt("");showToast("Comentario agregado");};
-  const addHist=h=>{
-    upd({history:[...m.history,{id:"h"+uid(),...h,costReal:+h.costReal}],lastDate:h.date,...(h.marcarVigente?{status:"Vigente"}:{})});
-    addEmail({requestId:m.id,date:new Date().toISOString(),to:"admin@condo.cl",subject:"Mantencion "+m.code+" ejecutada",type:"Mantencion",status:"Enviado",body:"Ejecucion de "+m.code+" el "+h.date+"."});
-    showToast("Ejecucion registrada");setShowHistForm(false);
-  };
+  const addHist=h=>{upd({history:[...m.history,{id:"h"+uid(),...h,costReal:+h.costReal}],lastDate:h.date,...(h.marcarVigente?{status:"Vigente"}:{})});showToast("Ejecucion registrada");setShowHistForm(false);};
   const addDoc=d=>{upd({documents:[...m.documents,{id:"doc"+uid(),...d,date:new Date().toISOString().slice(0,10)}]});showToast("Documento agregado");setShowDocForm(false);};
   const setStatus=ns=>{upd({status:ns});showToast("Estado actualizado");};
   const daysLeft=m.nextDate?Math.ceil((new Date(m.nextDate)-new Date())/86400000):null;
-  const req=reqs.find(r=>r.id===m.requestId);
   const tabs=[{id:"info",label:"Informacion"},{id:"history",label:"Historial ("+m.history.length+")"},{id:"docs",label:"Documentos ("+m.documents.length+")"},{id:"comments",label:"Comentarios ("+m.comments.length+")"}];
   return(
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={onBack}>← Volver</button><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?15:18}}>{m.asset}</span><MBadge m={m}/><span style={bdg("#6b7280","#f1f5f9")}>{m.tipo}</span></div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>{m.code} - {m.category} - {m.location}</div></div></div>
-      {st==="Vencida"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><div><strong style={{color:"#dc2626"}}>MANTENCION VENCIDA</strong><div style={{fontSize:12,color:"#ef4444"}}>Vencio hace {Math.abs(daysLeft||0)} dias.</div></div></div>}
-      {st==="Por vencer"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><div><strong style={{color:"#92400e"}}>PROXIMA A VENCER</strong><div style={{fontSize:12,color:"#b45309"}}>Quedan {daysLeft} dias.</div></div></div>}
-      {!readOnly&&<div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}><div><label style={lbl}>Estado</label><select style={{...selSt,width:160}} value={m.status} onChange={e=>setStatus(e.target.value)}>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select></div><button style={mkBtn("success",true)} onClick={()=>setShowHistForm(true)}>+ Registrar ejecucion</button><button style={mkBtn("secondary",true)} onClick={()=>setShowDocForm(true)}>+ Documento</button></div></div>}
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={onBack}>← Volver</button><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?15:18}}>{m.asset}</span><MBadge m={m}/></div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>{m.code} - {m.category}</div></div></div>
+      {st==="Vencida"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><strong style={{color:"#dc2626"}}>VENCIDA - hace {Math.abs(daysLeft||0)} dias</strong></div>}
+      {!readOnly&&<div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><select style={{...selSt,width:160}} value={m.status} onChange={e=>setStatus(e.target.value)}>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select><button style={mkBtn("success",true)} onClick={()=>setShowHistForm(true)}>+ Registrar ejecucion</button><button style={mkBtn("secondary",true)} onClick={()=>setShowDocForm(true)}>+ Documento</button></div></div>}
       <Tabs tabs={tabs} active={tab} onChange={setTab} accent="#6366f1"/>
       {tab==="info"&&<div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Datos del activo</div><IR l="Codigo" v={m.code}/><IR l="Categoria" v={(m.category||"")+" - "+(m.subcategory||"")}/><IR l="Ubicacion" v={m.location}/><IR l="Tipo" v={m.tipo}/><IR l="Responsable" v={m.responsible}/><IR l="Proveedor" v={m.provider}/></div>
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Fechas y costos</div><IR l="Ultima mantencion" v={m.lastDate?fmtD(m.lastDate):"No registrada"}/><IR l="Proximo vencimiento" v={m.nextDate?fmtD(m.nextDate):"No definida"}/><IR l="Dias restantes" v={daysLeft===null?"---":daysLeft<0?Math.abs(daysLeft)+" dias vencida":daysLeft+" dias"}/><IR l="Costo estimado" v={m.costEstimated?"$"+Number(m.costEstimated).toLocaleString("es-CL"):"---"}/><IR l="Costo real" v={m.costReal?"$"+Number(m.costReal).toLocaleString("es-CL"):"Pendiente"}/></div>
-        <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripcion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{m.description||"Sin descripcion."}</p></div>
-        {req&&<div style={{...card,gridColumn:"1/-1",background:"#eff6ff",border:"1px solid #bfdbfe"}}><div style={{fontWeight:600,fontSize:13,marginBottom:6}}>Solicitud vinculada</div><div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}><span style={bdg("#3b82f6","#eff6ff")}>{req.code}</span><span style={{fontSize:12}}>{req.category} - Torre {req.tower}/{req.unit}</span><SBadge s={req.status}/></div></div>}
+        <div style={card}><IR l="Codigo" v={m.code}/><IR l="Categoria" v={(m.category||"")+" / "+(m.subcategory||"")}/><IR l="Ubicacion" v={m.location}/><IR l="Tipo" v={m.tipo}/><IR l="Responsable" v={m.responsible}/><IR l="Proveedor" v={m.provider}/></div>
+        <div style={card}><IR l="Ultima mantencion" v={m.lastDate?fmtD(m.lastDate):"No registrada"}/><IR l="Prox. vencimiento" v={m.nextDate?fmtD(m.nextDate):"No definida"}/><IR l="Dias restantes" v={daysLeft===null?"---":daysLeft<0?Math.abs(daysLeft)+" vencida":daysLeft+" dias"}/><IR l="Costo estimado" v={m.costEstimated?"$"+Number(m.costEstimated).toLocaleString("es-CL"):"---"}/><IR l="Costo real" v={m.costReal?"$"+Number(m.costReal).toLocaleString("es-CL"):"Pendiente"}/></div>
+        <div style={{...card,gridColumn:"1/-1"}}><p style={{fontSize:13,color:"#374151",margin:0}}>{m.description||"Sin descripcion."}</p></div>
       </div>}
-      {tab==="history"&&<div>{!readOnly&&!showHistForm&&<button style={{...mkBtn("success",true),marginBottom:12}} onClick={()=>setShowHistForm(true)}>+ Registrar ejecucion</button>}{showHistForm&&<HistForm onSave={addHist} onClose={()=>setShowHistForm(false)}/>}{m.history.length===0&&!showHistForm?<Empty msg="Sin historial"/>:<div>{[...m.history].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(h=><div key={h.id||h.date} style={{...card,borderLeft:"4px solid #6366f1",marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}><div><div style={{fontWeight:600,fontSize:13}}>{h.tipo} - {fmtD(h.date)}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>Responsable: {h.responsible}</div>{h.notes&&<p style={{fontSize:12,margin:"6px 0 0",color:"#374151"}}>{h.notes}</p>}</div>{h.costReal>0&&<span style={bdg("#10b981","#f0fdf4")}>${Number(h.costReal).toLocaleString("es-CL")}</span>}</div></div>)}</div>}</div>}
-      {tab==="docs"&&<div>{!readOnly&&!showDocForm&&<button style={{...mkBtn("secondary",true),marginBottom:12}} onClick={()=>setShowDocForm(true)}>+ Agregar documento</button>}{showDocForm&&<DocForm onSave={addDoc} onClose={()=>setShowDocForm(false)}/>}{m.documents.length===0&&!showDocForm?<Empty msg="Sin documentos"/>:<div>{m.documents.map(d=><div key={d.id} style={{...card,display:"flex",alignItems:"center",gap:12,marginBottom:8}}><div style={{width:36,height:36,borderRadius:8,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>📄</div><div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.name}</div><div style={{fontSize:11,color:"#64748b"}}>{fmtD(d.date)}{d.notes?" - "+d.notes:""}</div></div><span style={bdg("#6366f1","#eef2ff")}>Adjunto</span></div>)}</div>}</div>}
-      {tab==="comments"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Comentarios</div>{m.comments.length===0&&<div style={{color:"#94a3b8",fontSize:13,marginBottom:10}}>Sin comentarios.</div>}{m.comments.map((c,i)=><div key={i} style={{borderLeft:"3px solid #e2e8f0",paddingLeft:10,marginBottom:10}}><div style={{display:"flex",gap:6,marginBottom:3,flexWrap:"wrap"}}><strong style={{fontSize:12}}>{c.user}</strong><span style={{fontSize:10,color:"#94a3b8",marginLeft:"auto"}}>{fmt(c.date)}</span></div><p style={{margin:0,fontSize:13}}>{c.text}</p></div>)}{!readOnly&&<div style={{marginTop:10,display:"flex",gap:8}}><input style={{...inp,flex:1}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCmt()}/><button style={mkBtn("primary",true)} onClick={addCmt}>Enviar</button></div>}</div>}
+      {tab==="history"&&<div>{!readOnly&&!showHistForm&&<button style={{...mkBtn("success",true),marginBottom:12}} onClick={()=>setShowHistForm(true)}>+ Registrar ejecucion</button>}{showHistForm&&<HistForm onSave={addHist} onClose={()=>setShowHistForm(false)} resps={resps}/>}{m.history.length===0&&!showHistForm?<Empty msg="Sin historial"/>:<div>{[...m.history].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(h=><div key={h.id||h.date} style={{...card,borderLeft:"4px solid #6366f1",marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>{h.tipo} - {fmtD(h.date)}</div><div style={{fontSize:11,color:"#64748b"}}>{h.responsible}</div>{h.notes&&<p style={{fontSize:12,margin:"6px 0 0"}}>{h.notes}</p>}{h.costReal>0&&<span style={bdg("#10b981","#f0fdf4")}>${Number(h.costReal).toLocaleString("es-CL")}</span>}</div>)}</div>}</div>}
+      {tab==="docs"&&<div>{!readOnly&&!showDocForm&&<button style={{...mkBtn("secondary",true),marginBottom:12}} onClick={()=>setShowDocForm(true)}>+ Agregar documento</button>}{showDocForm&&<DocForm onSave={addDoc} onClose={()=>setShowDocForm(false)}/>}{m.documents.length===0&&!showDocForm?<Empty msg="Sin documentos"/>:m.documents.map(d=><div key={d.id} style={{...card,display:"flex",alignItems:"center",gap:12,marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>{d.name}</div><div style={{fontSize:11,color:"#64748b"}}>{fmtD(d.date)}</div></div>)}</div>}
+      {tab==="comments"&&<div style={card}>{m.comments.map((c,i)=><div key={i} style={{borderLeft:"3px solid #e2e8f0",paddingLeft:10,marginBottom:10}}><strong style={{fontSize:12}}>{c.user}</strong><span style={{fontSize:10,color:"#94a3b8",marginLeft:8}}>{fmt(c.date)}</span><p style={{margin:"4px 0 0",fontSize:13}}>{c.text}</p></div>)}{!readOnly&&<div style={{marginTop:10,display:"flex",gap:8}}><input style={{...inp,flex:1}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCmt()}/><button style={mkBtn("primary",true)} onClick={addCmt}>Enviar</button></div>}</div>}
     </div>
   );
 }
-function HistForm({onSave,onClose}){
-  const [f,setF]=useState({date:new Date().toISOString().slice(0,10),tipo:MANT_TIPOS[0],responsible:RESP_LIST[0],notes:"",costReal:0,marcarVigente:false});
+function HistForm({onSave,onClose,resps}){
+  const RESP_LIST=getRespList(resps);
+  const [f,setF]=useState({date:new Date().toISOString().slice(0,10),tipo:MANT_TIPOS[0],responsible:RESP_LIST[0]||"",notes:"",costReal:0,marcarVigente:false});
   return(<div style={{...card,border:"2px solid #6366f1",marginBottom:12}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Registrar ejecucion</div><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -1252,7 +1330,7 @@ function HistForm({onSave,onClose}){
       <div style={fg}><label style={lbl}>Responsable</label><select style={selSt} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>{RESP_LIST.map(r=><option key={r}>{r}</option>)}</select></div>
       <div style={fg}><label style={lbl}>Costo real</label><input type="number" min="0" style={inp} value={f.costReal} onChange={e=>setF(p=>({...p,costReal:Math.max(0,+e.target.value)}))}/></div>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Notas</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.notes} onChange={e=>setF(p=>({...p,notes:e.target.value}))}/></div>
-      <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="mv" checked={f.marcarVigente} onChange={e=>setF(p=>({...p,marcarVigente:e.target.checked}))}/><label htmlFor="mv" style={{fontSize:12,cursor:"pointer"}}>Marcar mantencion como Vigente</label></div>
+      <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="mv" checked={f.marcarVigente} onChange={e=>setF(p=>({...p,marcarVigente:e.target.checked}))}/><label htmlFor="mv" style={{fontSize:12,cursor:"pointer"}}>Marcar como Vigente</label></div>
     </div>
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("success",true)} onClick={()=>{if(!f.date)return;onSave(f);}}>Registrar</button></div>
   </div>);
@@ -1261,13 +1339,12 @@ function DocForm({onSave,onClose}){
   const [f,setF]=useState({name:"",notes:""});
   return(<div style={{...card,border:"2px solid #e2e8f0",marginBottom:12}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Agregar documento</div><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
-    <div style={fg}><label style={lbl}>Nombre del documento *</label><input style={inp} value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))} placeholder="ej: Certificado revision 2024"/></div>
+    <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))}/></div>
     <div style={fg}><label style={lbl}>Notas</label><input style={inp} value={f.notes} onChange={e=>setF(p=>({...p,notes:e.target.value}))}/></div>
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.name.trim())return;onSave(f);}}>Agregar</button></div>
   </div>);
 }
 
-// ── CONFIG ────────────────────────────────────────────────────────────────────
 function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,session}){
   const [editCat,setEditCat]=useState(null);const [showCF,setShowCF]=useState(false);
   const [editTow,setEditTow]=useState(null);const [showTF,setShowTF]=useState(false);
@@ -1276,66 +1353,55 @@ function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,sess
   const [usuarios,setUsuarios]=useState([]);const [showUF,setShowUF]=useState(false);const [editUser,setEditUser]=useState(null);
 
   useEffect(()=>{ if(tab==="usuarios") loadUsuarios(); },[tab]);
-
   const loadUsuarios=async()=>{
     try{const res=await fetch(`${SUPA_URL}/rest/v1/usuarios?order=created_at.asc&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`}});const data=await res.json();setUsuarios(Array.isArray(data)?data:[]);}catch(e){console.error(e);}
   };
   const saveUsuario=async(u)=>{
     try{
-      if(u.isNew){
-        await fetch(`${SUPA_URL}/rest/v1/usuarios`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`,"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});
-        showToast("Usuario creado (recuerde crearlo en Auth de Supabase)");
-      }else{
-        await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active})});
-        showToast("Usuario actualizado");
-      }
+      if(u.isNew){await fetch(`${SUPA_URL}/rest/v1/usuarios`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`,"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});showToast("Usuario creado");}
+      else{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active})});showToast("Usuario actualizado");}
       loadUsuarios();setShowUF(false);setEditUser(null);
-    }catch(e){showToast("Error al guardar: "+e.message,"error");}
+    }catch(e){showToast("Error: "+e.message,"error");}
   };
   const toggleUser=async(u)=>{
-    try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({active:!u.active})});loadUsuarios();showToast(u.active?"Desactivado":"Activado");}catch(e){showToast("Error","error");}
+    try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({active:!u.active})});loadUsuarios();}catch(e){showToast("Error","error");}
   };
-
   const toggleCat=id=>setCats(p=>p.map(c=>c.id===id?{...c,active:!c.active}:c));
-  const saveCat=cat=>{if(editCat){setCats(p=>p.map(c=>c.id===cat.id?cat:c));showToast("Actualizada");}else{setCats(p=>[...p,{...cat,id:"cat"+uid(),order:p.length}]);showToast("Creada");}setShowCF(false);setEditCat(null);};
+  const saveCat=cat=>{if(editCat){setCats(p=>p.map(c=>c.id===cat.id?cat:c));}else{setCats(p=>[...p,{...cat,id:"cat"+uid(),order:p.length}]);}showToast("Guardada");setShowCF(false);setEditCat(null);};
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});
   const toggleTow=id=>setTowers(p=>p.map(t=>t.id===id?{...t,active:!t.active}:t));
-  const saveTow=t=>{if(editTow){setTowers(p=>p.map(x=>x.id===t.id?t:x));showToast("Actualizada");}else{setTowers(p=>[...p,{...t,id:"t"+uid()}]);showToast("Creada");}setShowTF(false);setEditTow(null);};
-  const mvTow=(idx,dir)=>setTowers(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a;});
+  const saveTow=t=>{if(editTow){setTowers(p=>p.map(x=>x.id===t.id?t:x));}else{setTowers(p=>[...p,{...t,id:"t"+uid()}]);}showToast("Guardada");setShowTF(false);setEditTow(null);};
   const toggleResp=id=>setResps(p=>p.map(r=>r.id===id?{...r,active:!r.active}:r));
-  const saveResp=r=>{if(editResp){setResps(p=>p.map(x=>x.id===r.id?r:x));showToast("Actualizado");}else{setResps(p=>[...p,{...r,id:"r"+uid()}]);showToast("Creado");}setShowRF(false);setEditResp(null);};
+  const saveResp=r=>{if(editResp){setResps(p=>p.map(x=>x.id===r.id?r:x));}else{setResps(p=>[...p,{...r,id:"r"+uid()}]);}showToast("Guardado");setShowRF(false);setEditResp(null);};
   const sla={Emergencia:"4h",Alta:"24h",Media:"72h",Baja:"7 dias"};
   const cfgTabs=[{id:"cats",label:"Categorias"},{id:"towers",label:"Torres"},{id:"resps",label:"Responsables"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"}];
   return(
     <div>
       <Tabs tabs={cfgTabs} active={tab} onChange={setTab}/>
-      {tab==="cats"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{cats.filter(c=>c.active).length} activas</div><button style={mkBtn("primary",true)} onClick={()=>{setEditCat(null);setShowCF(true);}}>+ Nueva</button></div><div style={card}>{cats.map((cat,idx)=><div key={cat.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:cat.active?1:.5,flexWrap:"wrap"}}><div style={{display:"flex",flexDirection:"column",gap:2}}><button style={{...mkBtn("ghost",true),padding:"2px 4px",fontSize:10}} onClick={()=>mvCat(idx,-1)}>▲</button><button style={{...mkBtn("ghost",true),padding:"2px 4px",fontSize:10}} onClick={()=>mvCat(idx,1)}>▼</button></div><div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{cat.name}</div><div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat.subs.join(", ")}</div></div><div style={{display:"flex",gap:4,flexShrink:0}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditCat(cat);setShowCF(true);}}>Editar</button><button style={mkBtn(cat.active?"warning":"success",true)} onClick={()=>toggleCat(cat.id)}>{cat.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setCats(p=>p.filter(c=>c.id!==cat.id))}>X</button></div></div>)}</div>{showCF&&<CatForm cat={editCat} onSave={saveCat} onClose={()=>{setShowCF(false);setEditCat(null);}}/>}</div>}
-      {tab==="towers"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{towers.filter(t=>t.active).length} activas</div><button style={mkBtn("primary",true)} onClick={()=>{setEditTow(null);setShowTF(true);}}>+ Nueva torre</button></div><div style={card}>{towers.map((t,idx)=><div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:t.active?1:.5,flexWrap:"wrap"}}><div style={{display:"flex",flexDirection:"column",gap:2}}><button style={{...mkBtn("ghost",true),padding:"2px 4px",fontSize:10}} onClick={()=>mvTow(idx,-1)}>▲</button><button style={{...mkBtn("ghost",true),padding:"2px 4px",fontSize:10}} onClick={()=>mvTow(idx,1)}>▼</button></div><div style={{width:34,height:34,borderRadius:8,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"#3b82f6",flexShrink:0}}>{t.name}</div><div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{t.label}</div><div style={{fontSize:11,color:"#64748b"}}>Codigo: {t.name}</div></div><div style={{display:"flex",gap:4,flexShrink:0}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditTow(t);setShowTF(true);}}>Editar</button><button style={mkBtn(t.active?"warning":"success",true)} onClick={()=>toggleTow(t.id)}>{t.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setTowers(p=>p.filter(x=>x.id!==t.id))}>X</button></div></div>)}</div>{showTF&&<TowerForm tower={editTow} onSave={saveTow} onClose={()=>{setShowTF(false);setEditTow(null);}}/>}</div>}
-      {tab==="resps"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{resps.filter(r=>r.active).length} activos</div><button style={mkBtn("primary",true)} onClick={()=>{setEditResp(null);setShowRF(true);}}>+ Nuevo</button></div><div>{resps.map(r=><div key={r.id} style={{...card,opacity:r.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{r.name}</div><div style={{fontSize:11,color:"#64748b",marginBottom:3}}>{r.email} - {r.phone}</div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{(r.modules||[]).map(m=><span key={m} style={bdg("#6366f1","#eef2ff")}>{m}</span>)}</div></div><div style={{display:"flex",gap:4,flexShrink:0}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditResp(r);setShowRF(true);}}>Editar</button><button style={mkBtn(r.active?"warning":"success",true)} onClick={()=>toggleResp(r.id)}>{r.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setResps(p=>p.filter(x=>x.id!==r.id))}>X</button></div></div></div>)}</div>{showRF&&<RespForm resp={editResp} onSave={saveResp} onClose={()=>{setShowRF(false);setEditResp(null);}}/>}</div>}
+      {tab==="cats"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{cats.filter(c=>c.active).length} activas</div><button style={mkBtn("primary",true)} onClick={()=>{setEditCat(null);setShowCF(true);}}>+ Nueva</button></div><div style={card}>{cats.map((cat,idx)=><div key={cat.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:cat.active?1:.5,flexWrap:"wrap"}}><div style={{display:"flex",flexDirection:"column"}}><button style={{...mkBtn("ghost",true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,-1)}>▲</button><button style={{...mkBtn("ghost",true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,1)}>▼</button></div><div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{cat.name}</div><div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat.subs.join(", ")}</div></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditCat(cat);setShowCF(true);}}>Editar</button><button style={mkBtn(cat.active?"warning":"success",true)} onClick={()=>toggleCat(cat.id)}>{cat.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setCats(p=>p.filter(c=>c.id!==cat.id))}>X</button></div></div>)}</div>{showCF&&<CatForm cat={editCat} onSave={saveCat} onClose={()=>{setShowCF(false);setEditCat(null);}}/>}</div>}
+      {tab==="towers"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{towers.filter(t=>t.active).length} activas</div><button style={mkBtn("primary",true)} onClick={()=>{setEditTow(null);setShowTF(true);}}>+ Nueva torre</button></div><div style={card}>{towers.map((t,idx)=><div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:t.active?1:.5,flexWrap:"wrap"}}><div style={{width:34,height:34,borderRadius:8,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"#3b82f6",flexShrink:0}}>{t.name}</div><div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{t.label}</div></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditTow(t);setShowTF(true);}}>Editar</button><button style={mkBtn(t.active?"warning":"success",true)} onClick={()=>toggleTow(t.id)}>{t.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setTowers(p=>p.filter(x=>x.id!==t.id))}>X</button></div></div>)}</div>{showTF&&<TowerForm tower={editTow} onSave={saveTow} onClose={()=>{setShowTF(false);setEditTow(null);}}/>}</div>}
+      {tab==="resps"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{resps.filter(r=>r.active).length} activos</div><button style={mkBtn("primary",true)} onClick={()=>{setEditResp(null);setShowRF(true);}}>+ Nuevo</button></div><div>{resps.map(r=><div key={r.id} style={{...card,opacity:r.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{r.name}</div><div style={{fontSize:11,color:"#64748b",marginBottom:3}}>{r.email}</div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{(r.modules||[]).map(m=><span key={m} style={bdg("#6366f1","#eef2ff")}>{m}</span>)}</div></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditResp(r);setShowRF(true);}}>Editar</button><button style={mkBtn(r.active?"warning":"success",true)} onClick={()=>toggleResp(r.id)}>{r.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setResps(p=>p.filter(x=>x.id!==r.id))}>X</button></div></div></div>)}</div>{showRF&&<RespForm resp={editResp} onSave={saveResp} onClose={()=>{setShowRF(false);setEditResp(null);}}/>}</div>}
       {tab==="usuarios"&&<div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuarios.filter(u=>u.active).length} activos</div><button style={mkBtn("primary",true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
         {showUF&&<UserForm user={editUser} onSave={saveUsuario} onClose={()=>{setShowUF(false);setEditUser(null);}}/>}
-        <div>{usuarios.map(u=><div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontWeight:700,fontSize:13}}>{u.nombre}</span>{!u.active&&<span style={bdg("#6b7280","#f1f5f9")}>Inactivo</span>}</div><div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div><div style={{display:"flex",gap:4,flexShrink:0}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={mkBtn(u.active?"warning":"success",true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button></div></div></div>)}</div>
+        <div>{usuarios.map(u=><div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{u.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={mkBtn(u.active?"warning":"success",true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button></div></div></div>)}</div>
       </div>}
-      {tab==="sla"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>{Object.entries(sla).map(([p,t])=><div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600,fontSize:13}}>{t}</span></div>)}</div>}
+      {tab==="sla"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>{Object.entries(sla).map(([p,t])=><div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>)}</div>}
     </div>
   );
 }
 function UserForm({user,onSave,onClose}){
   const [f,setF]=useState({nombre:"",email:"",rol:"Residente",active:true,isNew:true,...(user||{})});
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  return(
-    <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre completo *</label><input style={inp} value={f.nombre} onChange={e=>set("nombre",e.target.value)} placeholder="ej: Juan Perez"/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>set("email",e.target.value)} placeholder="correo@ejemplo.cl" disabled={!!user}/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Rol</label><select style={selSt} value={f.rol} onChange={e=>set("rol",e.target.value)}>{ROLES.map(r=><option key={r}>{r}</option>)}</select></div>
-      </div>
-      {!user&&<div style={{...alrt("info"),fontSize:12,marginTop:8}}>Despues de crear el usuario aqui, debe crearlo tambien en Supabase Authentication con el mismo correo y contraseña.</div>}
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave(f);}}>Guardar</button></div>
-    </div></div>
-  );
+  return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
+    <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre *</label><input style={inp} value={f.nombre} onChange={e=>setF(p=>({...p,nombre:e.target.value}))}/></div>
+      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>setF(p=>({...p,email:e.target.value}))} disabled={!!user}/></div>
+      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Rol</label><select style={selSt} value={f.rol} onChange={e=>setF(p=>({...p,rol:e.target.value}))}>{ROLES.map(r=><option key={r}>{r}</option>)}</select></div>
+    </div>
+    {!user&&<div style={{...alrt("info"),marginTop:8,fontSize:12}}>Recuerde crear el usuario en Supabase Authentication con el mismo correo.</div>}
+    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave(f);}}>Guardar</button></div>
+  </div></div>);
 }
 function CatForm({cat,onSave,onClose}){
   const [name,setName]=useState(cat?cat.name:"");
@@ -1345,13 +1411,11 @@ function CatForm({cat,onSave,onClose}){
 }
 function TowerForm({tower,onSave,onClose}){
   const [name,setName]=useState(tower?tower.name:"");const [label,setLabel]=useState(tower?tower.label:"");
-  const save=()=>{if(!name.trim()||!label.trim())return;onSave({...(tower||{}),name:name.trim(),label:label.trim(),active:tower?tower.active:true});};
-  return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"20px",marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{tower?"Editar":"Nueva"} torre</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div><div style={fg}><label style={lbl}>Codigo *</label><input style={inp} value={name} onChange={e=>setName(e.target.value)} placeholder="ej: A"/></div><div style={fg}><label style={lbl}>Nombre completo *</label><input style={inp} value={label} onChange={e=>setLabel(e.target.value)} placeholder="ej: Torre A"/></div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={save}>Guardar</button></div></div></div>);
+  return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"20px",marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{tower?"Editar":"Nueva"} torre</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div><div style={fg}><label style={lbl}>Codigo *</label><input style={inp} value={name} onChange={e=>setName(e.target.value)} placeholder="ej: A"/></div><div style={fg}><label style={lbl}>Nombre completo *</label><input style={inp} value={label} onChange={e=>setLabel(e.target.value)} placeholder="ej: Torre A"/></div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!name.trim()||!label.trim())return;onSave({...(tower||{}),name:name.trim(),label:label.trim(),active:tower?tower.active:true});}}>Guardar</button></div></div></div>);
 }
 function RespForm({resp,onSave,onClose}){
   const [f,setF]=useState({name:"",email:"",phone:"",modules:[],active:true,...(resp||{})});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const toggleMod=m=>setF(p=>({...p,modules:(p.modules||[]).includes(m)?(p.modules||[]).filter(x=>x!==m):[...(p.modules||[]),m]}));
-  const save=()=>{if(!f.name.trim()||!f.email.trim())return;onSave(f);};
-  return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{resp?"Editar":"Nuevo"} responsable</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={e=>set("name",e.target.value)}/></div><div style={fg}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>set("email",e.target.value)}/></div><div style={fg}><label style={lbl}>Telefono</label><input style={inp} value={f.phone} onChange={e=>set("phone",e.target.value)}/></div><div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Modulos</label><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>{ALL_MODS.map(m=><button key={m} onClick={()=>toggleMod(m)} style={{padding:"4px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"1.5px solid "+((f.modules||[]).includes(m)?"#6366f1":"#e2e8f0"),background:(f.modules||[]).includes(m)?"#eef2ff":"#f9fafb",color:(f.modules||[]).includes(m)?"#6366f1":"#6b7280"}}>{m}</button>)}</div></div></div><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={save}>Guardar</button></div></div></div>);
+  return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{resp?"Editar":"Nuevo"} responsable</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={e=>set("name",e.target.value)}/></div><div style={fg}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>set("email",e.target.value)}/></div><div style={fg}><label style={lbl}>Telefono</label><input style={inp} value={f.phone} onChange={e=>set("phone",e.target.value)}/></div><div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Modulos</label><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>{ALL_MODS.map(m=><button key={m} onClick={()=>toggleMod(m)} style={{padding:"4px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"1.5px solid "+((f.modules||[]).includes(m)?"#6366f1":"#e2e8f0"),background:(f.modules||[]).includes(m)?"#eef2ff":"#f9fafb",color:(f.modules||[]).includes(m)?"#6366f1":"#6b7280"}}>{m}</button>)}</div></div></div><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.name.trim()||!f.email.trim())return;onSave(f);}}>Guardar</button></div></div></div>);
 }

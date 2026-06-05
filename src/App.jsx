@@ -527,14 +527,14 @@ export default function App() {
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
             {view==="dashboard"   &&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} session={session}/>}
-            {view==="requests"    &&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} resps={resps}/>}
+            {view==="requests"    &&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} resps={resps} session={session}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} resps={resps}/>}
             {view==="tasks"       &&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob} resps={resps}/>}
-            {view==="provider"    &&<ProviderDash orders={orders} setOrders={setOrders} role={er} showToast={showToast} mob={mob}/>}
+            {view==="provider"    &&<ProviderDash orders={orders} setOrders={setOrders} role={er} showToast={showToast} mob={mob} reqs={reqs} session={session}/>}
             {view==="inspections" &&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} role={er} mob={mob} towers={towers}/>}
             {view==="inventory"   &&<InvView inventory={inventory} setInv={setInvDB} dispatch={dispatch} setDispatch={setDispatchDB} reqs={reqs} role={er} showToast={showToast} mob={mob} resps={resps}/>}
             {view==="mantencion"  &&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob} resps={resps}/>}
-            {view==="emails"      &&<EmailsView logs={emails}/>}
+            {view==="emails"      &&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
             {view==="reports"     &&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob} resps={resps}/>}
             {view==="config"      &&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} resps={resps} setResps={setRespsDB} showToast={showToast} session={session}/>}
           </div>
@@ -590,11 +590,17 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,session}){
   );
 }
 
-function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers,resps}){
+function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers,resps,session}){
   const [fi,setFi]=useState({status:"",priority:"",category:"",tower:"",q:""});
   const [sort,setSort]=useState("date");
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
-  const visible=reqs.filter(r=>{
+
+  // Residentes solo ven sus propias solicitudes
+  const baseReqs = role==="Residente"
+    ? reqs.filter(r=>r.requesterEmail===session?.email||r.requesterName===session?.nombre)
+    : reqs;
+
+  const visible=baseReqs.filter(r=>{
     if(fi.status&&r.status!==fi.status)return false;
     if(fi.priority&&r.priority!==fi.priority)return false;
     if(fi.category&&r.category!==fi.category)return false;
@@ -895,12 +901,19 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const submit=()=>{
     if(!validate())return;
     const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
-    const nr=normalizeReq({id:code,code,createdAt:now,...f,status:"Ingresada",assignedTo:"Sin asignar",
+    const nr=normalizeReq({id:code,code,createdAt:now,...f,
+      category:tipoReporte==="Administrativo"?"Administrativo":f.category,
+      subcategory:tipoReporte==="Administrativo"?"Administrativo":f.subcategory,
+      status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
       attachmentsInitial:prevs.map(p=>({id:"a"+uid(),requestId:code,type:"inicial",name:p.name,date:now,user:f.requesterName,preview:p.url,comment:""})),
       dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud de "+f.category+" fue registrada. Codigo: "+code+"."});
+    addEmail({requestId:code,date:now,to:f.requesterEmail,
+      subject:"[CondoAdmin] Solicitud "+code+" recibida",
+      type:"Creacion",status:"Enviado",
+      body:`Estimado/a ${f.requesterName},\n\nSu solicitud ha sido registrada exitosamente.\n\n📋 DETALLE DE LA SOLICITUD\n──────────────────────────\nCódigo: ${code}\nCategoría: ${f.category} - ${f.subcategory}\nTorre: ${f.tower} / Unidad: ${f.unit}\nPrioridad: ${f.priority}\nFranja horaria: ${f.preferredTimeSlot}\n\nDescripción:\n${f.description}\n\n──────────────────────────\nNuestro equipo revisará su solicitud a la brevedad.\n\nCondoAdmin`
+    });
     const notif=(resps||[]).filter(rr=>rr.active&&rr.email&&(rr.modules||[]).includes("Solicitudes"));
     notif.forEach(rr=>{addEmail({
       requestId:code,date:now,to:rr.email,
@@ -989,15 +1002,48 @@ function TasksView({tasks,reqs,role,setTasks,showToast,mob,resps}){
   );
 }
 
-function ProviderDash({orders,setOrders,role,showToast,mob}){
+function ProviderDash({orders,setOrders,role,showToast,mob,reqs,session}){
   const [selOrder,setSelOrder]=useState(null);
-  const visible=orders;
+  // Solicitudes asignadas al proveedor (por nombre o email)
+  const myReqs=reqs.filter(r=>r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email));
   if(selOrder){const order=orders.find(o=>o.id===selOrder.id)||selOrder;return <WorkDetail order={order} setOrders={setOrders} showToast={showToast} role={role} mob={mob} onBack={()=>setSelOrder(null)}/>;}
   return(
     <div>
-      <div style={{...card,background:"#1e3a5f",marginBottom:16}}><div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Panel de Proveedor</div><div style={{color:"#94a3b8",fontSize:12}}>Gestion de ordenes de trabajo</div></div>
-      <Grid cols={4} mob={mob}><Kpi value={orders.filter(o=>o.status==="Pendiente").length} label="Pend. aceptacion" color="#f59e0b" mob={mob}/><Kpi value={orders.filter(o=>["Aceptado","Diagnostico","Ejecucion"].includes(o.status)).length} label="Activos" color="#3b82f6" mob={mob}/><Kpi value={orders.filter(o=>o.status==="Ejecutado").length} label="Ejecutados" color="#10b981" mob={mob}/><Kpi value={orders.filter(o=>o.status==="Cerrado").length} label="Cerrados" color="#6b7280" mob={mob}/></Grid>
-      {visible.length===0?<Empty msg="Sin ordenes de trabajo"/>:<div>{visible.map(o=><div key={o.id} style={{...card,borderLeft:"4px solid "+(WS_COLOR[o.status]||"#e2e8f0"),marginBottom:10,cursor:"pointer",padding:14}} onClick={()=>setSelOrder(o)}><div style={{fontWeight:600,fontSize:14,marginBottom:4}}>{o.title}</div><div style={{fontSize:11,color:"#64748b",marginBottom:8}}>{o.location}</div><div style={{display:"flex",gap:8}}><PBadge p={o.priority}/><SBadge s={o.status}/></div></div>)}</div>}
+      <div style={{...card,background:"#1e3a5f",marginBottom:16}}>
+        <div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Mis Trabajos Asignados</div>
+        <div style={{color:"#94a3b8",fontSize:12}}>Solicitudes asignadas a {session?.nombre||"ti"}</div>
+      </div>
+      <Grid cols={3} mob={mob}>
+        <Kpi value={myReqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Activas" color="#3b82f6" mob={mob}/>
+        <Kpi value={myReqs.filter(r=>r.status==="Resuelta").length} label="Resueltas" color="#10b981" mob={mob}/>
+        <Kpi value={myReqs.filter(r=>r.status==="Cerrada").length} label="Cerradas" color="#6b7280" mob={mob}/>
+      </Grid>
+      {myReqs.length===0
+        ?<Empty msg="No tienes solicitudes asignadas aún"/>
+        :<div>{myReqs.map(r=>(
+          <div key={r.id} style={{...card,borderLeft:"4px solid "+(PRIORITY_COLOR[r.priority]||"#e2e8f0"),marginBottom:10,padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{r.code}</span>
+                  <PBadge p={r.priority}/>
+                  <SBadge s={r.status}/>
+                </div>
+                <div style={{fontWeight:600,fontSize:14,marginBottom:3}}>{r.category} - {r.subcategory}</div>
+                <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Torre {r.tower} / Unidad {r.unit}</div>
+                <div style={{fontSize:12,color:"#374151"}}>{r.description}</div>
+              </div>
+              <div style={{fontSize:11,color:"#94a3b8",flexShrink:0}}>{fmtD(r.createdAt)}</div>
+            </div>
+            {r.comments&&r.comments.length>0&&(
+              <div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:8}}>
+                <div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:4}}>Último comentario</div>
+                <div style={{fontSize:12,color:"#374151"}}>{r.comments[r.comments.length-1].text}</div>
+              </div>
+            )}
+          </div>
+        ))}</div>
+      }
     </div>
   );
 }
@@ -1245,14 +1291,26 @@ function DisModal({item,reqs,onConfirm,onClose,resps}){
   </div></div>);
 }
 
-function EmailsView({logs}){
+function EmailsView({logs, setEmails, role}){
   const [q,setQ]=useState("");
   const visible=[...logs].sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(e=>!q||((e.to||"")+(e.subject||"")+(e.requestId||"")).toLowerCase().includes(q.toLowerCase()));
   return(<div>
-    <div style={{...card,padding:12,marginBottom:12}}><input style={inp} placeholder="Buscar..." value={q} onChange={e=>setQ(e.target.value)}/></div>
+    <div style={{...card,padding:12,marginBottom:12,display:"flex",gap:8}}>
+      <input style={{...inp,flex:1}} placeholder="Buscar..." value={q} onChange={e=>setQ(e.target.value)}/>
+      {can(role,"manageConfig")&&logs.length>0&&<button style={mkBtn("danger",true)} onClick={()=>{if(window.confirm("¿Eliminar todos los correos del registro?"))setEmails([]);}}>🗑 Limpiar todo</button>}
+    </div>
     <div style={card}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Bandeja de correos</div><span style={bdg("#10b981","#f0fdf4")}>{logs.length} enviados</span></div>
-      {visible.length===0?<Empty msg="Sin correos"/>:visible.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span><span style={bdg("#10b981","#f0fdf4")}>{e.status}</span></div><div style={{fontSize:10,color:"#64748b",marginBottom:3}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4}}>{e.body}</div></div>)}
+      {visible.length===0?<Empty msg="Sin correos"/>:visible.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}>
+        <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
+          <span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span>
+          <span style={bdg("#6366f1","#eef2ff")}>{e.type}</span>
+          <span style={bdg("#10b981","#f0fdf4")}>{e.status}</span>
+          {can(role,"manageConfig")&&<button style={{...mkBtn("ghost",true),padding:"2px 6px",fontSize:11,color:"#ef4444"}} onClick={()=>setEmails(p=>p.filter(x=>(x.id||x)!==(e.id||e)))}>🗑</button>}
+        </div>
+        <div style={{fontSize:10,color:"#64748b",marginBottom:3}}>{e.to} - {fmt(e.date)}</div>
+        <div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4}}>{e.body}</div>
+      </div>)}
     </div>
   </div>);
 }
@@ -1418,8 +1476,13 @@ function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,sess
   };
   const saveUsuario=async(u)=>{
     try{
-      if(u.isNew){await fetch(`${SUPA_URL}/rest/v1/usuarios`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`,"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});showToast("Usuario creado");}
-      else{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active})});showToast("Usuario actualizado");}
+      if(u.isNew){
+        await fetch(`${SUPA_URL}/rest/v1/usuarios`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`,"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});
+        showToast("Usuario creado");
+      } else {
+        await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active??true})});
+        showToast("Usuario actualizado");
+      }
       loadUsuarios();setShowUF(false);setEditUser(null);
     }catch(e){showToast("Error: "+e.message,"error");}
   };
@@ -1455,7 +1518,7 @@ function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,sess
   );
 }
 function UserForm({user,onSave,onClose}){
-  const [f,setF]=useState({nombre:"",email:"",rol:"Residente",active:true,isNew:true,...(user||{})});
+  const [f,setF]=useState(user ? {...user, isNew:false} : {nombre:"",email:"",rol:"Residente",active:true,isNew:true});
   const [rol,setRol]=useState((user&&user.rol)||"Residente");
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>

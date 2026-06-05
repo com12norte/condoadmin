@@ -82,8 +82,8 @@ const INV_CATS   = ["Herramientas","Electrico","Plomeria","Pintura","Limpieza","
 const INV_UNITS  = ["unidad","caja","kg","litro","metro","rollo","par","juego"];
 const RESP_LIST_DEFAULT  = ["Carlos Munoz","Ana Garcia","Pedro Soto","Maria Lopez","Jose Fernandez","Sin asignar"];
 const RESP_ASSIGNABLE_DEFAULT = RESP_LIST_DEFAULT.filter(r=>r!=="Sin asignar");
-const getRespList  = (resps) => resps&&resps.length ? [...resps.filter(r=>r.active).map(r=>r.name),"Sin asignar"] : RESP_LIST_DEFAULT;
-const getRespAssignable = (resps) => resps&&resps.length ? resps.filter(r=>r.active).map(r=>r.name) : RESP_ASSIGNABLE_DEFAULT;
+const getRespList  = (usuarios) => usuarios&&usuarios.length ? [...usuarios.filter(u=>u.active&&u.rol!=="Residente"&&u.rol!=="Proveedor").map(u=>u.nombre),"Sin asignar"] : [...RESP_LIST_DEFAULT];
+const getRespAssignable = (usuarios) => usuarios&&usuarios.length ? usuarios.filter(u=>u.active&&u.rol!=="Residente"&&u.rol!=="Proveedor").map(u=>u.nombre) : RESP_ASSIGNABLE_DEFAULT;
 const SECTOR_LIST= ["Torre A","Torre B","Torre C","Zona norte","Zona sur","Estacionamientos","Perimetro exterior","Jardines","Techumbres"];
 const URGENCY_LEVELS = ["Baja","Media","Alta","Critica"];
 const URGENCY_COLOR  = {Baja:"#6b7280",Media:"#f59e0b",Alta:"#f97316",Critica:"#ef4444"};
@@ -312,6 +312,7 @@ export default function App() {
   const [showNew,setShowNew]=useState(false);
   const [toast,setToast]=useState(null);
   const [navOpen,setNavOpen]=useState(false);
+  const [usuarios,setUsuarios]=useState([]);
 
   const er = session ? (viewAs||session.rol) : "Residente";
   const showToast = (msg,type) => { setToast({msg,type:type||"success"}); setTimeout(()=>setToast(null),3200); };
@@ -327,7 +328,7 @@ export default function App() {
     if (!session) return;
     (async()=>{
       try {
-        const [rR,rT,rI,rM,rIn,rE,rD,rCfg]=await Promise.all([
+        const [rR,rT,rI,rM,rIn,rE,rD,rCfg,rU]=await Promise.all([
           dbGet("solicitudes","?order=created_at.desc"),
           dbGet("tareas","?order=id.asc"),
           dbGet("inventario","?order=id.asc"),
@@ -336,6 +337,7 @@ export default function App() {
           dbGet("correos","?order=id.asc"),
           dbGet("despachos","?order=id.asc"),
           dbGet("config","?select=*"),
+          fetch(`${SUPA_URL}/rest/v1/usuarios?active=eq.true&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}}).then(r=>r.json()),
         ]);
         if(rR)  setReqs(rR.map(r=>normalizeReq(r.data)).filter(Boolean));
         if(rT)  setTasks(rT.map(r=>normalizeTask(r.data)).filter(Boolean));
@@ -344,6 +346,7 @@ export default function App() {
         if(rIn) setInsp(rIn.map(r=>normalizeInsp(r.data)).filter(Boolean));
         if(rE)  setEmails(rE.map(r=>r.data).filter(Boolean));
         if(rD)  setDispatch(rD.map(r=>r.data).filter(Boolean));
+        if(rU)  setUsuarios(Array.isArray(rU)?rU:[]);
         if(rCfg&&rCfg.length>0) rCfg.forEach(c=>{
           if(!c||!c.data) return;
           if(c.key==="cats")   setCats(c.data);
@@ -536,15 +539,15 @@ export default function App() {
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
             {view==="dashboard"   &&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} session={session}/>}
             {view==="requests"    &&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} resps={resps} session={session}/>}
-            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} resps={resps}/>}
-            {view==="tasks"       &&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob} resps={resps}/>}
+            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} resps={usuarios}/>}
+            {view==="tasks"       &&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob} resps={usuarios}/>}
             {view==="provider"    &&<ProviderDash orders={orders} setOrders={setOrders} role={er} showToast={showToast} mob={mob} reqs={reqs} session={session}/>}
             {view==="inspections" &&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} role={er} mob={mob} towers={towers}/>}
-            {view==="inventory"   &&<InvView inventory={inventory} setInv={setInvDB} dispatch={dispatch} setDispatch={setDispatchDB} reqs={reqs} role={er} showToast={showToast} mob={mob} resps={resps}/>}
-            {view==="mantencion"  &&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob} resps={resps}/>}
+            {view==="inventory"   &&<InvView inventory={inventory} setInv={setInvDB} dispatch={dispatch} setDispatch={setDispatchDB} reqs={reqs} role={er} showToast={showToast} mob={mob} resps={usuarios}/>}
+            {view==="mantencion"  &&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob} resps={usuarios}/>}
             {view==="emails"      &&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
-            {view==="reports"     &&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob} resps={resps}/>}
-            {view==="config"      &&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} resps={resps} setResps={setRespsDB} showToast={showToast} session={session}/>}
+            {view==="reports"     &&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob} resps={usuarios}/>}
+            {view==="config"      &&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
           </div>
         </div>
       </div>

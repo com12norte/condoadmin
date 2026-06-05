@@ -347,8 +347,8 @@ export default function App() {
   },[session]);
 
   const persistReq  = async(item)=>{
-    try { await dbPost("solicitudes",{id:item.id,code:item.code,created_at:item.createdAt,data:item}); }
-    catch { try { await dbPatch("solicitudes",item.id,{data:item}); } catch(e){ console.error("persistReq",e); } }
+    try { await dbUpsert("solicitudes",{id:item.id,code:item.code,created_at:item.createdAt,data:item}); }
+    catch(e){ console.error("persistReq",e); }
   };
   const persistTask = async(item)=>{
     try { await dbPost("tareas",{id:item.id,request_id:item.requestId,data:item}); }
@@ -419,16 +419,24 @@ export default function App() {
   const sendRealEmail = async (to, subject, body) => {
     if (!to || !to.includes("@")) return;
     try {
-      await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           service_id:  EMAILJS_SERVICE_ID,
           template_id: EMAILJS_TEMPLATE_ID,
           user_id:     EMAILJS_PUBLIC_KEY,
-          template_params: { to_email: to, subject, message: body, from_name: "CondoAdmin" },
+          template_params: {
+            to_email: to,
+            subject:  subject,
+            message:  body,
+            name:     "CondoAdmin",
+            email:    "no-reply@condoadmin.cl",
+          },
         }),
       });
+      if (!res.ok) { const t=await res.text(); console.error("EmailJS error:",res.status,t); }
+      else console.log("Email enviado OK a",to);
     } catch(e) { console.error("Error enviando email:", e); }
   };
 
@@ -532,7 +540,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente")setView("requests");}} onOpen={openReq} cats={cats} towers={towers} resps={resps}/>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente")setView("requests");}} onOpen={openReq} cats={cats} towers={towers} resps={resps} session={session}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
     </div>
   );
@@ -639,7 +647,10 @@ function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers,resps})
             <td style={tdSt}><SBadge s={r.status}/></td>
             <td style={tdSt}>{r.assignedTo}</td>
             <td style={tdSt}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
-            <td style={tdSt} onClick={e=>e.stopPropagation()}>{can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&<select style={{...selSt,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={e=>quickSt(r,e.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>}</td>
+            <td style={tdSt} onClick={e=>e.stopPropagation()}>
+              {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&<select style={{...selSt,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={e=>quickSt(r,e.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>}
+              {can(role,"manageConfig")&&<button style={{...mkBtn("danger",true),marginLeft:4}} onClick={()=>{if(window.confirm("¿Eliminar solicitud "+r.code+"?"))setReqs(p=>p.filter(x=>x.id!==r.id));}}>🗑</button>}
+            </td>
           </tr>
         ))}</tbody></table></div>
       )}
@@ -851,19 +862,31 @@ function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
     </div>{showEv&&<EvidModal type="cierre" requestId={req.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)}/>}</div>
   );
 }
-function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,resps}){
+function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,resps,session}){
   const actCats=cats.filter(c=>c.active);
   const actTowers=towers.filter(t=>t.active);
   const initCat=actCats[0]||{name:"",subs:[""]};
   const initTower=actTowers[0]||{name:""};
-  const [f,setF]=useState({requesterName:"",requesterEmail:"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,preferredTimeSlot:"Manana",confirm:false});
+  const isAdminRole=role==="Administrador"||role==="Administrador Edificio";
+  const [tipoReporte,setTipoReporte]=useState(isAdminRole?"Administrativo":"Incidencia");
+  const [f,setF]=useState({
+    requesterName:session?.nombre||"",
+    requesterEmail:session?.email||"",
+    requesterPhone:session?.phone||"",
+    tower:initTower.name,unit:"",
+    category:initCat.name,subcategory:initCat.subs[0]||"",
+    description:"",priority:"Media",
+    accessPermission:false,preferredTimeSlot:"Manana",confirm:false
+  });
   const [errs,setErrs]=useState({});const [prevs,setPrevs]=useState([]);const [done,setDone]=useState(null);const fileRef=useRef();
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const validate=()=>{
     const e={};
-    if(!f.requesterName)e.requesterName="Requerido";
-    if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail))e.requesterEmail="Email invalido";
-    if(!f.unit)e.unit="Requerido";
+    if(tipoReporte==="Incidencia"){
+      if(!f.requesterName)e.requesterName="Requerido";
+      if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail))e.requesterEmail="Email invalido";
+      if(!f.unit)e.unit="Requerido";
+    }
     if(!f.description||f.description.length<10)e.description="Min. 10 caracteres";
     if(!f.confirm)e.confirm="Debe confirmar";
     setErrs(e);return !Object.keys(e).length;
@@ -879,7 +902,12 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     setReqs(p=>[nr,...p]);
     addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud de "+f.category+" fue registrada. Codigo: "+code+"."});
     const notif=(resps||[]).filter(rr=>rr.active&&rr.email&&(rr.modules||[]).includes("Solicitudes"));
-    notif.forEach(rr=>{addEmail({requestId:code,date:now,to:rr.email,subject:"Aviso solicitud "+code,type:"Aviso responsable",status:"Enviado",body:"Nueva solicitud "+code+" de "+f.requesterName+". Prioridad: "+f.priority+"."});});
+    notif.forEach(rr=>{addEmail({
+      requestId:code,date:now,to:rr.email,
+      subject:"[CondoAdmin] Nueva solicitud "+code+" - "+f.category,
+      type:"Aviso responsable",status:"Enviado",
+      body:`Nueva solicitud recibida:\n\nCódigo: ${code}\nSolicitante: ${f.requesterName}\nTorre: ${f.tower} / Unidad: ${f.unit}\nCategoría: ${f.category} - ${f.subcategory}\nPrioridad: ${f.priority}\nDescripción: ${f.description}\n\nIngresa a CondoAdmin para gestionar esta solicitud.`
+    });});
     setDone(nr);showToast("Solicitud "+code+" creada");
   };
   const curCat=actCats.find(c=>c.name===f.category);
@@ -890,16 +918,47 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
         <h3 style={{margin:0,fontSize:15}}>Nueva solicitud</h3>
         <button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>
       </div>
+
+      {/* Selector tipo reporte - solo admins */}
+      {isAdminRole&&(
+        <div style={{display:"flex",gap:10,marginBottom:16}}>
+          {["Administrativo","Incidencia"].map(t=>(
+            <button key={t} onClick={()=>setTipoReporte(t)} style={{flex:1,padding:"12px",borderRadius:10,border:"2px solid "+(tipoReporte===t?(t==="Administrativo"?"#6366f1":"#ef4444"):"#e2e8f0"),background:tipoReporte===t?(t==="Administrativo"?"#eef2ff":"#fef2f2"):"#f9fafb",color:tipoReporte===t?(t==="Administrativo"?"#6366f1":"#ef4444"):"#6b7280",fontWeight:tipoReporte===t?700:400,cursor:"pointer",fontSize:14}}>
+              {t==="Administrativo"?"📋 Administrativo":"🚨 Incidencia"}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Telefono","text"]].map(([k,l,t])=><div key={k} style={fg}><label style={lbl}>{l}</label><input type={t} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={e=>set(k,e.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10,marginTop:2}}>{errs[k]}</div>}</div>)}
-        <div style={fg}><label style={lbl}>Torre</label><select style={selSt} value={f.tower} onChange={e=>set("tower",e.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Unidad *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={e=>set("unit",e.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
-        <div style={fg}><label style={lbl}>Categoria</label><select style={selSt} value={f.category} onChange={e=>{const c=actCats.find(x=>x.name===e.target.value);set("category",e.target.value);set("subcategory",c&&c.subs.length?c.subs[0]:"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Subcategoria</label><select style={selSt} value={f.subcategory} onChange={e=>set("subcategory",e.target.value)}>{(curCat?curCat.subs:[]).map(s=><option key={s}>{s}</option>)}</select></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripcion *</label><textarea style={{...inp,height:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={e=>set("description",e.target.value)} placeholder="Describa el problema..."/>{errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}</div>
-        <div style={fg}><label style={lbl}>Prioridad</label><select style={{...selSt,color:PRIORITY_COLOR[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Franja horaria</label><select style={selSt} value={f.preferredTimeSlot} onChange={e=>set("preferredTimeSlot",e.target.value)}>{["Manana (9-13h)","Tarde (14-18h)","Cualquier hora","Inmediato"].map(s=><option key={s}>{s}</option>)}</select></div>
+
+        {/* Datos solicitante - solo en Incidencia */}
+        {tipoReporte==="Incidencia"&&<>
+          {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Telefono","text"]].map(([k,l,t])=><div key={k} style={fg}><label style={lbl}>{l}</label><input type={t} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={e=>set(k,e.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10,marginTop:2}}>{errs[k]}</div>}</div>)}
+          <div style={fg}><label style={lbl}>Torre</label><select style={selSt} value={f.tower} onChange={e=>set("tower",e.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+          <div style={fg}><label style={lbl}>Unidad *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={e=>set("unit",e.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
+          <div style={fg}><label style={lbl}>Categoria</label><select style={selSt} value={f.category} onChange={e=>{const c=actCats.find(x=>x.name===e.target.value);set("category",e.target.value);set("subcategory",c&&c.subs.length?c.subs[0]:"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
+          <div style={fg}><label style={lbl}>Subcategoria</label><select style={selSt} value={f.subcategory} onChange={e=>set("subcategory",e.target.value)}>{(curCat?curCat.subs:[]).map(s=><option key={s}>{s}</option>)}</select></div>
+        </>}
+
+        {/* Descripcion siempre visible */}
         <div style={{...fg,gridColumn:"1/-1"}}>
+          <label style={lbl}>{tipoReporte==="Administrativo"?"Descripcion / Nota *":"Descripcion *"}</label>
+          <textarea style={{...inp,height:tipoReporte==="Administrativo"?140:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={e=>set("description",e.target.value)} placeholder={tipoReporte==="Administrativo"?"Ingrese el detalle administrativo...":"Describa el problema..."}/>
+          {errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}
+        </div>
+
+        {/* Prioridad y franja - solo Incidencia o admin */}
+        {tipoReporte==="Incidencia"&&<>
+          <div style={fg}><label style={lbl}>Prioridad</label><select style={{...selSt,color:PRIORITY_COLOR[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+          <div style={fg}><label style={lbl}>Franja horaria</label><select style={selSt} value={f.preferredTimeSlot} onChange={e=>set("preferredTimeSlot",e.target.value)}>{["Manana (9-13h)","Tarde (14-18h)","Cualquier hora","Inmediato"].map(s=><option key={s}>{s}</option>)}</select></div>
+        </>}
+        {isAdminRole&&tipoReporte==="Administrativo"&&<>
+          <div style={fg}><label style={lbl}>Prioridad</label><select style={{...selSt,color:PRIORITY_COLOR[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+        </>}
+
+        {/* Imágenes - solo Incidencia */}
+        {tipoReporte==="Incidencia"&&<div style={{...fg,gridColumn:"1/-1"}}>
           <label style={lbl}>Imagenes (opcional)</label>
           <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
           <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}>
@@ -907,12 +966,13 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
             <div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div>
           </div>
           {prevs.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prevs.map((p,i)=><div key={i} style={{position:"relative"}}><img src={p.url} alt={p.name} style={{...thumb,width:72,height:56}}/><button onClick={()=>setPrevs(pr=>pr.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>)}</div>}
-        </div>
-        <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={e=>set("accessPermission",e.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
+        </div>}
+
+        {tipoReporte==="Incidencia"&&<div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={e=>set("accessPermission",e.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>}
         <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="conf" checked={f.confirm} onChange={e=>set("confirm",e.target.checked)}/><label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la informacion es correcta *</label>{errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}</div>
       </div>
-      {f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA - Se notificara de inmediato.</strong></div>}
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={submit}>Enviar solicitud</button></div>
+      {tipoReporte==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA - Se notificara de inmediato.</strong></div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn(tipoReporte==="Administrativo"?"purple":"primary",true)} onClick={submit}>Enviar {tipoReporte==="Administrativo"?"nota":"solicitud"}</button></div>
     </div></div>
   );
 }
@@ -1364,7 +1424,11 @@ function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,sess
     }catch(e){showToast("Error: "+e.message,"error");}
   };
   const toggleUser=async(u)=>{
-    try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({active:!u.active})});loadUsuarios();}catch(e){showToast("Error","error");}
+    try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({active:!u.active})});loadUsuarios();showToast(u.active?"Desactivado":"Activado");}catch(e){showToast("Error","error");}
+  };
+  const deleteUser=async(u)=>{
+    if(!window.confirm(`¿Eliminar usuario ${u.nombre}?`))return;
+    try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"DELETE",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`}});loadUsuarios();showToast("Usuario eliminado");}catch(e){showToast("Error al eliminar","error");}
   };
   const toggleCat=id=>setCats(p=>p.map(c=>c.id===id?{...c,active:!c.active}:c));
   const saveCat=cat=>{if(editCat){setCats(p=>p.map(c=>c.id===cat.id?cat:c));}else{setCats(p=>[...p,{...cat,id:"cat"+uid(),order:p.length}]);}showToast("Guardada");setShowCF(false);setEditCat(null);};
@@ -1384,7 +1448,7 @@ function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,sess
       {tab==="usuarios"&&<div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuarios.filter(u=>u.active).length} activos</div><button style={mkBtn("primary",true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
         {showUF&&<UserForm user={editUser} onSave={saveUsuario} onClose={()=>{setShowUF(false);setEditUser(null);}}/>}
-        <div>{usuarios.map(u=><div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{u.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={mkBtn(u.active?"warning":"success",true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button></div></div></div>)}</div>
+        <div>{usuarios.map(u=><div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{u.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={mkBtn(u.active?"warning":"success",true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>deleteUser(u)}>Eliminar</button></div></div></div>)}</div>
       </div>}
       {tab==="sla"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>{Object.entries(sla).map(([p,t])=><div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>)}</div>}
     </div>
@@ -1392,15 +1456,16 @@ function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,sess
 }
 function UserForm({user,onSave,onClose}){
   const [f,setF]=useState({nombre:"",email:"",rol:"Residente",active:true,isNew:true,...(user||{})});
+  const [rol,setRol]=useState((user&&user.rol)||"Residente");
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre *</label><input style={inp} value={f.nombre} onChange={e=>setF(p=>({...p,nombre:e.target.value}))}/></div>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>setF(p=>({...p,email:e.target.value}))} disabled={!!user}/></div>
-      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Rol</label><select style={selSt} value={f.rol} onChange={e=>setF(p=>({...p,rol:e.target.value}))}>{ROLES.map(r=><option key={r}>{r}</option>)}</select></div>
+      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Rol</label><select style={selSt} value={rol} onChange={e=>{setRol(e.target.value);setF(p=>({...p,rol:e.target.value}));}}>{ROLES.map(r=><option key={r} value={r}>{r}</option>)}</select></div>
     </div>
     {!user&&<div style={{...alrt("info"),marginTop:8,fontSize:12}}>Recuerde crear el usuario en Supabase Authentication con el mismo correo.</div>}
-    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave(f);}}>Guardar</button></div>
+    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave({...f,rol});}}>Guardar</button></div>
   </div></div>);
 }
 function CatForm({cat,onSave,onClose}){

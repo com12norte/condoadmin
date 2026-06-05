@@ -414,7 +414,7 @@ export default function App() {
 
   const EMAILJS_SERVICE_ID  = "service_vxhdrlx";
   const EMAILJS_TEMPLATE_ID = "template_90tjafk";
-  const EMAILJS_PUBLIC_KEY  = "wKxD2rJHuftU7W";
+  const EMAILJS_PUBLIC_KEY  = "wKxD2rJHuftU7W-WE";
 
   const sendRealEmail = async (to, subject, body) => {
     if (!to || !to.includes("@")) return;

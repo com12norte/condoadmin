@@ -60,7 +60,23 @@ const normalizeOrder = (o) => ({
   ...(o||{}),
 });
 
-const ROLES      = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
+const EQUIP_TIPOS = [
+  {id:"e1", nombre:"Extintores", icono:"🧯", frecuencia:"Anual"},
+  {id:"e2", nombre:"Red húmeda/seca", icono:"🚒", frecuencia:"Anual"},
+  {id:"e3", nombre:"Tableros eléctricos", icono:"⚡", frecuencia:"Anual"},
+  {id:"e4", nombre:"Ascensores", icono:"🛗", frecuencia:"Semestral"},
+  {id:"e5", nombre:"Calderas/Calefactores", icono:"🔥", frecuencia:"Anual"},
+  {id:"e6", nombre:"Estanques de agua", icono:"💧", frecuencia:"Semestral"},
+  {id:"e7", nombre:"Cámaras CCTV", icono:"🎥", frecuencia:"Anual"},
+  {id:"e8", nombre:"Puertas cortafuego", icono:"🚪", frecuencia:"Anual"},
+  {id:"e9", nombre:"Piscina", icono:"🏊", frecuencia:"Mensual"},
+  {id:"e10", nombre:"Ventilación/Extracción", icono:"🌬️", frecuencia:"Semestral"},
+  {id:"e11", nombre:"Generador", icono:"⚙️", frecuencia:"Anual"},
+  {id:"e12", nombre:"Bomba de agua", icono:"🔧", frecuencia:"Anual"},
+  {id:"e13", nombre:"Motor portón", icono:"🚗", frecuencia:"Anual"},
+  {id:"e14", nombre:"Citófonos", icono:"📞", frecuencia:"Anual"},
+  {id:"e15", nombre:"Alarmas", icono:"🔔", frecuencia:"Anual"},
+];
 const ADMIN_CATS = {
   "Gestión":["Circular informativa","Acta de reunión","Carta a residente","Aviso general","Otro"],
   "Finanzas":["Pago de gastos comunes","Deuda morosa","Cotización","Factura proveedor","Fondo de reserva","Otro"],
@@ -89,7 +105,7 @@ const URGENCY_LEVELS = ["Baja","Media","Alta","Critica"];
 const URGENCY_COLOR  = {Baja:"#6b7280",Media:"#f59e0b",Alta:"#f97316",Critica:"#ef4444"};
 const ITEM_STATES= ["Bueno","Regular","Malo","No aplica"];
 const ITEM_COLOR = {Bueno:"#10b981",Regular:"#f59e0b",Malo:"#ef4444","No aplica":"#94a3b8","":"#d1d5db"};
-const ALL_MODS   = ["Solicitudes","Tareas","Novedades","Inventario","Correos","Reportes","Mantencion","Config"];
+const ALL_MODS   = ["Solicitudes","Órdenes de Trabajo","Novedades","Inventario","Correos","Reportes","Mantencion","Config"];
 const MANT_CATS  = ["Equipos/Maquinaria","Infraestructura","Sistemas"];
 const MANT_SUBCATS = {
   "Equipos/Maquinaria":["Ascensor","Motor porton","Bomba agua","Bomba calor","Generador","Otro"],
@@ -254,22 +270,11 @@ function LoginScreen({onLogin}) {
   );
 
   // ── LOGIN RESIDENTE ─────────────────────────────────────────────────────────
-  if (mode==="residente") return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
-      <div style={{width:"100%",maxWidth:380}}>
-        <button onClick={()=>setMode(null)} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24,display:"flex",alignItems:"center",gap:6}}>← Volver</button>
-        <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{fontSize:48,marginBottom:12}}>🏠</div>
-          <div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Acceso Residentes</div>
-          <div style={{color:"#bfdbfe",fontSize:13,marginTop:4}}>Ingresa directo para crear tu solicitud</div>
-        </div>
-        <button onClick={enterResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,.15)"}}>
-          Ingresar como Residente →
-        </button>
-        <div style={{color:"#bfdbfe",fontSize:11,textAlign:"center",marginTop:16}}>No necesitas contraseña</div>
-      </div>
-    </div>
-  );
+  if (mode==="residente") {
+    // Entra directo sin mostrar pantalla intermedia
+    enterResidente();
+    return null;
+  }
 
   // ── LOGIN PERSONAL ──────────────────────────────────────────────────────────
   return (
@@ -308,6 +313,8 @@ export default function App() {
   const [cats,setCats]=useState(Object.entries(DEF_CATS).map(([name,subs],i)=>({id:"cat"+i,name,subs,active:true,order:i})));
   const [towers,setTowers]=useState([{id:"t1",name:"A",label:"Torre A",active:true},{id:"t2",name:"B",label:"Torre B",active:true},{id:"t3",name:"C",label:"Torre C",active:true},{id:"t4",name:"D",label:"Torre D",active:true},{id:"t5",name:"Comun",label:"Area Comun",active:true}]);
   const [resps,setResps]=useState([{id:"r1",name:"Carlos Munoz",email:"carlos@condo.cl",phone:"56912341111",modules:["Solicitudes","Tareas","Novedades"],active:true},{id:"r2",name:"Ana Garcia",email:"ana@condo.cl",phone:"56912342222",modules:["Solicitudes","Tareas"],active:true},{id:"r3",name:"Pedro Soto",email:"pedro@condo.cl",phone:"56912343333",modules:["Tareas","Novedades"],active:true}]);
+  const [equipos,setEquipos]=useState(EQUIP_TIPOS.map(e=>({...e,active:false})));
+  const [certs,setCerts]=useState([]);
   const [selReq,setSelReq]=useState(null);
   const [showNew,setShowNew]=useState(false);
   const [toast,setToast]=useState(null);
@@ -413,6 +420,8 @@ export default function App() {
   });
   const setCatsDB   = updater => setCats(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("cats",next);return next;});
   const setTowersDB = updater => setTowers(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("towers",next);return next;});
+  const setEquiposDB= updater => setEquipos(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("equipos",next);return next;});
+  const setCertsDB  = updater => setCerts(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("certs",next);return next;});
   const setRespsDB  = updater => setResps(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("resps",next);return next;});
 
   const sendWhatsApp = async (phone, apikey, message) => {
@@ -464,7 +473,7 @@ export default function App() {
   const navItems=[
     {id:"dashboard",   label:"Dashboard"},
     {id:"requests",    label:"Solicitudes"},
-    {id:"tasks",       label:"Tareas"},
+    {id:"tasks",       label:"Órdenes de Trabajo"},
     {id:"provider",    label:"Mis Trabajos"},
     {id:"inspections", label:"Novedades"},
     {id:"inventory",   label:"Inventario"},
@@ -544,14 +553,14 @@ export default function App() {
             {view==="provider"    &&<ProviderDash orders={orders} setOrders={setOrders} role={er} showToast={showToast} mob={mob} reqs={reqs} session={session}/>}
             {view==="inspections" &&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} role={er} mob={mob} towers={towers}/>}
             {view==="inventory"   &&<InvView inventory={inventory} setInv={setInvDB} dispatch={dispatch} setDispatch={setDispatchDB} reqs={reqs} role={er} showToast={showToast} mob={mob} resps={usuarios}/>}
-            {view==="mantencion"  &&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob} resps={usuarios}/>}
+            {view==="mantencion"  &&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob} resps={usuarios} towers={towers} equipos={equipos} certs={certs} setCerts={setCertsDB}/>}
             {view==="emails"      &&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
             {view==="reports"     &&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob} resps={usuarios}/>}
-            {view==="config"      &&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
+            {view==="config"      &&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} equipos={equipos} setEquipos={setEquiposDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente")setView("requests");}} onOpen={openReq} cats={cats} towers={towers} resps={resps} session={session}/>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente"){handleLogout();}else{setView("requests");}}} onOpen={openReq} cats={cats} towers={towers} resps={resps} session={session}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
     </div>
   );
@@ -786,10 +795,35 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
   );
 }
 
+function TaskForm({requestId,setTasks,showToast,onClose,resps}){
+  const RESP_ASSIGNABLE=getRespAssignable(resps);
+  const [f,setF]=useState({title:"",desc:"",responsible:RESP_ASSIGNABLE[0]||"",ejecutor:"",dueDate:"",priority:"Media"});
+  const submit=()=>{
+    if(!f.title){showToast("Ingrese titulo","error");return;}
+    setTasks(p=>[...p,{id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f}]);
+    showToast("Orden de trabajo creada");onClose();
+  };
+  return(
+    <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Nueva Orden de Trabajo</div><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo a realizar *</label><input style={inp} placeholder="Describe el trabajo específico..." value={f.title} onChange={e=>setF(p=>({...p,title:e.target.value}))}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción detallada</label><textarea style={{...inp,height:70,resize:"vertical"}} value={f.desc} onChange={e=>setF(p=>({...p,desc:e.target.value}))}/></div>
+        <div style={fg}><label style={lbl}>Responsable (supervisa)</label><select style={selSt} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>{RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Ejecutor (hace el trabajo)</label><input style={inp} placeholder="ej: Juan Técnico, Empresa X..." value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}/></div>
+        <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={e=>setF(p=>({...p,dueDate:e.target.value}))}/></div>
+        <div style={fg}><label style={lbl}>Prioridad</label><select style={selSt} value={f.priority} onChange={e=>setF(p=>({...p,priority:e.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+      </div>
+      <button style={mkBtn("primary",true)} onClick={submit}>Crear Orden de Trabajo</button>
+    </div>
+  );
+}
+
 function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
   const [exp,setExp]=useState(false);
   const [cmt,setCmt]=useState("");
   const [showEv,setShowEv]=useState(false);
+  const [showInforme,setShowInforme]=useState(false);
   const safeComments=task.comments||[];
   const safeMaterials=task.materials||[];
   const safeAtts=task.attachments||[];
@@ -797,49 +831,105 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
   const addC=()=>{if(!cmt.trim())return;upd({comments:[...safeComments,{user:role,date:new Date().toISOString(),text:cmt}]});setCmt("");};
   const resolve=()=>{
     if(!safeAtts.some(a=>a.type==="cierre")){showToast("Cargue imagen de cierre","error");return;}
-    upd({status:"Completada"});showToast("Tarea completada");
+    upd({status:"Completada"});showToast("Orden completada");
   };
   return(
     <div style={{...card,marginBottom:10,borderLeft:"4px solid "+(PRIORITY_COLOR[task.priority]||"#e2e8f0")}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",cursor:"pointer",gap:8}} onClick={()=>setExp(p=>!p)}>
-        <div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>{task.responsible} - {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div></div>
+        <div style={{minWidth:0}}>
+          <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
+            👤 {task.responsible} {task.ejecutor&&<span> · 🔧 {task.ejecutor}</span>} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}
+          </div>
+          {task.informe&&<div style={{fontSize:11,color:"#10b981",marginTop:2}}>✓ Informe registrado</div>}
+        </div>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/><span style={{color:"#94a3b8",fontSize:12}}>{exp?"▲":"▼"}</span></div>
       </div>
       {exp&&<div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:10}}>
-        <p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>
+        {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
         {safeComments.map((c,i)=><div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}><strong>{c.user}</strong> - <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}</div>)}
+
+        {/* Informe del ejecutor */}
+        {task.informe&&<div style={{...alrt("success"),marginBottom:10}}>
+          <div style={{fontWeight:600,marginBottom:4}}>📋 Informe del ejecutor</div>
+          <div style={{fontSize:12,whiteSpace:"pre-wrap"}}>{task.informe}</div>
+          {task.tiempoUsado&&<div style={{fontSize:11,marginTop:4,color:"#16a34a"}}>⏱ Tiempo: {task.tiempoUsado}</div>}
+        </div>}
+
         <MatPanel materials={safeMaterials} setMaterials={ms=>upd({materials:ms})} readOnly={!can(role,"changeStatus")&&!can(role,"resolveTask")}/>
         <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
           <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addC()}/>
           <button style={mkBtn("secondary",true)} onClick={addC}>Enviar</button>
-          <button style={mkBtn("secondary",true)} onClick={()=>setShowEv(true)}>Foto</button>
-          {task.status!=="Completada"&&(can(role,"resolveTask")||can(role,"changeStatus"))&&<button style={mkBtn("success",true)} onClick={resolve}>Completar</button>}
+          <button style={mkBtn("secondary",true)} onClick={()=>setShowEv(true)}>📷 Foto</button>
+          <button style={mkBtn("purple",true)} onClick={()=>setShowInforme(true)}>📋 Informe</button>
+          {task.status!=="Completada"&&(can(role,"resolveTask")||can(role,"changeStatus"))&&<button style={mkBtn("success",true)} onClick={resolve}>✓ Completar</button>}
         </div>
       </div>}
       {showEv&&<EvidModal type="cierre" requestId={task.requestId} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)} taskId={task.id} setTasks={setTasks}/>}
+      {showInforme&&<InformeModal task={task} onSave={inf=>{ upd({informe:inf.texto,tiempoUsado:inf.tiempo}); showToast("Informe guardado"); setShowInforme(false); }} onClose={()=>setShowInforme(false)}/>}
     </div>
   );
 }
-function TaskForm({requestId,setTasks,showToast,onClose,resps}){
-  const RESP_ASSIGNABLE=getRespAssignable(resps);
-  const [f,setF]=useState({title:"",desc:"",responsible:RESP_ASSIGNABLE[0]||"",dueDate:"",priority:"Media"});
-  const submit=()=>{
-    if(!f.title){showToast("Ingrese titulo","error");return;}
-    setTasks(p=>[...p,{id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",...f}]);
-    showToast("Tarea creada");onClose();
+
+function InformeModal({task,onSave,onClose}){
+  const [texto,setTexto]=useState(task.informe||"");
+  const [tiempo,setTiempo]=useState(task.tiempoUsado||"");
+  const [escuchando,setEscuchando]=useState(false);
+  const recognRef=useRef(null);
+
+  const iniciarVoz=()=>{
+    const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SpeechRecognition){alert("Tu navegador no soporta reconocimiento de voz. Usa Chrome.");return;}
+    const recog=new SpeechRecognition();
+    recog.lang="es-CL";
+    recog.continuous=true;
+    recog.interimResults=false;
+    recog.onresult=e=>{
+      const transcript=Array.from(e.results).map(r=>r[0].transcript).join(" ");
+      setTexto(p=>(p?p+" ":"")+transcript);
+    };
+    recog.onerror=()=>setEscuchando(false);
+    recog.onend=()=>setEscuchando(false);
+    recognRef.current=recog;
+    recog.start();
+    setEscuchando(true);
   };
+
+  const detenerVoz=()=>{
+    if(recognRef.current)recognRef.current.stop();
+    setEscuchando(false);
+  };
+
   return(
-    <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Nueva tarea</div><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Titulo *</label><input style={inp} value={f.title} onChange={e=>setF(p=>({...p,title:e.target.value}))}/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripcion</label><textarea style={{...inp,height:70,resize:"vertical"}} value={f.desc} onChange={e=>setF(p=>({...p,desc:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Responsable</label><select style={selSt} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>{RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.dueDate} onChange={e=>setF(p=>({...p,dueDate:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Prioridad</label><select style={selSt} value={f.priority} onChange={e=>setF(p=>({...p,priority:e.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+    <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}>
+        <h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3>
+        <button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>
       </div>
-      <button style={mkBtn("primary",true)} onClick={submit}>Crear tarea</button>
-    </div>
+      <div style={{...card,background:"#f8fafc",marginBottom:12}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:2}}>Orden de trabajo</div>
+        <div style={{fontWeight:600,fontSize:13}}>{task.title}</div>
+        {task.ejecutor&&<div style={{fontSize:11,color:"#6366f1",marginTop:2}}>🔧 Ejecutor: {task.ejecutor}</div>}
+      </div>
+      <div style={fg}>
+        <label style={lbl}>Descripción del trabajo realizado *</label>
+        <textarea style={{...inp,height:120,resize:"vertical"}} placeholder="Describe detalladamente lo que se realizó..." value={texto} onChange={e=>setTexto(e.target.value)}/>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button style={{...mkBtn(escuchando?"danger":"purple"),flex:1,justifyContent:"center"}} onClick={escuchando?detenerVoz:iniciarVoz}>
+          {escuchando?"⏹ Detener grabación":"🎤 Dictar por voz"}
+        </button>
+        {escuchando&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}><div style={{width:8,height:8,borderRadius:"50%",background:"#ef4444",animation:"spin .8s linear infinite"}}/> Escuchando...</div>}
+      </div>
+      <div style={fg}>
+        <label style={lbl}>Tiempo utilizado</label>
+        <input style={inp} placeholder="ej: 2 horas, 45 minutos..." value={tiempo} onChange={e=>setTiempo(e.target.value)}/>
+      </div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button>
+        <button style={mkBtn("success",true)} onClick={()=>{if(!texto.trim()){alert("Ingrese la descripción del trabajo");return;}onSave({texto,tiempo});}}>Guardar informe</button>
+      </div>
+    </div></div>
   );
 }
 function MatPanel({materials,setMaterials,readOnly}){
@@ -1371,9 +1461,12 @@ function Reports({reqs,tasks,inventory,mob,resps}){
   </div>);
 }
 
-function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps}){
+function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps,towers,equipos,certs,setCerts}){
   const [sub,setSub]=useState("list");const [sel,setSel]=useState(null);const [showForm,setShowForm]=useState(false);const [editItem,setEdit]=useState(null);const [fi,setFi]=useState({cat:"",status:"",q:""});
+  const [mantTab,setMantTab]=useState("mant");
+  const [showCertForm,setShowCertForm]=useState(false);const [editCert,setEditCert]=useState(null);
   const readOnly=!can(role,"mantencion");
+  const activeEquipos=(equipos||[]).filter(e=>e.active);
   const enriched=mant.map(m=>({...m,computedStatus:getMantStatus(m)}));
   const vencidas=enriched.filter(m=>m.computedStatus==="Vencida").length;
   const porVencer=enriched.filter(m=>m.computedStatus==="Por vencer").length;
@@ -1385,6 +1478,11 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps}){
     if(fi.q&&!((m.asset||"")+" "+(m.category||"")+" "+(m.provider||"")).toLowerCase().includes(fi.q.toLowerCase()))return false;
     return true;
   }).sort((a,b)=>{const ord={Vencida:0,"Por vencer":1,"En ejecucion":2,Vigente:3,Completada:4};return((ord[a.computedStatus]??9)-(ord[b.computedStatus]??9));});
+
+  // Alertas certificaciones
+  const certsVenc=(certs||[]).filter(c=>{if(!c.vencimiento)return false;const d=Math.ceil((new Date(c.vencimiento)-new Date())/86400000);return d<0;}).length;
+  const certsPorV=(certs||[]).filter(c=>{if(!c.vencimiento)return false;const d=Math.ceil((new Date(c.vencimiento)-new Date())/86400000);return d>=0&&d<=30;}).length;
+
   const saveMant=item=>{
     const ts=new Date().toISOString();
     if(editItem){setMant(p=>p.map(m=>m.id===item.id?item:m));showToast("Mantencion actualizada");}
@@ -1397,30 +1495,121 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps}){
     }
     setShowForm(false);setEdit(null);
   };
+
+  const saveCert=item=>{
+    if(editCert){setCerts(p=>p.map(c=>c.id===item.id?item:c));showToast("Actualizado");}
+    else{setCerts(p=>[{...item,id:"cert"+uid()},...p]);showToast("Certificación registrada");}
+    setShowCertForm(false);setEditCert(null);
+  };
+
   if(sub==="detail"&&sel){
     const item=normalizeMant(mant.find(m=>m.id===sel.id)||sel);
     return <MantDetail item={item} mant={mant} setMant={setMant} reqs={reqs} role={role} showToast={showToast} addEmail={addEmail} mob={mob} readOnly={readOnly} onBack={()=>setSub("list")} resps={resps}/>;
   }
+
+  const mantTabs=[{id:"mant",label:"Mantenciones"},{id:"certs",label:"Certificaciones"+(certsVenc+certsPorV>0?" ⚠":"")}];
+
   return(
     <div>
-      {vencidas>0&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><div><strong style={{color:"#dc2626"}}>{vencidas} mantencion(es) vencida(s)</strong></div></div>}
-      {porVencer>0&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><strong style={{color:"#92400e"}}>{porVencer} mantencion(es) vencen en los proximos 30 dias</strong></div>}
-      <Grid cols={4} mob={mob}><Kpi value={vencidas} label="Vencidas" color="#ef4444" mob={mob}/><Kpi value={porVencer} label="Por vencer" color="#f59e0b" mob={mob}/><Kpi value={enEjec} label="En ejecucion" color="#6366f1" mob={mob}/><Kpi value={vigentes} label="Vigentes" color="#10b981" mob={mob}/></Grid>
-      <div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar activo, proveedor..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/><select style={{...selSt,flex:1}} value={fi.cat} onChange={e=>setFi(p=>({...p,cat:e.target.value}))}><option value="">Todas las categorias</option>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select><select style={{...selSt,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos los estados</option>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>{!readOnly&&<button style={mkBtn("primary",true)} onClick={()=>{setEdit(null);setShowForm(true);}}>+ Nueva mantencion</button>}</div></div>
-      {visible.length===0?<Empty msg="Sin mantenciones registradas"/>:<div>{visible.map(m=>{
-        const daysLeft=m.nextDate?Math.ceil((new Date(m.nextDate)-new Date())/86400000):null;
-        const dayColor=daysLeft===null?"#374151":daysLeft<0?"#ef4444":daysLeft<=30?"#f59e0b":"#374151";
-        return(<div key={m.id} style={{...card,borderLeft:"4px solid "+(MANT_SC[m.computedStatus]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>{setSel(m);setSub("detail");}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
-            <div style={{flex:1,minWidth:0}}><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span style={{fontWeight:700,color:"#6366f1",fontSize:11}}>{m.code}</span><span style={bdg("#6b7280","#f1f5f9")}>{m.tipo}</span></div><div style={{fontWeight:700,fontSize:14,marginBottom:3}}>{m.asset}</div><div style={{fontSize:11,color:"#64748b"}}>{m.subcategory} - {m.location}</div></div>
-            <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end",flexShrink:0}}><MBadge m={m}/>{m.nextDate&&<div style={{fontSize:11,textAlign:"right",color:dayColor,fontWeight:600}}>{daysLeft!==null&&(daysLeft<0?Math.abs(daysLeft)+" dias vencida":daysLeft+" dias restantes")}</div>}</div>
+      {vencidas>0&&mantTab==="mant"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><div><strong style={{color:"#dc2626"}}>{vencidas} mantencion(es) vencida(s)</strong></div></div>}
+      {porVencer>0&&mantTab==="mant"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><strong style={{color:"#92400e"}}>{porVencer} mantencion(es) vencen pronto</strong></div>}
+      {certsVenc>0&&mantTab==="certs"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><strong style={{color:"#dc2626"}}>{certsVenc} certificación(es) vencida(s)</strong></div>}
+      {certsPorV>0&&mantTab==="certs"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><strong style={{color:"#92400e"}}>{certsPorV} certificación(es) vencen en 30 días</strong></div>}
+
+      <Tabs tabs={mantTabs} active={mantTab} onChange={setMantTab}/>
+
+      {mantTab==="mant"&&<div>
+        <Grid cols={4} mob={mob}><Kpi value={vencidas} label="Vencidas" color="#ef4444" mob={mob}/><Kpi value={porVencer} label="Por vencer" color="#f59e0b" mob={mob}/><Kpi value={enEjec} label="En ejecucion" color="#6366f1" mob={mob}/><Kpi value={vigentes} label="Vigentes" color="#10b981" mob={mob}/></Grid>
+        <div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar activo, proveedor..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/><select style={{...selSt,flex:1}} value={fi.cat} onChange={e=>setFi(p=>({...p,cat:e.target.value}))}><option value="">Todas las categorias</option>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select><select style={{...selSt,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos los estados</option>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>{!readOnly&&<button style={mkBtn("primary",true)} onClick={()=>{setEdit(null);setShowForm(true);}}>+ Nueva</button>}</div></div>
+        {visible.length===0?<Empty msg="Sin mantenciones registradas"/>:<div>{visible.map(m=>{
+          const daysLeft=m.nextDate?Math.ceil((new Date(m.nextDate)-new Date())/86400000):null;
+          const dayColor=daysLeft===null?"#374151":daysLeft<0?"#ef4444":daysLeft<=30?"#f59e0b":"#374151";
+          return(<div key={m.id} style={{...card,borderLeft:"4px solid "+(MANT_SC[m.computedStatus]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>{setSel(m);setSub("detail");}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+              <div style={{flex:1,minWidth:0}}><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span style={{fontWeight:700,color:"#6366f1",fontSize:11}}>{m.code}</span><span style={bdg("#6b7280","#f1f5f9")}>{m.tipo}</span></div><div style={{fontWeight:700,fontSize:14,marginBottom:3}}>{m.asset}</div><div style={{fontSize:11,color:"#64748b"}}>{m.subcategory} - {m.location}</div></div>
+              <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end",flexShrink:0}}><MBadge m={m}/>{m.nextDate&&<div style={{fontSize:11,textAlign:"right",color:dayColor,fontWeight:600}}>{daysLeft!==null&&(daysLeft<0?Math.abs(daysLeft)+" dias vencida":daysLeft+" dias restantes")}</div>}</div>
+            </div>
+            {!readOnly&&<div style={{display:"flex",gap:6,marginTop:10}} onClick={e=>e.stopPropagation()}><button style={mkBtn("secondary",true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button><button style={mkBtn("ghost",true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button></div>}
+          </div>);
+        })}</div>}
+        {showForm&&<MantForm item={editItem} reqs={reqs} onSave={saveMant} onClose={()=>{setShowForm(false);setEdit(null);}} resps={resps}/>}
+      </div>}
+
+      {mantTab==="certs"&&<div>
+        {activeEquipos.length===0
+          ?<div style={{...alrt("warning")}}>No hay equipos activos. Ve a Config → Equipos para activar los equipos de tu edificio.</div>
+          :<div>
+            <div style={{...card,padding:12,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:13,color:"#64748b"}}>{activeEquipos.length} equipos activos</div>
+              {!readOnly&&<button style={mkBtn("primary",true)} onClick={()=>{setEditCert(null);setShowCertForm(true);}}>+ Nueva certificación</button>}
+            </div>
+            {activeEquipos.map(eq=>{
+              const equipCerts=(certs||[]).filter(c=>c.equipoId===eq.id).sort((a,b)=>new Date(b.vencimiento)-new Date(a.vencimiento));
+              const lastCert=equipCerts[0];
+              const daysLeft=lastCert?.vencimiento?Math.ceil((new Date(lastCert.vencimiento)-new Date())/86400000):null;
+              const certColor=daysLeft===null?"#6b7280":daysLeft<0?"#ef4444":daysLeft<=7?"#ef4444":daysLeft<=30?"#f59e0b":"#10b981";
+              const certBg=daysLeft===null?"#f9fafb":daysLeft<0?"#fef2f2":daysLeft<=30?"#fffbeb":"#f0fdf4";
+              return(
+                <div key={eq.id} style={{...card,marginBottom:10,borderLeft:"4px solid "+certColor}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style={{fontSize:22}}>{eq.icono}</span>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:14}}>{eq.nombre}</div>
+                          <div style={{fontSize:11,color:"#64748b"}}>Frecuencia recomendada: {eq.frecuencia}</div>
+                        </div>
+                      </div>
+                      {lastCert?<div style={{background:certBg,borderRadius:8,padding:"8px 10px",marginTop:6}}>
+                        <div style={{fontSize:12,fontWeight:600,color:certColor}}>
+                          {daysLeft<0?`Vencida hace ${Math.abs(daysLeft)} días`:daysLeft===0?"Vence hoy":daysLeft<=30?`Vence en ${daysLeft} días`:`Vigente · ${daysLeft} días restantes`}
+                        </div>
+                        <div style={{fontSize:11,color:"#64748b",marginTop:2}}>Última: {fmtD(lastCert.fecha)} · Vence: {fmtD(lastCert.vencimiento)}</div>
+                        {lastCert.empresa&&<div style={{fontSize:11,color:"#64748b"}}>Empresa: {lastCert.empresa}</div>}
+                        {lastCert.ubicacion&&<div style={{fontSize:11,color:"#64748b"}}>Ubicación: {lastCert.ubicacion}</div>}
+                      </div>:<div style={{...alrt("warning"),margin:"6px 0 0"}}>Sin certificación registrada</div>}
+                    </div>
+                    {!readOnly&&<button style={mkBtn("secondary",true)} onClick={()=>{setEditCert({equipoId:eq.id,equipoNombre:eq.nombre});setShowCertForm(true);}}>+ Registrar</button>}
+                  </div>
+                  {equipCerts.length>1&&<details style={{marginTop:8}}><summary style={{fontSize:11,color:"#6366f1",cursor:"pointer"}}>Ver historial ({equipCerts.length})</summary><div style={{marginTop:6}}>{equipCerts.map(c=><div key={c.id} style={{fontSize:11,padding:"4px 0",borderBottom:"1px solid #f1f5f9",display:"flex",justifyContent:"space-between"}}><span>{fmtD(c.fecha)} → {fmtD(c.vencimiento)}</span><span style={{color:"#64748b"}}>{c.empresa}</span></div>)}</div></details>}
+                </div>
+              );
+            })}
+            {showCertForm&&<CertForm cert={editCert} equipos={activeEquipos} towers={towers} onSave={saveCert} onClose={()=>{setShowCertForm(false);setEditCert(null);}}/>}
           </div>
-          {!readOnly&&<div style={{display:"flex",gap:6,marginTop:10}} onClick={e=>e.stopPropagation()}><button style={mkBtn("secondary",true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button><button style={mkBtn("ghost",true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button></div>}
-        </div>);
-      })}</div>}
-      {showForm&&<MantForm item={editItem} reqs={reqs} onSave={saveMant} onClose={()=>{setShowForm(false);setEdit(null);}} resps={resps}/>}
+        }
+      </div>}
     </div>
   );
+}
+
+function CertForm({cert,equipos,towers,onSave,onClose}){
+  const actTowers=(towers||[]).filter(t=>t.active);
+  const [f,setF]=useState({
+    equipoId:cert?.equipoId||equipos[0]?.id||"",
+    equipoNombre:cert?.equipoNombre||equipos[0]?.nombre||"",
+    fecha:new Date().toISOString().slice(0,10),
+    vencimiento:"",
+    empresa:"",
+    torre:"",
+    ubicacion:"",
+    notas:"",
+    ...(cert||{})
+  });
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16,marginBottom:16}}>
+    <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>Registrar Certificación</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Equipo *</label><select style={selSt} value={f.equipoId} onChange={e=>{const eq=equipos.find(x=>x.id===e.target.value);set("equipoId",e.target.value);set("equipoNombre",eq?.nombre||"");}}>{equipos.map(e=><option key={e.id} value={e.id}>{e.icono} {e.nombre}</option>)}</select></div>
+      <div style={fg}><label style={lbl}>Torre</label><select style={selSt} value={f.torre} onChange={e=>set("torre",e.target.value)}><option value="">Sin torre específica</option>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+      <div style={fg}><label style={lbl}>Ubicación específica</label><input style={inp} placeholder="ej: Subterráneo, Sala técnica..." value={f.ubicacion} onChange={e=>set("ubicacion",e.target.value)}/></div>
+      <div style={fg}><label style={lbl}>Fecha certificación *</label><input type="date" style={inp} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/></div>
+      <div style={fg}><label style={lbl}>Fecha vencimiento *</label><input type="date" style={inp} value={f.vencimiento} onChange={e=>set("vencimiento",e.target.value)}/></div>
+      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Empresa responsable</label><input style={inp} placeholder="ej: Empresa Certificadora S.A." value={f.empresa} onChange={e=>set("empresa",e.target.value)}/></div>
+      <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Notas</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.notas} onChange={e=>set("notas",e.target.value)}/></div>
+    </div>
+    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.equipoId||!f.fecha||!f.vencimiento)return;onSave(f);}}>Guardar</button></div>
+  </div></div>);
 }
 function MantForm({item,reqs,onSave,onClose,resps}){
   const RESP_LIST=getRespList(resps);

@@ -312,7 +312,7 @@ export default function App() {
   const [mant,setMant]=useState([]);
   const [cats,setCats]=useState(Object.entries(DEF_CATS).map(([name,subs],i)=>({id:"cat"+i,name,subs,active:true,order:i})));
   const [towers,setTowers]=useState([{id:"t1",name:"A",label:"Torre A",active:true},{id:"t2",name:"B",label:"Torre B",active:true},{id:"t3",name:"C",label:"Torre C",active:true},{id:"t4",name:"D",label:"Torre D",active:true},{id:"t5",name:"Comun",label:"Area Comun",active:true}]);
-  const [resps,setResps]=useState([{id:"r1",name:"Carlos Munoz",email:"carlos@condo.cl",phone:"56912341111",modules:["Solicitudes","Tareas","Novedades"],active:true},{id:"r2",name:"Ana Garcia",email:"ana@condo.cl",phone:"56912342222",modules:["Solicitudes","Tareas"],active:true},{id:"r3",name:"Pedro Soto",email:"pedro@condo.cl",phone:"56912343333",modules:["Tareas","Novedades"],active:true}]);
+
   const [equipos,setEquipos]=useState(EQUIP_TIPOS.map(e=>({...e,active:false})));
   const [certs,setCerts]=useState([]);
   const [selReq,setSelReq]=useState(null);
@@ -422,6 +422,7 @@ export default function App() {
   const setTowersDB = updater => setTowers(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("towers",next);return next;});
   const setEquiposDB= updater => setEquipos(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("equipos",next);return next;});
   const setCertsDB  = updater => setCerts(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("certs",next);return next;});
+
   const setRespsDB  = updater => setResps(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("resps",next);return next;});
 
   const sendWhatsApp = async (phone, apikey, message) => {
@@ -547,7 +548,7 @@ export default function App() {
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
             {view==="dashboard"   &&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} session={session}/>}
-            {view==="requests"    &&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} resps={resps} session={session}/>}
+            {view==="requests"    &&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} resps={usuarios} session={session}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} resps={usuarios}/>}
             {view==="tasks"       &&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob} resps={usuarios}/>}
             {view==="provider"    &&<ProviderDash orders={orders} setOrders={setOrders} role={er} showToast={showToast} mob={mob} reqs={reqs} session={session}/>}
@@ -560,7 +561,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente"){handleLogout();}else{setView("requests");}}} onOpen={openReq} cats={cats} towers={towers} resps={resps} session={session}/>}
+            {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente"){setView("requests");}else{setView("requests");}}} onOpen={openReq} cats={cats} towers={towers} resps={usuarios} session={session}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
     </div>
   );

@@ -271,9 +271,8 @@ function LoginScreen({onLogin}) {
 
   // ── LOGIN RESIDENTE ─────────────────────────────────────────────────────────
   if (mode==="residente") {
-    // Entra directo sin mostrar pantalla intermedia
     enterResidente();
-    return null;
+    return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)"}}><div style={{color:"#fff",fontSize:16}}>Cargando...</div></div>;
   }
 
   // ── LOGIN PERSONAL ──────────────────────────────────────────────────────────

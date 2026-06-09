@@ -44,6 +44,7 @@ const normalizeReq = (r) => ({
 });
 const normalizeTask = (t) => ({
   comments:[], attachments:[], materials:[], status:"Ingresada",
+  informe:"", tiempoUsado:"",
   ...(t||{}),
 });
 const normalizeMant = (m) => ({
@@ -77,6 +78,8 @@ const EQUIP_TIPOS = [
   {id:"e14", nombre:"Citófonos", icono:"📞", frecuencia:"Anual"},
   {id:"e15", nombre:"Alarmas", icono:"🔔", frecuencia:"Anual"},
 ];
+
+const ROLES      = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
 const ADMIN_CATS = {
   "Gestión":["Circular informativa","Acta de reunión","Carta a residente","Aviso general","Otro"],
   "Finanzas":["Pago de gastos comunes","Deuda morosa","Cotización","Factura proveedor","Fondo de reserva","Otro"],
@@ -96,9 +99,9 @@ const MAT_STATUS = ["Por adquirir","Adquirido","Entregado"];
 const MAT_COLOR  = {"Por adquirir":"#f59e0b",Adquirido:"#6366f1",Entregado:"#10b981"};
 const INV_CATS   = ["Herramientas","Electrico","Plomeria","Pintura","Limpieza","Jardines","Perimetral","Motor","Otros"];
 const INV_UNITS  = ["unidad","caja","kg","litro","metro","rollo","par","juego"];
-const RESP_LIST_DEFAULT  = ["Carlos Munoz","Ana Garcia","Pedro Soto","Maria Lopez","Jose Fernandez","Sin asignar"];
-const RESP_ASSIGNABLE_DEFAULT = RESP_LIST_DEFAULT.filter(r=>r!=="Sin asignar");
-const getRespList  = (usuarios) => usuarios&&usuarios.length ? [...usuarios.filter(u=>u.active&&u.rol!=="Residente"&&u.rol!=="Proveedor").map(u=>u.nombre),"Sin asignar"] : [...RESP_LIST_DEFAULT];
+const RESP_LIST_DEFAULT  = ["Carlos Munoz","Ana Garcia","Pedro Soto","Sin asignar"];
+const RESP_ASSIGNABLE_DEFAULT = ["Carlos Munoz","Ana Garcia","Pedro Soto"];
+const getRespList  = (usuarios) => usuarios&&usuarios.length ? [...usuarios.filter(u=>u.active&&u.rol!=="Residente"&&u.rol!=="Proveedor").map(u=>u.nombre),"Sin asignar"] : RESP_LIST_DEFAULT;
 const getRespAssignable = (usuarios) => usuarios&&usuarios.length ? usuarios.filter(u=>u.active&&u.rol!=="Residente"&&u.rol!=="Proveedor").map(u=>u.nombre) : RESP_ASSIGNABLE_DEFAULT;
 const SECTOR_LIST= ["Torre A","Torre B","Torre C","Zona norte","Zona sur","Estacionamientos","Perimetro exterior","Jardines","Techumbres"];
 const URGENCY_LEVELS = ["Baja","Media","Alta","Critica"];
@@ -156,7 +159,6 @@ const fmt   = d => { try { return new Date(d).toLocaleString("es-CL",{day:"2-dig
 const fmtD  = d => { try { return new Date(d).toLocaleDateString("es-CL"); } catch { return String(d); }};
 const uid   = () => Math.random().toString(36).slice(2,9);
 const genCode = (arr,pfx) => { const nums=(arr||[]).map(r=>parseInt(((r.id||r.code||"")).replace(/\D/g,""))||0); return pfx+String((nums.length?Math.max(0,...nums):0)+1).padStart(3,"0"); };
-const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r.toISOString().slice(0,10); };
 
 function getMantStatus(m) {
   if (!m) return "Vigente";
@@ -214,14 +216,17 @@ function Tabs({tabs,active,onChange,accent}){
 }
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando datos...</div><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;}
 
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}) {
-  const [mode,setMode]=useState(null); // null | "residente" | "personal"
+  const [mode,setMode]=useState(null);
   const [email,setEmail]=useState("");
-  const [pass,setPass]  =useState("");
-  const [load,setLoad]  =useState(false);
-  const [err,setErr]    =useState("");
+  const [pass,setPass]=useState("");
+  const [load,setLoad]=useState(false);
+  const [err,setErr]=useState("");
+  const [resEmail,setResEmail]=useState("");
+  const [resErr,setResErr]=useState("");
 
-  const submit = async () => {
+  const submitPersonal = async () => {
     if (!email||!pass){setErr("Ingrese correo y contraseña");return;}
     setLoad(true);setErr("");
     try {
@@ -234,11 +239,12 @@ function LoginScreen({onLogin}) {
     setLoad(false);
   };
 
-  const enterResidente = () => {
-    onLogin({id:"guest-residente",nombre:"Residente",email:"",rol:"Residente",token:null,openNewReq:true});
+  const submitResidente = () => {
+    if (!resEmail||!/\S+@\S+\.\S+/.test(resEmail)){setResErr("Ingrese un correo válido");return;}
+    onLogin({id:"guest-residente",nombre:"Residente",email:resEmail,rol:"Residente",token:null,openNewReq:true});
   };
 
-  // ── PANTALLA INICIAL ────────────────────────────────────────────────────────
+  // Pantalla inicial
   if (!mode) return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f1f5f9",fontFamily:"system-ui,sans-serif",padding:16}}>
       <div style={{width:"100%",maxWidth:400}}>
@@ -248,7 +254,7 @@ function LoginScreen({onLogin}) {
           <div style={{color:"#64748b",fontSize:14,marginTop:4}}>Sistema de Gestión de Condominios</div>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <button onClick={()=>setMode("residente")} style={{background:"linear-gradient(135deg,#3b82f6,#1d4ed8)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(59,130,246,.35)",transition:"transform .15s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform="translateY(0)"}>
+          <button onClick={()=>setMode("residente")} style={{background:"linear-gradient(135deg,#3b82f6,#1d4ed8)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(59,130,246,.35)"}}>
             <div style={{fontSize:36,flexShrink:0}}>🏠</div>
             <div style={{textAlign:"left"}}>
               <div style={{color:"#fff",fontWeight:700,fontSize:17}}>Soy Residente</div>
@@ -256,7 +262,7 @@ function LoginScreen({onLogin}) {
             </div>
             <div style={{marginLeft:"auto",color:"#bfdbfe",fontSize:20}}>→</div>
           </button>
-          <button onClick={()=>setMode("personal")} style={{background:"linear-gradient(135deg,#0f172a,#1e3a5f)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(0,0,0,.25)",transition:"transform .15s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform="translateY(0)"}>
+          <button onClick={()=>setMode("personal")} style={{background:"linear-gradient(135deg,#0f172a,#1e3a5f)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(0,0,0,.25)"}}>
             <div style={{fontSize:36,flexShrink:0}}>🔑</div>
             <div style={{textAlign:"left"}}>
               <div style={{color:"#fff",fontWeight:700,fontSize:17}}>Acceso Personal</div>
@@ -269,13 +275,30 @@ function LoginScreen({onLogin}) {
     </div>
   );
 
-  // ── LOGIN RESIDENTE ─────────────────────────────────────────────────────────
-  if (mode==="residente") {
-    enterResidente();
-    return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)"}}><div style={{color:"#fff",fontSize:16}}>Cargando...</div></div>;
-  }
+  // Login Residente
+  if (mode==="residente") return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <button onClick={()=>{setMode(null);setResErr("");setResEmail("");}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24,display:"flex",alignItems:"center",gap:6}}>← Volver</button>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:48,marginBottom:12}}>🏠</div>
+          <div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div>
+          <div style={{color:"#bfdbfe",fontSize:13,marginTop:4}}>Ingresa tu correo para continuar</div>
+        </div>
+        {resErr&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{resErr}</div>}
+        <div style={{marginBottom:20}}>
+          <label style={{...lbl,color:"#bfdbfe"}}>Correo electrónico</label>
+          <input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={e=>setResEmail(e.target.value)} placeholder="tu@correo.cl" onKeyDown={e=>e.key==="Enter"&&submitResidente()}/>
+        </div>
+        <button onClick={submitResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer"}}>
+          Ingresar →
+        </button>
+        <div style={{color:"#bfdbfe",fontSize:11,textAlign:"center",marginTop:16}}>Solo necesitas tu correo, sin contraseña</div>
+      </div>
+    </div>
+  );
 
-  // ── LOGIN PERSONAL ──────────────────────────────────────────────────────────
+  // Login Personal
   return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0f172a",fontFamily:"system-ui,sans-serif",padding:16}}>
       <div style={{width:"100%",maxWidth:380}}>
@@ -286,14 +309,21 @@ function LoginScreen({onLogin}) {
           <div style={{color:"#64748b",fontSize:13,marginTop:4}}>Administración · Conserjería · Comité</div>
         </div>
         {err&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{err}</div>}
-        <div style={{marginBottom:14}}><label style={{...lbl,color:"#94a3b8"}}>Correo electrónico</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="correo@ejemplo.cl" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-        <div style={{marginBottom:24}}><label style={{...lbl,color:"#94a3b8"}}>Contraseña</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-        <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submit} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
+        <div style={{marginBottom:14}}>
+          <label style={{...lbl,color:"#94a3b8"}}>Correo electrónico</label>
+          <input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="correo@ejemplo.cl" onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/>
+        </div>
+        <div style={{marginBottom:24}}>
+          <label style={{...lbl,color:"#94a3b8"}}>Contraseña</label>
+          <input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/>
+        </div>
+        <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submitPersonal} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
       </div>
     </div>
   );
 }
 
+// ── APP ROOT ──────────────────────────────────────────────────────────────────
 export default function App() {
   const mob = useMob();
   const [session,setSession]=useState(null);
@@ -311,14 +341,13 @@ export default function App() {
   const [mant,setMant]=useState([]);
   const [cats,setCats]=useState(Object.entries(DEF_CATS).map(([name,subs],i)=>({id:"cat"+i,name,subs,active:true,order:i})));
   const [towers,setTowers]=useState([{id:"t1",name:"A",label:"Torre A",active:true},{id:"t2",name:"B",label:"Torre B",active:true},{id:"t3",name:"C",label:"Torre C",active:true},{id:"t4",name:"D",label:"Torre D",active:true},{id:"t5",name:"Comun",label:"Area Comun",active:true}]);
-
   const [equipos,setEquipos]=useState(EQUIP_TIPOS.map(e=>({...e,active:false})));
   const [certs,setCerts]=useState([]);
+  const [usuarios,setUsuarios]=useState([]);
   const [selReq,setSelReq]=useState(null);
   const [showNew,setShowNew]=useState(false);
   const [toast,setToast]=useState(null);
   const [navOpen,setNavOpen]=useState(false);
-  const [usuarios,setUsuarios]=useState([]);
 
   const er = session ? (viewAs||session.rol) : "Residente";
   const showToast = (msg,type) => { setToast({msg,type:type||"success"}); setTimeout(()=>setToast(null),3200); };
@@ -355,82 +384,34 @@ export default function App() {
         if(rU)  setUsuarios(Array.isArray(rU)?rU:[]);
         if(rCfg&&rCfg.length>0) rCfg.forEach(c=>{
           if(!c||!c.data) return;
-          if(c.key==="cats")   setCats(c.data);
-          if(c.key==="towers") setTowers(c.data);
-          if(c.key==="resps")  setResps(c.data);
+          if(c.key==="cats")    setCats(c.data);
+          if(c.key==="towers")  setTowers(c.data);
+          if(c.key==="equipos") setEquipos(c.data);
+          if(c.key==="certs")   setCerts(c.data);
         });
       } catch(e){ console.error("Error cargando datos:",e); }
     })();
   },[session]);
 
-  const persistReq  = async(item)=>{
-    try { await dbUpsert("solicitudes",{id:item.id,code:item.code,created_at:item.createdAt,data:item}); }
-    catch(e){ console.error("persistReq",e); }
-  };
-  const persistTask = async(item)=>{
-    try { await dbPost("tareas",{id:item.id,request_id:item.requestId,data:item}); }
-    catch { try { await dbPatch("tareas",item.id,{data:item}); } catch(e){ console.error("persistTask",e); } }
-  };
-  const persistInv  = async(item)=>{
-    try { await dbPost("inventario",{id:item.id,data:item}); }
-    catch { try { await dbPatch("inventario",item.id,{data:item}); } catch(e){ console.error("persistInv",e); } }
-  };
-  const persistMant = async(item)=>{
-    try { await dbPost("mantenciones",{id:item.id,data:item}); }
-    catch { try { await dbPatch("mantenciones",item.id,{data:item}); } catch(e){ console.error("persistMant",e); } }
-  };
-  const persistInsp = async(item)=>{
-    try { await dbPost("inspecciones",{id:item.id,data:item}); }
-    catch { try { await dbPatch("inspecciones",item.id,{data:item}); } catch(e){ console.error("persistInsp",e); } }
-  };
-  const persistEmail= async(item)=>{ try { await dbPost("correos",{id:item.id,request_id:item.requestId||"",data:item}); } catch(e){ console.error("persistEmail",e); } };
-  const persistDis  = async(item)=>{ try { await dbPost("despachos",{id:item.id,data:item}); } catch(e){ console.error("persistDis",e); } };
-  const persistCfg  = async(key,data)=>{ try { await dbUpsert("config",{key,data}); } catch(e){ console.error("persistCfg",e); } };
+  const persistReq  = async(item)=>{ try { await dbUpsert("solicitudes",{id:item.id,code:item.code,created_at:item.createdAt,data:item}); } catch(e){ console.error("persistReq",e); }};
+  const persistTask = async(item)=>{ try { await dbPost("tareas",{id:item.id,request_id:item.requestId,data:item}); } catch { try { await dbPatch("tareas",item.id,{data:item}); } catch(e){ console.error("persistTask",e); }}};
+  const persistInv  = async(item)=>{ try { await dbPost("inventario",{id:item.id,data:item}); } catch { try { await dbPatch("inventario",item.id,{data:item}); } catch(e){ console.error("persistInv",e); }}};
+  const persistMant = async(item)=>{ try { await dbPost("mantenciones",{id:item.id,data:item}); } catch { try { await dbPatch("mantenciones",item.id,{data:item}); } catch(e){ console.error("persistMant",e); }}};
+  const persistInsp = async(item)=>{ try { await dbPost("inspecciones",{id:item.id,data:item}); } catch { try { await dbPatch("inspecciones",item.id,{data:item}); } catch(e){ console.error("persistInsp",e); }}};
+  const persistEmail= async(item)=>{ try { await dbPost("correos",{id:item.id,request_id:item.requestId||"",data:item}); } catch(e){ console.error("persistEmail",e); }};
+  const persistDis  = async(item)=>{ try { await dbPost("despachos",{id:item.id,data:item}); } catch(e){ console.error("persistDis",e); }};
+  const persistCfg  = async(key,data)=>{ try { await dbUpsert("config",{key,data}); } catch(e){ console.error("persistCfg",e); }};
 
-  const setReqsDB = updater => setReqs(prev=>{
-    const next=typeof updater==="function"?updater(prev):updater;
-    next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistReq(item);});
-    return next;
-  });
-  const setTasksDB = updater => setTasks(prev=>{
-    const next=typeof updater==="function"?updater(prev):updater;
-    next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistTask(item);});
-    return next;
-  });
-  const setInvDB = updater => setInv(prev=>{
-    const next=typeof updater==="function"?updater(prev):updater;
-    next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistInv(item);});
-    return next;
-  });
-  const setMantDB = updater => setMant(prev=>{
-    const next=typeof updater==="function"?updater(prev):updater;
-    next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistMant(item);});
-    return next;
-  });
-  const setInspDB = updater => setInsp(prev=>{
-    const next=typeof updater==="function"?updater(prev):updater;
-    next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistInsp(item);});
-    return next;
-  });
-  const setDispatchDB = updater => setDispatch(prev=>{
-    const next=typeof updater==="function"?updater(prev):updater;
-    next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old)persistDis(item);});
-    return next;
-  });
+  const setReqsDB = updater => setReqs(prev=>{ const next=typeof updater==="function"?updater(prev):updater; next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistReq(item);}); return next; });
+  const setTasksDB = updater => setTasks(prev=>{ const next=typeof updater==="function"?updater(prev):updater; next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistTask(item);}); return next; });
+  const setInvDB = updater => setInv(prev=>{ const next=typeof updater==="function"?updater(prev):updater; next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistInv(item);}); return next; });
+  const setMantDB = updater => setMant(prev=>{ const next=typeof updater==="function"?updater(prev):updater; next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistMant(item);}); return next; });
+  const setInspDB = updater => setInsp(prev=>{ const next=typeof updater==="function"?updater(prev):updater; next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persistInsp(item);}); return next; });
+  const setDispatchDB = updater => setDispatch(prev=>{ const next=typeof updater==="function"?updater(prev):updater; next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old)persistDis(item);}); return next; });
   const setCatsDB   = updater => setCats(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("cats",next);return next;});
   const setTowersDB = updater => setTowers(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("towers",next);return next;});
   const setEquiposDB= updater => setEquipos(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("equipos",next);return next;});
   const setCertsDB  = updater => setCerts(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("certs",next);return next;});
-
-  const setRespsDB  = updater => setResps(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("resps",next);return next;});
-
-  const sendWhatsApp = async (phone, apikey, message) => {
-    if (!phone || !apikey) return;
-    try {
-      const encoded = encodeURIComponent(message);
-      await fetch(`https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encoded}&apikey=${apikey}`);
-    } catch(e) { console.error("Error enviando WhatsApp:", e); }
-  };
 
   const EMAILJS_SERVICE_ID  = "service_vxhdrlx";
   const EMAILJS_TEMPLATE_ID = "template_90tjafk";
@@ -446,13 +427,7 @@ export default function App() {
           service_id:  EMAILJS_SERVICE_ID,
           template_id: EMAILJS_TEMPLATE_ID,
           user_id:     EMAILJS_PUBLIC_KEY,
-          template_params: {
-            to_email: to,
-            subject:  subject,
-            message:  body,
-            name:     "CondoAdmin",
-            email:    "no-reply@condoadmin.cl",
-          },
+          template_params: { to_email: to, subject, message: body, name: "CondoAdmin", email: "no-reply@condoadmin.cl" },
         }),
       });
       if (!res.ok) { const t=await res.text(); console.error("EmailJS error:",res.status,t); }
@@ -498,14 +473,16 @@ export default function App() {
 
   if (loading) return <Loader/>;
   if (!session) return <LoginScreen onLogin={handleLogin}/>;
+  if (!er) return <Loader/>;
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100vh",fontFamily:"system-ui,sans-serif",background:"#f1f5f9",color:"#1e293b",overflow:"hidden"}}>
       {viewAs&&<div style={{background:"#7c3aed",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:100,fontSize:13}}><span>Visualizando como: <strong>{viewAs}</strong></span><button style={{...mkBtn("ghost",true),color:"#fff",border:"1px solid rgba(255,255,255,.4)"}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir</button></div>}
       {mob&&<div style={{background:"#0f172a",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:60}}><div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>CondoAdmin</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={bdg("#fff","#1e3a5f")}>{er}</span><button style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}} onClick={()=>setNavOpen(p=>!p)}>{navOpen?"✕":"☰"}</button></div></div>}
-      <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+      <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
+        {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onClick={()=>setNavOpen(false)}/>}
         {(!mob||navOpen)&&(
-          <div style={{width:220,background:"#0f172a",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto",position:mob?"absolute":"relative",top:mob?40:0,left:0,bottom:0,zIndex:50}}>
+          <div onClick={e=>e.stopPropagation()} style={{width:mob?260:220,background:"#0f172a",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto",position:mob?"fixed":"relative",top:0,left:0,bottom:0,height:mob?"100vh":"auto",zIndex:50}}>
             {!mob&&<div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{padding:"18px 14px 14px",borderBottom:"1px solid #1e293b",cursor:"pointer"}}><div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div><div style={{color:"#64748b",fontSize:11,marginTop:2}}>Sistema de Gestion</div></div>}
             <nav style={{padding:"6px 0",flex:1}}>
               {navItems.map(n=>(
@@ -521,13 +498,13 @@ export default function App() {
                 <span style={bdg("#93c5fd","#1e3a5f")}>{session.rol}</span>
               </div>
               {can(session.rol,"viewAs")&&!viewAs&&(
-                <>
+                <div style={{marginBottom:8}}>
                   <div style={{color:"#64748b",fontSize:10,textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>Ver como</div>
-                  <select style={{width:"100%",background:"#1e293b",color:"#a78bfa",border:"1px solid #4c1d95",borderRadius:6,padding:"6px 8px",fontSize:12,marginBottom:8}} defaultValue="" onChange={e=>{if(e.target.value){setViewAs(e.target.value);setView(e.target.value==="Proveedor"?"provider":"dashboard");}}}>
+                  <select style={{width:"100%",background:"#1e293b",color:"#a78bfa",border:"1px solid #4c1d95",borderRadius:6,padding:"6px 8px",fontSize:12}} defaultValue="" onChange={e=>{if(e.target.value){setViewAs(e.target.value);setView(e.target.value==="Proveedor"?"provider":"dashboard");}}}>
                     <option value="">Seleccionar perfil...</option>
                     {ROLES.filter(r=>r!==session.rol).map(r=><option key={r}>{r}</option>)}
                   </select>
-                </>
+                </div>
               )}
               {viewAs&&<button style={{...mkBtn("secondary",true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir de vista</button>}
               <button style={{...mkBtn("danger",true),width:"100%",justifyContent:"center"}} onClick={handleLogout}>Cerrar sesion</button>
@@ -560,7 +537,7 @@ export default function App() {
           </div>
         </div>
       </div>
-            {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente"){setView("requests");}else{setView("requests");}}} onOpen={openReq} cats={cats} towers={towers} resps={usuarios} session={session}/>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);setView("requests");}} onOpen={openReq} cats={cats} towers={towers} resps={usuarios} session={session}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
     </div>
   );
@@ -614,12 +591,9 @@ function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers,resps,s
   const [fi,setFi]=useState({status:"",priority:"",category:"",tower:"",q:""});
   const [sort,setSort]=useState("date");
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
-
-  // Residentes solo ven sus propias solicitudes
   const baseReqs = role==="Residente"
     ? reqs.filter(r=>r.requesterEmail===session?.email||r.requesterName===session?.nombre)
     : reqs;
-
   const visible=baseReqs.filter(r=>{
     if(fi.status&&r.status!==fi.status)return false;
     if(fi.priority&&r.priority!==fi.priority)return false;
@@ -675,7 +649,7 @@ function ReqList({reqs,role,onOpen,setReqs,showToast,addEmail,mob,towers,resps,s
             <td style={tdSt}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
             <td style={tdSt} onClick={e=>e.stopPropagation()}>
               {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&<select style={{...selSt,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={e=>quickSt(r,e.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>}
-              {can(role,"manageConfig")&&<button style={{...mkBtn("danger",true),marginLeft:4}} onClick={()=>{if(window.confirm("¿Eliminar solicitud "+r.code+"?"))setReqs(p=>p.filter(x=>x.id!==r.id));}}>🗑</button>}
+              {can(role,"manageConfig")&&<button style={{...mkBtn("danger",true),marginLeft:4}} onClick={e=>{e.stopPropagation();if(window.confirm("¿Eliminar solicitud "+r.code+"?"))setReqs(p=>p.filter(x=>x.id!==r.id));}}>🗑</button>}
             </td>
           </tr>
         ))}</tbody></table></div>
@@ -715,20 +689,12 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
     if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
     upd({assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:r.status,to:"Asignada"});
     showToast("Responsable asignado");
-    // Buscar el correo del usuario asignado en Supabase
     try {
-      const res = await fetch(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(asgn)}&active=eq.true&select=*`,{
-        headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}
-      });
-      const usuarios = await res.json();
-      const usuario = usuarios&&usuarios[0];
-      if(usuario?.email){
-        addEmail({
-          requestId:r.id,date:new Date().toISOString(),to:usuario.email,
-          subject:"[CondoAdmin] Se te asignó la solicitud "+r.code,
-          type:"Asignacion",status:"Enviado",
-          body:`Hola ${usuario.nombre},\n\nSe te ha asignado una nueva solicitud:\n\n📋 DETALLE\n──────────────────────────\nCódigo: ${r.code}\nSolicitante: ${r.requesterName}\nTeléfono: ${r.requesterPhone||"No indicado"}\nTorre: ${r.tower} / Unidad: ${r.unit}\nCategoría: ${r.category} - ${r.subcategory}\nPrioridad: ${r.priority}\n\nDescripción:\n${r.description}\n──────────────────────────\nIngresa a CondoAdmin para gestionar esta solicitud.`
-        });
+      const res=await fetch(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(asgn)}&active=eq.true&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}});
+      const users=await res.json();
+      const u=users&&users[0];
+      if(u?.email){
+        addEmail({requestId:r.id,date:new Date().toISOString(),to:u.email,subject:"[CondoAdmin] Se te asignó la solicitud "+r.code,type:"Asignacion",status:"Enviado",body:`Hola ${u.nombre},\n\nSe te ha asignado una nueva solicitud:\n\nCódigo: ${r.code}\nSolicitante: ${r.requesterName}\nTeléfono: ${r.requesterPhone||"No indicado"}\nTorre: ${r.tower} / Unidad: ${r.unit}\nCategoría: ${r.category} - ${r.subcategory}\nPrioridad: ${r.priority}\n\nDescripción:\n${r.description}\n\nIngresa a CondoAdmin para gestionar esta solicitud.`});
       }
     } catch(e){ console.error("Error buscando usuario asignado:",e); }
   };
@@ -746,7 +712,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
   const tabs=[
     {id:"info",label:"Info"},
     {id:"history",label:"Historial ("+safeHistory.length+")"},
-    {id:"tasks",label:"Tareas ("+myTasks.length+")"},
+    {id:"tasks",label:"Órdenes ("+myTasks.length+")"},
     {id:"evidence",label:"Evidencias"},
     {id:"emails",label:"Correos ("+myEmails.length+")"},
   ];
@@ -765,7 +731,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
             {can(role,"changeStatus")&&<div><label style={lbl}>Estado</label><div style={{display:"flex",gap:6}}><select style={{...selSt,width:140}} value={ns} onChange={e=>setNs(e.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select><button style={mkBtn("primary",true)} onClick={applyStatus}>OK</button></div></div>}
             {can(role,"assign")&&<div><label style={lbl}>Responsable</label><div style={{display:"flex",gap:6}}><select style={{...selSt,width:150}} value={asgn} onChange={e=>setAsgn(e.target.value)}>{RESP_LIST.map(s=><option key={s}>{s}</option>)}</select><button style={mkBtn("secondary",true)} onClick={applyAsgn}>Asignar</button></div></div>}
-            {can(role,"createTask")&&<button style={mkBtn("secondary",true)} onClick={()=>setShowTF(true)}>+ Tarea</button>}
+            {can(role,"createTask")&&<button style={mkBtn("secondary",true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
             {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={mkBtn("success",true)} onClick={()=>setShowCl(true)}>Cerrar</button>}
             <button style={mkBtn("secondary",true)} onClick={()=>setShowEv("avance")}>Evidencia</button>
           </div>
@@ -785,8 +751,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
           </div>
         </div>
       )}
-      {tab==="history"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Bitacora</div>{safeHistory.length===0?<Empty msg="Sin historial"/>:<div style={{position:"relative",paddingLeft:20}}>{[...safeHistory].reverse().map((h,i)=><div key={i} style={{position:"relative",paddingLeft:16,paddingBottom:14}}><div style={{width:9,height:9,borderRadius:"50%",background:h.to?STATUS_COLOR[h.to]:"#3b82f6",position:"absolute",left:0,top:4}}/>{i<safeHistory.length-1&&<div style={{position:"absolute",left:4,top:13,bottom:0,width:2,background:"#e2e8f0"}}/>}<div style={{fontSize:13,fontWeight:600}}>{h.action}</div>{h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div></div>)}</div>}</div>}
-      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} resps={resps}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin tareas"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva tarea</button>}</div>}
+      {tab==="history"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Bitacora</div>{safeHistory.length===0?<Empty msg="Sin historial"/>:<div style={{position:"relative",paddingLeft:20}}>{[...safeHistory].reverse().map((h,i)=><div key={i} style={{position:"relative",paddingLeft:16,paddingBottom:14}}><div style={{width:9,height:9,borderRadius:"50%",background:h.to?STATUS_COLOR[h.to]:"#3b82f6",position:"absolute",left:0,top:4}}/><div style={{fontSize:13,fontWeight:600}}>{h.action}</div>{h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div></div>)}</div>}</div>}
+      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} resps={resps}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin órdenes de trabajo"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva orden</button>}</div>}
       {tab==="evidence"&&<div>{["inicial","avance","cierre"].map(type=><div key={type} style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Imagenes {type==="inicial"?"iniciales":type==="avance"?"de avance":"de cierre"}</div>{r.status!=="Cerrada"&&<button style={mkBtn("secondary",true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}</div>{myAtt(type).length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imagenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt(type).map((a,i)=><div key={a.id||i} style={{textAlign:"center"}}><img src={a.preview} alt={a.name} style={thumb} onError={e=>e.target.style.display="none"}/><div style={{fontSize:10,color:"#64748b",marginTop:3,maxWidth:70,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div></div>)}</div>}</div>)}</div>}
       {tab==="emails"&&<div style={card}>{myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span><span style={bdg("#10b981","#f0fdf4")}>{e.status}</span></div><div style={{fontSize:10,color:"#64748b",marginBottom:3}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4}}>{e.body}</div></div>)}</div>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
@@ -839,7 +805,7 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
         <div style={{minWidth:0}}>
           <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div>
           <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
-            👤 {task.responsible} {task.ejecutor&&<span> · 🔧 {task.ejecutor}</span>} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}
+            👤 {task.responsible}{task.ejecutor&&<span> · 🔧 {task.ejecutor}</span>} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}
           </div>
           {task.informe&&<div style={{fontSize:11,color:"#10b981",marginTop:2}}>✓ Informe registrado</div>}
         </div>
@@ -848,14 +814,7 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
       {exp&&<div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:10}}>
         {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
         {safeComments.map((c,i)=><div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}><strong>{c.user}</strong> - <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}</div>)}
-
-        {/* Informe del ejecutor */}
-        {task.informe&&<div style={{...alrt("success"),marginBottom:10}}>
-          <div style={{fontWeight:600,marginBottom:4}}>📋 Informe del ejecutor</div>
-          <div style={{fontSize:12,whiteSpace:"pre-wrap"}}>{task.informe}</div>
-          {task.tiempoUsado&&<div style={{fontSize:11,marginTop:4,color:"#16a34a"}}>⏱ Tiempo: {task.tiempoUsado}</div>}
-        </div>}
-
+        {task.informe&&<div style={{...alrt("success"),marginBottom:10}}><div style={{fontWeight:600,marginBottom:4}}>📋 Informe del ejecutor</div><div style={{fontSize:12,whiteSpace:"pre-wrap"}}>{task.informe}</div>{task.tiempoUsado&&<div style={{fontSize:11,marginTop:4,color:"#16a34a"}}>⏱ Tiempo: {task.tiempoUsado}</div>}</div>}
         <MatPanel materials={safeMaterials} setMaterials={ms=>upd({materials:ms})} readOnly={!can(role,"changeStatus")&&!can(role,"resolveTask")}/>
         <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
           <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addC()}/>
@@ -866,7 +825,7 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
         </div>
       </div>}
       {showEv&&<EvidModal type="cierre" requestId={task.requestId} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)} taskId={task.id} setTasks={setTasks}/>}
-      {showInforme&&<InformeModal task={task} onSave={inf=>{ upd({informe:inf.texto,tiempoUsado:inf.tiempo}); showToast("Informe guardado"); setShowInforme(false); }} onClose={()=>setShowInforme(false)}/>}
+      {showInforme&&<InformeModal task={task} onSave={inf=>{upd({informe:inf.texto,tiempoUsado:inf.tiempo});showToast("Informe guardado");setShowInforme(false);}} onClose={()=>setShowInforme(false)}/>}
     </div>
   );
 }
@@ -876,62 +835,32 @@ function InformeModal({task,onSave,onClose}){
   const [tiempo,setTiempo]=useState(task.tiempoUsado||"");
   const [escuchando,setEscuchando]=useState(false);
   const recognRef=useRef(null);
-
   const iniciarVoz=()=>{
-    const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SpeechRecognition){alert("Tu navegador no soporta reconocimiento de voz. Usa Chrome.");return;}
-    const recog=new SpeechRecognition();
-    recog.lang="es-CL";
-    recog.continuous=true;
-    recog.interimResults=false;
-    recog.onresult=e=>{
-      const transcript=Array.from(e.results).map(r=>r[0].transcript).join(" ");
-      setTexto(p=>(p?p+" ":"")+transcript);
-    };
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){alert("Tu navegador no soporta reconocimiento de voz. Usa Chrome.");return;}
+    const recog=new SR();
+    recog.lang="es-CL";recog.continuous=true;recog.interimResults=false;
+    recog.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join(" ");setTexto(p=>(p?p+" ":"")+t);};
     recog.onerror=()=>setEscuchando(false);
     recog.onend=()=>setEscuchando(false);
-    recognRef.current=recog;
-    recog.start();
-    setEscuchando(true);
+    recognRef.current=recog;recog.start();setEscuchando(true);
   };
-
-  const detenerVoz=()=>{
-    if(recognRef.current)recognRef.current.stop();
-    setEscuchando(false);
-  };
-
+  const detenerVoz=()=>{if(recognRef.current)recognRef.current.stop();setEscuchando(false);};
   return(
     <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}>
-        <h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3>
-        <button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>
-      </div>
-      <div style={{...card,background:"#f8fafc",marginBottom:12}}>
-        <div style={{fontSize:12,color:"#64748b",marginBottom:2}}>Orden de trabajo</div>
-        <div style={{fontWeight:600,fontSize:13}}>{task.title}</div>
-        {task.ejecutor&&<div style={{fontSize:11,color:"#6366f1",marginTop:2}}>🔧 Ejecutor: {task.ejecutor}</div>}
-      </div>
-      <div style={fg}>
-        <label style={lbl}>Descripción del trabajo realizado *</label>
-        <textarea style={{...inp,height:120,resize:"vertical"}} placeholder="Describe detalladamente lo que se realizó..." value={texto} onChange={e=>setTexto(e.target.value)}/>
-      </div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
+      <div style={{...card,background:"#f8fafc",marginBottom:12}}><div style={{fontSize:12,color:"#64748b",marginBottom:2}}>Orden de trabajo</div><div style={{fontWeight:600,fontSize:13}}>{task.title}</div>{task.ejecutor&&<div style={{fontSize:11,color:"#6366f1",marginTop:2}}>🔧 Ejecutor: {task.ejecutor}</div>}</div>
+      <div style={fg}><label style={lbl}>Descripción del trabajo realizado *</label><textarea style={{...inp,height:120,resize:"vertical"}} placeholder="Describe detalladamente lo que se realizó..." value={texto} onChange={e=>setTexto(e.target.value)}/></div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <button style={{...mkBtn(escuchando?"danger":"purple"),flex:1,justifyContent:"center"}} onClick={escuchando?detenerVoz:iniciarVoz}>
-          {escuchando?"⏹ Detener grabación":"🎤 Dictar por voz"}
-        </button>
-        {escuchando&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}><div style={{width:8,height:8,borderRadius:"50%",background:"#ef4444",animation:"spin .8s linear infinite"}}/> Escuchando...</div>}
+        <button style={{...mkBtn(escuchando?"danger":"purple"),flex:1,justifyContent:"center"}} onClick={escuchando?detenerVoz:iniciarVoz}>{escuchando?"⏹ Detener grabación":"🎤 Dictar por voz"}</button>
+        {escuchando&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}><div style={{width:8,height:8,borderRadius:"50%",background:"#ef4444",animation:"spin .8s linear infinite"}}/>Escuchando...</div>}
       </div>
-      <div style={fg}>
-        <label style={lbl}>Tiempo utilizado</label>
-        <input style={inp} placeholder="ej: 2 horas, 45 minutos..." value={tiempo} onChange={e=>setTiempo(e.target.value)}/>
-      </div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button>
-        <button style={mkBtn("success",true)} onClick={()=>{if(!texto.trim()){alert("Ingrese la descripción del trabajo");return;}onSave({texto,tiempo});}}>Guardar informe</button>
-      </div>
+      <div style={fg}><label style={lbl}>Tiempo utilizado</label><input style={inp} placeholder="ej: 2 horas, 45 minutos..." value={tiempo} onChange={e=>setTiempo(e.target.value)}/></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("success",true)} onClick={()=>{if(!texto.trim()){alert("Ingrese la descripción del trabajo");return;}onSave({texto,tiempo});}}>Guardar informe</button></div>
     </div></div>
   );
 }
+
 function MatPanel({materials,setMaterials,readOnly}){
   const [showAdd,setShowAdd]=useState(false);
   const [nm,setNm]=useState({name:"",qty:1,unit:INV_UNITS[0],cost:0,status:"Por adquirir",notes:""});
@@ -974,6 +903,7 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
     </div></div>
   );
 }
+
 function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
   const closure=atts.filter(a=>a.requestId===req.id&&a.type==="cierre");
   const [showEv,setShowEv]=useState(false);
@@ -985,6 +915,7 @@ function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
     </div>{showEv&&<EvidModal type="cierre" requestId={req.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)}/>}</div>
   );
 }
+
 function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,resps,session}){
   const actCats=cats.filter(c=>c.active);
   const actTowers=towers.filter(t=>t.active);
@@ -992,13 +923,9 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const initTower=actTowers[0]||{name:""};
   const isAdminRole=role==="Administrador"||role==="Administrador Edificio";
   const [tipoReporte,setTipoReporte]=useState(isAdminRole?"Administrativo":"Incidencia");
-
-  // Categorías según tipo
   const adminCatList=Object.keys(ADMIN_CATS);
-  const initAdminCat=adminCatList[0];
-  const [adminCat,setAdminCat]=useState(initAdminCat);
-  const [adminSub,setAdminSub]=useState(ADMIN_CATS[initAdminCat][0]);
-
+  const [adminCat,setAdminCat]=useState(adminCatList[0]);
+  const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
   const [f,setF]=useState({
     requesterName:session?.nombre||"",
     requesterEmail:session?.email||"",
@@ -1008,7 +935,10 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     description:"",priority:"Media",
     accessPermission:false,preferredTimeSlot:"Manana",confirm:false
   });
-  const [errs,setErrs]=useState({});const [prevs,setPrevs]=useState([]);const [done,setDone]=useState(null);const fileRef=useRef();
+  const [errs,setErrs]=useState({});
+  const [prevs,setPrevs]=useState([]);
+  const [done,setDone]=useState(null);
+  const fileRef=useRef();
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const validate=()=>{
     const e={};
@@ -1022,7 +952,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     setErrs(e);return !Object.keys(e).length;
   };
   const handleFiles=e=>Array.from(e.target.files).forEach(fi=>{const r=new FileReader();r.onload=ev=>setPrevs(p=>[...p,{name:fi.name,url:ev.target.result}]);r.readAsDataURL(fi);});
-  const submit=()=>{
+  const submit=async()=>{
     if(!validate())return;
     const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
     const nr=normalizeReq({id:code,code,createdAt:now,...f,
@@ -1033,18 +963,13 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       attachmentsInitial:prevs.map(p=>({id:"a"+uid(),requestId:code,type:"inicial",name:p.name,date:now,user:f.requesterName,preview:p.url,comment:""})),
       dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    addEmail({requestId:code,date:now,to:f.requesterEmail,
-      subject:"[CondoAdmin] Solicitud "+code+" recibida",
-      type:"Creacion",status:"Enviado",
-      body:`Estimado/a ${f.requesterName},\n\nSu solicitud ha sido registrada exitosamente.\n\n📋 DETALLE DE LA SOLICITUD\n──────────────────────────\nCódigo: ${code}\nCategoría: ${f.category} - ${f.subcategory}\nTorre: ${f.tower} / Unidad: ${f.unit}\nPrioridad: ${f.priority}\nFranja horaria: ${f.preferredTimeSlot}\n\nDescripción:\n${f.description}\n\n──────────────────────────\nNuestro equipo revisará su solicitud a la brevedad.\n\nCondoAdmin`
-    });
-    const notif=(resps||[]).filter(rr=>rr.active&&rr.email&&(rr.modules||[]).includes("Solicitudes"));
-    notif.forEach(rr=>{addEmail({
-      requestId:code,date:now,to:rr.email,
-      subject:"[CondoAdmin] Nueva solicitud "+code+" - "+f.category,
-      type:"Aviso responsable",status:"Enviado",
-      body:`Nueva solicitud recibida:\n\nCódigo: ${code}\nSolicitante: ${f.requesterName}\nTorre: ${f.tower} / Unidad: ${f.unit}\nCategoría: ${f.category} - ${f.subcategory}\nPrioridad: ${f.priority}\nDescripción: ${f.description}\n\nIngresa a CondoAdmin para gestionar esta solicitud.`
-    });});
+    addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:`Su solicitud de ${f.category} fue registrada. Código: ${code}. Nos contactaremos a la brevedad.`});
+    try {
+      const res=await fetch(`${SUPA_URL}/rest/v1/usuarios?active=eq.true&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}});
+      const usuarios=await res.json();
+      const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email);
+      admins.forEach(u=>{addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code+" - "+(tipoReporte==="Administrativo"?adminCat:f.category),type:"Aviso responsable",status:"Enviado",body:`Nueva solicitud recibida:\n\n📋 DETALLE\n──────────────────────────\nCódigo: ${code}\nTipo: ${tipoReporte}\nSolicitante: ${f.requesterName}\nCorreo: ${f.requesterEmail}\nTeléfono: ${f.requesterPhone||"No indicado"}\nTorre: ${f.tower} / Unidad: ${f.unit}\nCategoría: ${tipoReporte==="Administrativo"?adminCat:f.category} - ${tipoReporte==="Administrativo"?adminSub:f.subcategory}\nPrioridad: ${f.priority}\n\nDescripción:\n${f.description}\n──────────────────────────\nIngresa a CondoAdmin para gestionar esta solicitud.`});});
+    } catch(e){ console.error("Error notificando admins:",e); }
     setDone(nr);showToast("Solicitud "+code+" creada");
   };
   const curCat=actCats.find(c=>c.name===f.category);
@@ -1055,8 +980,6 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
         <h3 style={{margin:0,fontSize:15}}>Nueva solicitud</h3>
         <button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>
       </div>
-
-      {/* Selector tipo reporte - solo admins */}
       {isAdminRole&&(
         <div style={{display:"flex",gap:10,marginBottom:16}}>
           {["Administrativo","Incidencia"].map(t=>(
@@ -1066,10 +989,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
           ))}
         </div>
       )}
-
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-
-        {/* Datos solicitante - solo en Incidencia */}
         {tipoReporte==="Incidencia"&&<>
           {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Telefono","text"]].map(([k,l,t])=><div key={k} style={fg}><label style={lbl}>{l}</label><input type={t} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={e=>set(k,e.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10,marginTop:2}}>{errs[k]}</div>}</div>)}
           <div style={fg}><label style={lbl}>Torre</label><select style={selSt} value={f.tower} onChange={e=>set("tower",e.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
@@ -1077,44 +997,30 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
           <div style={fg}><label style={lbl}>Categoria</label><select style={selSt} value={f.category} onChange={e=>{const c=actCats.find(x=>x.name===e.target.value);set("category",e.target.value);set("subcategory",c&&c.subs.length?c.subs[0]:"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
           <div style={fg}><label style={lbl}>Subcategoria</label><select style={selSt} value={f.subcategory} onChange={e=>set("subcategory",e.target.value)}>{(curCat?curCat.subs:[]).map(s=><option key={s}>{s}</option>)}</select></div>
         </>}
-
-        {/* Categorías administrativas */}
         {isAdminRole&&tipoReporte==="Administrativo"&&<>
           <div style={fg}><label style={lbl}>Categoría</label><select style={selSt} value={adminCat} onChange={e=>{setAdminCat(e.target.value);setAdminSub(ADMIN_CATS[e.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
           <div style={fg}><label style={lbl}>Subcategoría</label><select style={selSt} value={adminSub} onChange={e=>setAdminSub(e.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
         </>}
-
-        {/* Descripcion siempre visible */}
         <div style={{...fg,gridColumn:"1/-1"}}>
           <label style={lbl}>{tipoReporte==="Administrativo"?"Descripcion / Nota *":"Descripcion *"}</label>
           <textarea style={{...inp,height:tipoReporte==="Administrativo"?140:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={e=>set("description",e.target.value)} placeholder={tipoReporte==="Administrativo"?"Ingrese el detalle administrativo...":"Describa el problema..."}/>
           {errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}
         </div>
-
-        {/* Prioridad y franja - solo Incidencia o admin */}
         {tipoReporte==="Incidencia"&&<>
           <div style={fg}><label style={lbl}>Prioridad</label><select style={{...selSt,color:PRIORITY_COLOR[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
           <div style={fg}><label style={lbl}>Franja horaria</label><select style={selSt} value={f.preferredTimeSlot} onChange={e=>set("preferredTimeSlot",e.target.value)}>{["Manana (9-13h)","Tarde (14-18h)","Cualquier hora","Inmediato"].map(s=><option key={s}>{s}</option>)}</select></div>
         </>}
-        {isAdminRole&&tipoReporte==="Administrativo"&&<>
-          <div style={fg}><label style={lbl}>Prioridad</label><select style={{...selSt,color:PRIORITY_COLOR[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
-        </>}
-
-        {/* Imágenes - solo Incidencia */}
+        {isAdminRole&&tipoReporte==="Administrativo"&&<div style={fg}><label style={lbl}>Prioridad</label><select style={{...selSt,color:PRIORITY_COLOR[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>}
         {tipoReporte==="Incidencia"&&<div style={{...fg,gridColumn:"1/-1"}}>
           <label style={lbl}>Imagenes (opcional)</label>
           <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
-          <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}>
-            <div style={{fontSize:24,marginBottom:4}}>📷</div>
-            <div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div>
-          </div>
-          {prevs.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prevs.map((p,i)=><div key={i} style={{position:"relative"}}><img src={p.url} alt={p.name} style={{...thumb,width:72,height:56}}/><button onClick={()=>setPrevs(pr=>pr.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>)}</div>}
+          <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:24,marginBottom:4}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div></div>
+          {prevs.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prevs.map((p,i)=><div key={i} style={{position:"relative"}}><img src={p.url} alt={p.name} style={{...thumb,width:72,height:56}}/><button onClick={()=>setPrevs(pr=>pr.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10}}>✕</button></div>)}</div>}
         </div>}
-
         {tipoReporte==="Incidencia"&&<div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={e=>set("accessPermission",e.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>}
         <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="conf" checked={f.confirm} onChange={e=>set("confirm",e.target.checked)}/><label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la informacion es correcta *</label>{errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}</div>
       </div>
-      {tipoReporte==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA - Se notificara de inmediato.</strong></div>}
+      {tipoReporte==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA</strong></div>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn(tipoReporte==="Administrativo"?"purple":"primary",true)} onClick={submit}>Enviar {tipoReporte==="Administrativo"?"nota":"solicitud"}</button></div>
     </div></div>
   );
@@ -1126,57 +1032,42 @@ function TasksView({tasks,reqs,role,setTasks,showToast,mob,resps}){
   const visible=tasks.filter(t=>(!fi.status||t.status===fi.status)&&(!fi.responsible||t.responsible===fi.responsible)&&(!fi.q||(t.title+" "+t.responsible).toLowerCase().includes(fi.q.toLowerCase())));
   return(
     <div>
-      <div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar tareas..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/><select style={{...selSt,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos los estados</option>{["Ingresada","En proceso","Resuelta","Completada"].map(s=><option key={s}>{s}</option>)}</select><select style={{...selSt,flex:1}} value={fi.responsible} onChange={e=>setFi(p=>({...p,responsible:e.target.value}))}><option value="">Todos los responsables</option>{RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}</select></div></div>
-      {visible.length===0?<Empty msg="Sin tareas"/>:visible.map(t=>{const req=reqs.find(r=>r.id===t.requestId);const pm=(t.materials||[]).filter(m=>m.status==="Por adquirir").length;return(<div key={t.id} style={{...card,borderLeft:"4px solid "+(PRIORITY_COLOR[t.priority]||"#e2e8f0"),marginBottom:8,padding:12}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>{req&&<div style={{fontSize:10,color:"#3b82f6",marginTop:2}}>{req.code} - {req.category}</div>}<div style={{fontSize:11,color:"#64748b",marginTop:2}}>{t.responsible} - {t.dueDate?fmtD(t.dueDate):"Sin fecha"}{pm>0&&<span style={{marginLeft:8,...bdg("#f59e0b","#fffbeb"),fontSize:10}}>{pm} mat. pendiente(s)</span>}</div></div><div style={{display:"flex",gap:6,flexShrink:0}}><PBadge p={t.priority}/><SBadge s={t.status}/></div></div></div>);})}
+      <div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar órdenes..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/><select style={{...selSt,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos los estados</option>{["Ingresada","En proceso","Resuelta","Completada"].map(s=><option key={s}>{s}</option>)}</select><select style={{...selSt,flex:1}} value={fi.responsible} onChange={e=>setFi(p=>({...p,responsible:e.target.value}))}><option value="">Todos los responsables</option>{RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}</select></div></div>
+      {visible.length===0?<Empty msg="Sin órdenes de trabajo"/>:visible.map(t=>{const req=reqs.find(r=>r.id===t.requestId);const pm=(t.materials||[]).filter(m=>m.status==="Por adquirir").length;return(<div key={t.id} style={{...card,borderLeft:"4px solid "+(PRIORITY_COLOR[t.priority]||"#e2e8f0"),marginBottom:8,padding:12}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>{req&&<div style={{fontSize:10,color:"#3b82f6",marginTop:2}}>{req.code} - {req.category}</div>}<div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {t.responsible}{t.ejecutor&&<span> · 🔧 {t.ejecutor}</span>} · {t.dueDate?fmtD(t.dueDate):"Sin fecha"}{pm>0&&<span style={{marginLeft:8,...bdg("#f59e0b","#fffbeb"),fontSize:10}}>{pm} mat. pendiente(s)</span>}</div></div><div style={{display:"flex",gap:6,flexShrink:0}}><PBadge p={t.priority}/><SBadge s={t.status}/></div></div></div>);})}
     </div>
   );
 }
 
 function ProviderDash({orders,setOrders,role,showToast,mob,reqs,session}){
   const [selOrder,setSelOrder]=useState(null);
-  // Solicitudes asignadas al proveedor (por nombre o email)
   const myReqs=reqs.filter(r=>r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email));
   if(selOrder){const order=orders.find(o=>o.id===selOrder.id)||selOrder;return <WorkDetail order={order} setOrders={setOrders} showToast={showToast} role={role} mob={mob} onBack={()=>setSelOrder(null)}/>;}
   return(
     <div>
-      <div style={{...card,background:"#1e3a5f",marginBottom:16}}>
-        <div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Mis Trabajos Asignados</div>
-        <div style={{color:"#94a3b8",fontSize:12}}>Solicitudes asignadas a {session?.nombre||"ti"}</div>
-      </div>
+      <div style={{...card,background:"#1e3a5f",marginBottom:16}}><div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Mis Trabajos Asignados</div><div style={{color:"#94a3b8",fontSize:12}}>Solicitudes asignadas a {session?.nombre||"ti"}</div></div>
       <Grid cols={3} mob={mob}>
         <Kpi value={myReqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Activas" color="#3b82f6" mob={mob}/>
         <Kpi value={myReqs.filter(r=>r.status==="Resuelta").length} label="Resueltas" color="#10b981" mob={mob}/>
         <Kpi value={myReqs.filter(r=>r.status==="Cerrada").length} label="Cerradas" color="#6b7280" mob={mob}/>
       </Grid>
-      {myReqs.length===0
-        ?<Empty msg="No tienes solicitudes asignadas aún"/>
-        :<div>{myReqs.map(r=>(
-          <div key={r.id} style={{...card,borderLeft:"4px solid "+(PRIORITY_COLOR[r.priority]||"#e2e8f0"),marginBottom:10,padding:14}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
-                  <span style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{r.code}</span>
-                  <PBadge p={r.priority}/>
-                  <SBadge s={r.status}/>
-                </div>
-                <div style={{fontWeight:600,fontSize:14,marginBottom:3}}>{r.category} - {r.subcategory}</div>
-                <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Torre {r.tower} / Unidad {r.unit}</div>
-                <div style={{fontSize:12,color:"#374151"}}>{r.description}</div>
-              </div>
-              <div style={{fontSize:11,color:"#94a3b8",flexShrink:0}}>{fmtD(r.createdAt)}</div>
+      {myReqs.length===0?<Empty msg="No tienes solicitudes asignadas aún"/>:<div>{myReqs.map(r=>(
+        <div key={r.id} style={{...card,borderLeft:"4px solid "+(PRIORITY_COLOR[r.priority]||"#e2e8f0"),marginBottom:10,padding:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
+              <div style={{fontWeight:600,fontSize:14,marginBottom:3}}>{r.category} - {r.subcategory}</div>
+              <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Torre {r.tower} / Unidad {r.unit}</div>
+              <div style={{fontSize:12,color:"#374151"}}>{r.description}</div>
             </div>
-            {r.comments&&r.comments.length>0&&(
-              <div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:8}}>
-                <div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:4}}>Último comentario</div>
-                <div style={{fontSize:12,color:"#374151"}}>{r.comments[r.comments.length-1].text}</div>
-              </div>
-            )}
+            <div style={{fontSize:11,color:"#94a3b8",flexShrink:0}}>{fmtD(r.createdAt)}</div>
           </div>
-        ))}</div>
-      }
+          {r.comments&&r.comments.length>0&&<div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:8}}><div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:4}}>Último comentario</div><div style={{fontSize:12,color:"#374151"}}>{r.comments[r.comments.length-1].text}</div></div>}
+        </div>
+      ))}</div>}
     </div>
   );
 }
+
 function WorkDetail({order,setOrders,showToast,role,mob,onBack}){
   const [o,setO]=useState(normalizeOrder(order));
   const fileRefB=useRef();const fileRefA=useRef();
@@ -1194,16 +1085,16 @@ function WorkDetail({order,setOrders,showToast,role,mob,onBack}){
         {o.status==="Aceptado"&&<button style={mkBtn("purple")} onClick={()=>advance("Diagnostico")}>Iniciar diagnostico</button>}
         {o.status==="Diagnostico"&&<button style={mkBtn("primary")} onClick={()=>advance("Ejecucion")}>Iniciar ejecucion</button>}
         {o.status==="Ejecucion"&&<button style={mkBtn("success")} onClick={()=>advance("Ejecutado")}>Marcar ejecutado</button>}
-        {o.status==="Ejecutado"&&(isAdmin?<button style={mkBtn("success")} onClick={closeOrder}>Cerrar orden</button>:<span style={{fontSize:12,color:"#64748b"}}>Esperando cierre por administracion</span>)}
+        {o.status==="Ejecutado"&&(isAdmin?<button style={mkBtn("success")} onClick={closeOrder}>Cerrar orden</button>:<span style={{fontSize:12,color:"#64748b"}}>Esperando cierre</span>)}
       </div></div>}
-      <div style={card}><IR l="Titulo" v={o.title||"---"}/><IR l="Categoria" v={o.category||"---"}/><IR l="Ubicacion" v={o.location||"---"}/><IR l="Proveedor" v={o.provider||"---"}/></div>
+      <div style={card}><IR l="Titulo" v={o.title||"---"}/><IR l="Categoria" v={o.category||"---"}/><IR l="Ubicacion" v={o.location||"---"}/></div>
       <div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>Fotos ANTES ({o.photoBefore.length})</div>{canEdit&&<><input ref={fileRefB} type="file" accept="image/*" style={{display:"none"}} onChange={e=>addPhoto("photoBefore",e)}/><button style={mkBtn("secondary",true)} onClick={()=>fileRefB.current.click()}>+ Foto</button></>}</div>
         {o.photoBefore.length===0?<div style={{fontSize:12,color:"#94a3b8"}}>Sin fotos.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{o.photoBefore.map((img,i)=><img key={i} src={img} alt="antes" style={{...thumb,width:100,height:80}}/>)}</div>}
       </div>
       <div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>Fotos DESPUES ({o.photoAfter.length})</div>{canEdit&&<><input ref={fileRefA} type="file" accept="image/*" style={{display:"none"}} onChange={e=>addPhoto("photoAfter",e)}/><button style={mkBtn("primary",true)} onClick={()=>fileRefA.current.click()}>+ Foto</button></>}</div>
-        {o.photoAfter.length===0?<div style={alrt("warning")}>Suba al menos una foto para cerrar la orden.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{o.photoAfter.map((img,i)=><img key={i} src={img} alt="despues" style={{...thumb,width:100,height:80}}/>)}</div>}
+        {o.photoAfter.length===0?<div style={alrt("warning")}>Suba al menos una foto para cerrar.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{o.photoAfter.map((img,i)=><img key={i} src={img} alt="despues" style={{...thumb,width:100,height:80}}/>)}</div>}
         {canEdit&&isAdmin&&o.status==="Ejecutado"&&<button style={{...mkBtn("success"),marginTop:10,width:"100%",justifyContent:"center"}} onClick={closeOrder}>Cerrar orden de trabajo</button>}
       </div>
     </div>
@@ -1239,6 +1130,7 @@ function Inspections({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,m
     </div>
   );
 }
+
 function InspForm({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,onBack,mob,towers}){
   const nowStr=new Date().toISOString().slice(0,16);
   const towerSectors=(towers||[]).filter(t=>t.active).map(t=>t.label);
@@ -1276,28 +1168,13 @@ function InspForm({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,onBa
         <div style={card}>
           <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>{sec.label}</div>
           {sec.items.map(name=>{
-            const it=getItem(sec.id,name);
-            const isMalo=it.state==="Malo";
+            const it=getItem(sec.id,name);const isMalo=it.state==="Malo";
             return(
               <div key={name} style={{borderBottom:"1px solid #f1f5f9",paddingBottom:12,marginBottom:12}}>
                 <div style={{fontWeight:600,fontSize:12,marginBottom:6}}>{name}</div>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
-                  {ITEM_STATES.map(s=><button key={s} onClick={()=>setItem(sec.id,name,"state",s)} style={{padding:"3px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"2px solid "+(it.state===s?ITEM_COLOR[s]:"#e2e8f0"),background:it.state===s?ITEM_COLOR[s]+"22":"#f9fafb",color:it.state===s?ITEM_COLOR[s]:"#6b7280"}}>{s}</button>)}
-                </div>
-                {(it.state&&it.state!=="No aplica")&&(
-                  <div style={{display:"flex",gap:8,marginBottom:6}}>
-                    <input style={{...inp,flex:1,fontSize:12}} placeholder="Observacion..." value={it.obs} onChange={e=>setItem(sec.id,name,"obs",e.target.value)}/>
-                    {isMalo&&<select style={{...selSt,width:110,fontSize:12}} value={it.urgency} onChange={e=>setItem(sec.id,name,"urgency",e.target.value)}><option value="">Urgencia...</option>{URGENCY_LEVELS.map(u=><option key={u}>{u}</option>)}</select>}
-                  </div>
-                )}
-                {(it.state==="Malo"||it.state==="Regular")&&(
-                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                    <button style={mkBtn("secondary",true)} onClick={()=>{setPendImg({sid:sec.id,name});fileRef.current.click();}}>Foto</button>
-                    {(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:50,height:40}}/>)}
-                    {isMalo&&!it.reqId&&<button style={mkBtn("danger",true)} onClick={()=>createReq(sec.id,name)}>+ Crear solicitud</button>}
-                    {isMalo&&it.reqId&&<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>}
-                  </div>
-                )}
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>{ITEM_STATES.map(s=><button key={s} onClick={()=>setItem(sec.id,name,"state",s)} style={{padding:"3px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"2px solid "+(it.state===s?ITEM_COLOR[s]:"#e2e8f0"),background:it.state===s?ITEM_COLOR[s]+"22":"#f9fafb",color:it.state===s?ITEM_COLOR[s]:"#6b7280"}}>{s}</button>)}</div>
+                {(it.state&&it.state!=="No aplica")&&<div style={{display:"flex",gap:8,marginBottom:6}}><input style={{...inp,flex:1,fontSize:12}} placeholder="Observacion..." value={it.obs} onChange={e=>setItem(sec.id,name,"obs",e.target.value)}/>{isMalo&&<select style={{...selSt,width:110,fontSize:12}} value={it.urgency} onChange={e=>setItem(sec.id,name,"urgency",e.target.value)}><option value="">Urgencia...</option>{URGENCY_LEVELS.map(u=><option key={u}>{u}</option>)}</select>}</div>}
+                {(it.state==="Malo"||it.state==="Regular")&&<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={()=>{setPendImg({sid:sec.id,name});fileRef.current.click();}}>Foto</button>{(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:50,height:40}}/>)}{isMalo&&!it.reqId&&<button style={mkBtn("danger",true)} onClick={()=>createReq(sec.id,name)}>+ Crear solicitud</button>}{isMalo&&it.reqId&&<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>}</div>}
               </div>
             );
           })}
@@ -1311,6 +1188,7 @@ function InspForm({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,onBa
     </div>
   );
 }
+
 function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,onBack,readOnly,mob}){
   const [tab,setTab]=useState("resumen");
   const safeItems=inspection.items||mkItems();
@@ -1372,6 +1250,7 @@ function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob,
     </div>
   );
 }
+
 function InvForm({item,onSave,onClose}){
   const [f,setF]=useState({name:"",category:INV_CATS[0],unit:INV_UNITS[0],stock:0,minStock:1,location:"Bodega A",cost:0,supplier:"",notes:"",...(item||{})});
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:500,padding:"20px",marginTop:16}}>
@@ -1389,6 +1268,7 @@ function InvForm({item,onSave,onClose}){
     <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.name.trim())return;onSave(f);}}>Guardar</button></div>
   </div></div>);
 }
+
 function StockModal({data,onConfirm,onClose}){
   const [qty,setQty]=useState(1);const isIn=data.dir>0;
   const max=isIn?9999:data.item.stock;
@@ -1402,6 +1282,7 @@ function StockModal({data,onConfirm,onClose}){
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn(isIn?"success":"danger",true)} disabled={!isIn&&qty>data.item.stock} onClick={()=>onConfirm(data.item.id,isIn?safeQty:-safeQty)}>{isIn?"Confirmar ingreso":"Confirmar egreso"}</button></div>
   </div></div>);
 }
+
 function DisModal({item,reqs,onConfirm,onClose,resps}){
   const RESP_ASSIGNABLE=getRespAssignable(resps);
   const [f,setF]=useState({provider:RESP_ASSIGNABLE[0]||"",qty:1,requestId:"",notes:""});
@@ -1421,7 +1302,7 @@ function DisModal({item,reqs,onConfirm,onClose,resps}){
   </div></div>);
 }
 
-function EmailsView({logs, setEmails, role}){
+function EmailsView({logs,setEmails,role}){
   const [q,setQ]=useState("");
   const visible=[...logs].sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(e=>!q||((e.to||"")+(e.subject||"")+(e.requestId||"")).toLowerCase().includes(q.toLowerCase()));
   return(<div>
@@ -1455,8 +1336,8 @@ function Reports({reqs,tasks,inventory,mob,resps}){
     <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
       <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por estado</div>{STATUSES.map(s=>{const c=reqs.filter(r=>r.status===s).length;return c?<div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><SBadge s={s}/><span style={{fontWeight:600}}>{c}</span></div>:null;})}</div>
       <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoria</div>{byCat.length===0?<Empty msg="Sin datos"/>:byCat.map(x=><div key={x.c} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div><div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div></div>)}</div>
-      <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Tareas por responsable</div>{byResp.map(x=><div key={x.r} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:12}}><span>{x.r}</span><span style={bdg("#3b82f6","#eff6ff")}>{x.c} tareas</span></div>)}</div>
-      <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen general</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Casos activos" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Casos cerrados" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Total tareas" v={tasks.length}/><IR l="Insumos stock critico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
+      <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Órdenes por responsable</div>{byResp.map(x=><div key={x.r} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:12}}><span>{x.r}</span><span style={bdg("#3b82f6","#eff6ff")}>{x.c} órdenes</span></div>)}</div>
+      <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen general</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Casos activos" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Casos cerrados" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Total órdenes" v={tasks.length}/><IR l="Insumos stock critico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
     </div>
   </div>);
 }
@@ -1478,66 +1359,50 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps,towers,eq
     if(fi.q&&!((m.asset||"")+" "+(m.category||"")+" "+(m.provider||"")).toLowerCase().includes(fi.q.toLowerCase()))return false;
     return true;
   }).sort((a,b)=>{const ord={Vencida:0,"Por vencer":1,"En ejecucion":2,Vigente:3,Completada:4};return((ord[a.computedStatus]??9)-(ord[b.computedStatus]??9));});
-
-  // Alertas certificaciones
-  const certsVenc=(certs||[]).filter(c=>{if(!c.vencimiento)return false;const d=Math.ceil((new Date(c.vencimiento)-new Date())/86400000);return d<0;}).length;
+  const certsVenc=(certs||[]).filter(c=>{if(!c.vencimiento)return false;return Math.ceil((new Date(c.vencimiento)-new Date())/86400000)<0;}).length;
   const certsPorV=(certs||[]).filter(c=>{if(!c.vencimiento)return false;const d=Math.ceil((new Date(c.vencimiento)-new Date())/86400000);return d>=0&&d<=30;}).length;
-
   const saveMant=item=>{
     const ts=new Date().toISOString();
     if(editItem){setMant(p=>p.map(m=>m.id===item.id?item:m));showToast("Mantencion actualizada");}
-    else{
-      const code=genCode(mant,"MAN-");
-      const nr=normalizeMant({...item,id:code,code,createdAt:ts});
-      setMant(p=>[nr,...p]);
-      addEmail({requestId:code,date:ts,to:"admin@condo.cl",subject:"Nueva mantencion "+code+" - "+item.asset,type:"Mantencion",status:"Enviado",body:"Se registro mantencion "+code+" para "+item.asset+"."});
-      showToast("Mantencion "+code+" creada");
-    }
+    else{const code=genCode(mant,"MAN-");const nr=normalizeMant({...item,id:code,code,createdAt:ts});setMant(p=>[nr,...p]);addEmail({requestId:code,date:ts,to:"admin@condo.cl",subject:"Nueva mantencion "+code+" - "+item.asset,type:"Mantencion",status:"Enviado",body:"Se registro mantencion "+code+" para "+item.asset+"."});showToast("Mantencion "+code+" creada");}
     setShowForm(false);setEdit(null);
   };
-
   const saveCert=item=>{
-    if(editCert){setCerts(p=>p.map(c=>c.id===item.id?item:c));showToast("Actualizado");}
+    if(editCert&&editCert.id){setCerts(p=>p.map(c=>c.id===item.id?item:c));showToast("Actualizado");}
     else{setCerts(p=>[{...item,id:"cert"+uid()},...p]);showToast("Certificación registrada");}
     setShowCertForm(false);setEditCert(null);
   };
-
   if(sub==="detail"&&sel){
     const item=normalizeMant(mant.find(m=>m.id===sel.id)||sel);
     return <MantDetail item={item} mant={mant} setMant={setMant} reqs={reqs} role={role} showToast={showToast} addEmail={addEmail} mob={mob} readOnly={readOnly} onBack={()=>setSub("list")} resps={resps}/>;
   }
-
   const mantTabs=[{id:"mant",label:"Mantenciones"},{id:"certs",label:"Certificaciones"+(certsVenc+certsPorV>0?" ⚠":"")}];
-
   return(
     <div>
-      {vencidas>0&&mantTab==="mant"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><div><strong style={{color:"#dc2626"}}>{vencidas} mantencion(es) vencida(s)</strong></div></div>}
-      {porVencer>0&&mantTab==="mant"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><strong style={{color:"#92400e"}}>{porVencer} mantencion(es) vencen pronto</strong></div>}
+      {vencidas>0&&mantTab==="mant"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><strong style={{color:"#dc2626"}}>{vencidas} mantencion(es) vencida(s)</strong></div>}
+      {porVencer>0&&mantTab==="mant"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><strong style={{color:"#92400e"}}>{porVencer} vencen pronto</strong></div>}
       {certsVenc>0&&mantTab==="certs"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626",fontSize:16}}>✗</span><strong style={{color:"#dc2626"}}>{certsVenc} certificación(es) vencida(s)</strong></div>}
       {certsPorV>0&&mantTab==="certs"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e",fontSize:16}}>!</span><strong style={{color:"#92400e"}}>{certsPorV} certificación(es) vencen en 30 días</strong></div>}
-
       <Tabs tabs={mantTabs} active={mantTab} onChange={setMantTab}/>
-
       {mantTab==="mant"&&<div>
         <Grid cols={4} mob={mob}><Kpi value={vencidas} label="Vencidas" color="#ef4444" mob={mob}/><Kpi value={porVencer} label="Por vencer" color="#f59e0b" mob={mob}/><Kpi value={enEjec} label="En ejecucion" color="#6366f1" mob={mob}/><Kpi value={vigentes} label="Vigentes" color="#10b981" mob={mob}/></Grid>
         <div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar activo, proveedor..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/><select style={{...selSt,flex:1}} value={fi.cat} onChange={e=>setFi(p=>({...p,cat:e.target.value}))}><option value="">Todas las categorias</option>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select><select style={{...selSt,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos los estados</option>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>{!readOnly&&<button style={mkBtn("primary",true)} onClick={()=>{setEdit(null);setShowForm(true);}}>+ Nueva</button>}</div></div>
-        {visible.length===0?<Empty msg="Sin mantenciones registradas"/>:<div>{visible.map(m=>{
+        {visible.length===0?<Empty msg="Sin mantenciones"/>:<div>{visible.map(m=>{
           const daysLeft=m.nextDate?Math.ceil((new Date(m.nextDate)-new Date())/86400000):null;
           const dayColor=daysLeft===null?"#374151":daysLeft<0?"#ef4444":daysLeft<=30?"#f59e0b":"#374151";
           return(<div key={m.id} style={{...card,borderLeft:"4px solid "+(MANT_SC[m.computedStatus]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>{setSel(m);setSub("detail");}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
               <div style={{flex:1,minWidth:0}}><div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}><span style={{fontWeight:700,color:"#6366f1",fontSize:11}}>{m.code}</span><span style={bdg("#6b7280","#f1f5f9")}>{m.tipo}</span></div><div style={{fontWeight:700,fontSize:14,marginBottom:3}}>{m.asset}</div><div style={{fontSize:11,color:"#64748b"}}>{m.subcategory} - {m.location}</div></div>
-              <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end",flexShrink:0}}><MBadge m={m}/>{m.nextDate&&<div style={{fontSize:11,textAlign:"right",color:dayColor,fontWeight:600}}>{daysLeft!==null&&(daysLeft<0?Math.abs(daysLeft)+" dias vencida":daysLeft+" dias restantes")}</div>}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end",flexShrink:0}}><MBadge m={m}/>{m.nextDate&&<div style={{fontSize:11,color:dayColor,fontWeight:600}}>{daysLeft!==null&&(daysLeft<0?Math.abs(daysLeft)+" dias vencida":daysLeft+" dias restantes")}</div>}</div>
             </div>
             {!readOnly&&<div style={{display:"flex",gap:6,marginTop:10}} onClick={e=>e.stopPropagation()}><button style={mkBtn("secondary",true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button><button style={mkBtn("ghost",true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button></div>}
           </div>);
         })}</div>}
         {showForm&&<MantForm item={editItem} reqs={reqs} onSave={saveMant} onClose={()=>{setShowForm(false);setEdit(null);}} resps={resps}/>}
       </div>}
-
       {mantTab==="certs"&&<div>
         {activeEquipos.length===0
-          ?<div style={{...alrt("warning")}}>No hay equipos activos. Ve a Config → Equipos para activar los equipos de tu edificio.</div>
+          ?<div style={alrt("warning")}>No hay equipos activos. Ve a Config → Equipos para activar los equipos de tu edificio.</div>
           :<div>
             <div style={{...card,padding:12,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:13,color:"#64748b"}}>{activeEquipos.length} equipos activos</div>
@@ -1553,21 +1418,8 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps,towers,eq
                 <div key={eq.id} style={{...card,marginBottom:10,borderLeft:"4px solid "+certColor}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
                     <div style={{flex:1}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                        <span style={{fontSize:22}}>{eq.icono}</span>
-                        <div>
-                          <div style={{fontWeight:700,fontSize:14}}>{eq.nombre}</div>
-                          <div style={{fontSize:11,color:"#64748b"}}>Frecuencia recomendada: {eq.frecuencia}</div>
-                        </div>
-                      </div>
-                      {lastCert?<div style={{background:certBg,borderRadius:8,padding:"8px 10px",marginTop:6}}>
-                        <div style={{fontSize:12,fontWeight:600,color:certColor}}>
-                          {daysLeft<0?`Vencida hace ${Math.abs(daysLeft)} días`:daysLeft===0?"Vence hoy":daysLeft<=30?`Vence en ${daysLeft} días`:`Vigente · ${daysLeft} días restantes`}
-                        </div>
-                        <div style={{fontSize:11,color:"#64748b",marginTop:2}}>Última: {fmtD(lastCert.fecha)} · Vence: {fmtD(lastCert.vencimiento)}</div>
-                        {lastCert.empresa&&<div style={{fontSize:11,color:"#64748b"}}>Empresa: {lastCert.empresa}</div>}
-                        {lastCert.ubicacion&&<div style={{fontSize:11,color:"#64748b"}}>Ubicación: {lastCert.ubicacion}</div>}
-                      </div>:<div style={{...alrt("warning"),margin:"6px 0 0"}}>Sin certificación registrada</div>}
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:22}}>{eq.icono}</span><div><div style={{fontWeight:700,fontSize:14}}>{eq.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>Frecuencia: {eq.frecuencia}</div></div></div>
+                      {lastCert?<div style={{background:certBg,borderRadius:8,padding:"8px 10px",marginTop:6}}><div style={{fontSize:12,fontWeight:600,color:certColor}}>{daysLeft<0?`Vencida hace ${Math.abs(daysLeft)} días`:daysLeft===0?"Vence hoy":daysLeft<=30?`Vence en ${daysLeft} días`:`Vigente · ${daysLeft} días restantes`}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>Última: {fmtD(lastCert.fecha)} · Vence: {fmtD(lastCert.vencimiento)}</div>{lastCert.empresa&&<div style={{fontSize:11,color:"#64748b"}}>Empresa: {lastCert.empresa}</div>}{lastCert.ubicacion&&<div style={{fontSize:11,color:"#64748b"}}>Ubicación: {lastCert.ubicacion}</div>}</div>:<div style={{...alrt("warning"),margin:"6px 0 0"}}>Sin certificación registrada</div>}
                     </div>
                     {!readOnly&&<button style={mkBtn("secondary",true)} onClick={()=>{setEditCert({equipoId:eq.id,equipoNombre:eq.nombre});setShowCertForm(true);}}>+ Registrar</button>}
                   </div>
@@ -1585,24 +1437,14 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,resps,towers,eq
 
 function CertForm({cert,equipos,towers,onSave,onClose}){
   const actTowers=(towers||[]).filter(t=>t.active);
-  const [f,setF]=useState({
-    equipoId:cert?.equipoId||equipos[0]?.id||"",
-    equipoNombre:cert?.equipoNombre||equipos[0]?.nombre||"",
-    fecha:new Date().toISOString().slice(0,10),
-    vencimiento:"",
-    empresa:"",
-    torre:"",
-    ubicacion:"",
-    notas:"",
-    ...(cert||{})
-  });
+  const [f,setF]=useState({equipoId:cert?.equipoId||equipos[0]?.id||"",equipoNombre:cert?.equipoNombre||equipos[0]?.nombre||"",fecha:new Date().toISOString().slice(0,10),vencimiento:"",empresa:"",torre:"",ubicacion:"",notas:"",...(cert&&cert.id?cert:{})});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16,marginBottom:16}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>Registrar Certificación</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Equipo *</label><select style={selSt} value={f.equipoId} onChange={e=>{const eq=equipos.find(x=>x.id===e.target.value);set("equipoId",e.target.value);set("equipoNombre",eq?.nombre||"");}}>{equipos.map(e=><option key={e.id} value={e.id}>{e.icono} {e.nombre}</option>)}</select></div>
       <div style={fg}><label style={lbl}>Torre</label><select style={selSt} value={f.torre} onChange={e=>set("torre",e.target.value)}><option value="">Sin torre específica</option>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
-      <div style={fg}><label style={lbl}>Ubicación específica</label><input style={inp} placeholder="ej: Subterráneo, Sala técnica..." value={f.ubicacion} onChange={e=>set("ubicacion",e.target.value)}/></div>
+      <div style={fg}><label style={lbl}>Ubicación específica</label><input style={inp} placeholder="ej: Subterráneo..." value={f.ubicacion} onChange={e=>set("ubicacion",e.target.value)}/></div>
       <div style={fg}><label style={lbl}>Fecha certificación *</label><input type="date" style={inp} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/></div>
       <div style={fg}><label style={lbl}>Fecha vencimiento *</label><input type="date" style={inp} value={f.vencimiento} onChange={e=>set("vencimiento",e.target.value)}/></div>
       <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Empresa responsable</label><input style={inp} placeholder="ej: Empresa Certificadora S.A." value={f.empresa} onChange={e=>set("empresa",e.target.value)}/></div>
@@ -1611,6 +1453,7 @@ function CertForm({cert,equipos,towers,onSave,onClose}){
     <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.equipoId||!f.fecha||!f.vencimiento)return;onSave(f);}}>Guardar</button></div>
   </div></div>);
 }
+
 function MantForm({item,reqs,onSave,onClose,resps}){
   const RESP_LIST=getRespList(resps);
   const defCat=MANT_CATS[0];
@@ -1637,6 +1480,7 @@ function MantForm({item,reqs,onSave,onClose,resps}){
     <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.asset.trim())return;onSave(f);}}>Guardar</button></div>
   </div></div>);
 }
+
 function MantDetail({item,mant,setMant,reqs,role,showToast,addEmail,mob,readOnly,onBack,resps}){
   const RESP_LIST=getRespList(resps);
   const m=normalizeMant(mant.find(x=>x.id===item.id)||item);
@@ -1666,6 +1510,7 @@ function MantDetail({item,mant,setMant,reqs,role,showToast,addEmail,mob,readOnly
     </div>
   );
 }
+
 function HistForm({onSave,onClose,resps}){
   const RESP_LIST=getRespList(resps);
   const [f,setF]=useState({date:new Date().toISOString().slice(0,10),tipo:MANT_TIPOS[0],responsible:RESP_LIST[0]||"",notes:"",costReal:0,marcarVigente:false});
@@ -1682,6 +1527,7 @@ function HistForm({onSave,onClose,resps}){
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("success",true)} onClick={()=>{if(!f.date)return;onSave(f);}}>Registrar</button></div>
   </div>);
 }
+
 function DocForm({onSave,onClose}){
   const [f,setF]=useState({name:"",notes:""});
   return(<div style={{...card,border:"2px solid #e2e8f0",marginBottom:12}}>
@@ -1692,62 +1538,70 @@ function DocForm({onSave,onClose}){
   </div>);
 }
 
-function ConfigView({cats,setCats,towers,setTowers,resps,setResps,showToast,session}){
+function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,session,setUsuarios}){
   const [editCat,setEditCat]=useState(null);const [showCF,setShowCF]=useState(false);
   const [editTow,setEditTow]=useState(null);const [showTF,setShowTF]=useState(false);
-  const [editResp,setEditResp]=useState(null);const [showRF,setShowRF]=useState(false);
   const [tab,setTab]=useState("cats");
-  const [usuarios,setUsuarios]=useState([]);const [showUF,setShowUF]=useState(false);const [editUser,setEditUser]=useState(null);
-
+  const [usuariosLocal,setUsuariosLocal]=useState([]);const [showUF,setShowUF]=useState(false);const [editUser,setEditUser]=useState(null);
   useEffect(()=>{ if(tab==="usuarios") loadUsuarios(); },[tab]);
   const loadUsuarios=async()=>{
-    try{const res=await fetch(`${SUPA_URL}/rest/v1/usuarios?order=created_at.asc&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`}});const data=await res.json();setUsuarios(Array.isArray(data)?data:[]);}catch(e){console.error(e);}
+    try{
+      const res=await fetch(`${SUPA_URL}/rest/v1/usuarios?order=created_at.asc&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`}});
+      const data=await res.json();
+      const list=Array.isArray(data)?data:[];
+      setUsuariosLocal(list);
+      setUsuarios(list);
+    }catch(e){console.error(e);}
   };
   const saveUsuario=async(u)=>{
     try{
-      if(u.isNew){
-        await fetch(`${SUPA_URL}/rest/v1/usuarios`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`,"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});
-        showToast("Usuario creado");
-      } else {
-        await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active??true})});
-        showToast("Usuario actualizado");
-      }
+      if(u.isNew){await fetch(`${SUPA_URL}/rest/v1/usuarios`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`,"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});showToast("Usuario creado");}
+      else{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active??true})});showToast("Usuario actualizado");}
       loadUsuarios();setShowUF(false);setEditUser(null);
     }catch(e){showToast("Error: "+e.message,"error");}
   };
-  const toggleUser=async(u)=>{
-    try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({active:!u.active})});loadUsuarios();showToast(u.active?"Desactivado":"Activado");}catch(e){showToast("Error","error");}
-  };
-  const deleteUser=async(u)=>{
-    if(!window.confirm(`¿Eliminar usuario ${u.nombre}?`))return;
-    try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"DELETE",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`}});loadUsuarios();showToast("Usuario eliminado");}catch(e){showToast("Error al eliminar","error");}
-  };
+  const toggleUser=async(u)=>{try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"PATCH",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`},body:JSON.stringify({active:!u.active})});loadUsuarios();showToast(u.active?"Desactivado":"Activado");}catch(e){showToast("Error","error");}};
+  const deleteUser=async(u)=>{if(!window.confirm(`¿Eliminar usuario ${u.nombre}?`))return;try{await fetch(`${SUPA_URL}/rest/v1/usuarios?id=eq.${u.id}`,{method:"DELETE",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${session.token}`}});loadUsuarios();showToast("Usuario eliminado");}catch(e){showToast("Error al eliminar","error");}};
   const toggleCat=id=>setCats(p=>p.map(c=>c.id===id?{...c,active:!c.active}:c));
   const saveCat=cat=>{if(editCat){setCats(p=>p.map(c=>c.id===cat.id?cat:c));}else{setCats(p=>[...p,{...cat,id:"cat"+uid(),order:p.length}]);}showToast("Guardada");setShowCF(false);setEditCat(null);};
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});
   const toggleTow=id=>setTowers(p=>p.map(t=>t.id===id?{...t,active:!t.active}:t));
   const saveTow=t=>{if(editTow){setTowers(p=>p.map(x=>x.id===t.id?t:x));}else{setTowers(p=>[...p,{...t,id:"t"+uid()}]);}showToast("Guardada");setShowTF(false);setEditTow(null);};
-  const toggleResp=id=>setResps(p=>p.map(r=>r.id===id?{...r,active:!r.active}:r));
-  const saveResp=r=>{if(editResp){setResps(p=>p.map(x=>x.id===r.id?r:x));}else{setResps(p=>[...p,{...r,id:"r"+uid()}]);}showToast("Guardado");setShowRF(false);setEditResp(null);};
   const sla={Emergencia:"4h",Alta:"24h",Media:"72h",Baja:"7 dias"};
-  const cfgTabs=[{id:"cats",label:"Categorias"},{id:"towers",label:"Torres"},{id:"resps",label:"Responsables"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"}];
+  const cfgTabs=[{id:"cats",label:"Categorias"},{id:"towers",label:"Torres"},{id:"equipos",label:"Equipos"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"}];
   return(
     <div>
       <Tabs tabs={cfgTabs} active={tab} onChange={setTab}/>
       {tab==="cats"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{cats.filter(c=>c.active).length} activas</div><button style={mkBtn("primary",true)} onClick={()=>{setEditCat(null);setShowCF(true);}}>+ Nueva</button></div><div style={card}>{cats.map((cat,idx)=><div key={cat.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:cat.active?1:.5,flexWrap:"wrap"}}><div style={{display:"flex",flexDirection:"column"}}><button style={{...mkBtn("ghost",true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,-1)}>▲</button><button style={{...mkBtn("ghost",true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,1)}>▼</button></div><div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{cat.name}</div><div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat.subs.join(", ")}</div></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditCat(cat);setShowCF(true);}}>Editar</button><button style={mkBtn(cat.active?"warning":"success",true)} onClick={()=>toggleCat(cat.id)}>{cat.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setCats(p=>p.filter(c=>c.id!==cat.id))}>X</button></div></div>)}</div>{showCF&&<CatForm cat={editCat} onSave={saveCat} onClose={()=>{setShowCF(false);setEditCat(null);}}/>}</div>}
       {tab==="towers"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{towers.filter(t=>t.active).length} activas</div><button style={mkBtn("primary",true)} onClick={()=>{setEditTow(null);setShowTF(true);}}>+ Nueva torre</button></div><div style={card}>{towers.map((t,idx)=><div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:t.active?1:.5,flexWrap:"wrap"}}><div style={{width:34,height:34,borderRadius:8,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"#3b82f6",flexShrink:0}}>{t.name}</div><div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{t.label}</div></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditTow(t);setShowTF(true);}}>Editar</button><button style={mkBtn(t.active?"warning":"success",true)} onClick={()=>toggleTow(t.id)}>{t.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setTowers(p=>p.filter(x=>x.id!==t.id))}>X</button></div></div>)}</div>{showTF&&<TowerForm tower={editTow} onSave={saveTow} onClose={()=>{setShowTF(false);setEditTow(null);}}/>}</div>}
-      {tab==="resps"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{resps.filter(r=>r.active).length} activos</div><button style={mkBtn("primary",true)} onClick={()=>{setEditResp(null);setShowRF(true);}}>+ Nuevo</button></div><div>{resps.map(r=><div key={r.id} style={{...card,opacity:r.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{r.name}</div><div style={{fontSize:11,color:"#64748b",marginBottom:3}}>{r.email}</div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{(r.modules||[]).map(m=><span key={m} style={bdg("#6366f1","#eef2ff")}>{m}</span>)}</div></div><div style={{display:"flex",gap:4}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditResp(r);setShowRF(true);}}>Editar</button><button style={mkBtn(r.active?"warning":"success",true)} onClick={()=>toggleResp(r.id)}>{r.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>setResps(p=>p.filter(x=>x.id!==r.id))}>X</button></div></div></div>)}</div>{showRF&&<RespForm resp={editResp} onSave={saveResp} onClose={()=>{setShowRF(false);setEditResp(null);}}/>}</div>}
+      {tab==="equipos"&&<div>
+        <div style={{...alrt("info"),marginBottom:12}}>Activa los equipos que existen en tu edificio. Solo los activos aparecerán en Mantención → Certificaciones.</div>
+        <div style={card}>
+          {EQUIP_TIPOS.map(et=>{
+            const eq=(equipos||[]).find(e=>e.id===et.id)||{...et,active:false};
+            return(
+              <div key={et.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:eq.active?1:.5}}>
+                <div style={{fontSize:24,flexShrink:0}}>{et.icono}</div>
+                <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{et.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>Frecuencia: {et.frecuencia}</div></div>
+                <button style={mkBtn(eq.active?"warning":"success",true)} onClick={()=>setEquipos(p=>p.map(e=>e.id===et.id?{...e,active:!e.active}:e))}>{eq.active?"Desactivar":"Activar"}</button>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{fontSize:12,color:"#64748b",marginTop:8}}>{(equipos||[]).filter(e=>e.active).length} equipos activos</div>
+      </div>}
       {tab==="usuarios"&&<div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuarios.filter(u=>u.active).length} activos</div><button style={mkBtn("primary",true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuariosLocal.filter(u=>u.active).length} activos</div><button style={mkBtn("primary",true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
         {showUF&&<UserForm user={editUser} onSave={saveUsuario} onClose={()=>{setShowUF(false);setEditUser(null);}}/>}
-        <div>{usuarios.map(u=><div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{u.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={mkBtn(u.active?"warning":"success",true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>deleteUser(u)}>Eliminar</button></div></div></div>)}</div>
+        <div>{usuariosLocal.map(u=><div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{u.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button style={mkBtn("secondary",true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={mkBtn(u.active?"warning":"success",true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button><button style={mkBtn("danger",true)} onClick={()=>deleteUser(u)}>Eliminar</button></div></div></div>)}</div>
       </div>}
       {tab==="sla"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>{Object.entries(sla).map(([p,t])=><div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>)}</div>}
     </div>
   );
 }
+
 function UserForm({user,onSave,onClose}){
-  const [f,setF]=useState(user ? {...user, isNew:false} : {nombre:"",email:"",rol:"Residente",active:true,isNew:true});
+  const [f,setF]=useState(user?{...user,isNew:false}:{nombre:"",email:"",rol:"Residente",active:true,isNew:true});
   const [rol,setRol]=useState((user&&user.rol)||"Residente");
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
     <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
@@ -1760,19 +1614,15 @@ function UserForm({user,onSave,onClose}){
     <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave({...f,rol});}}>Guardar</button></div>
   </div></div>);
 }
+
 function CatForm({cat,onSave,onClose}){
   const [name,setName]=useState(cat?cat.name:"");
   const [subs,setSubs]=useState(cat?cat.subs.join("\n"):"");
   const save=()=>{if(!name.trim())return;const subsArr=subs.split("\n").map(s=>s.trim()).filter(Boolean);if(!subsArr.length)return;onSave({...(cat||{}),name:name.trim(),subs:subsArr,active:cat?cat.active:true});};
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{cat?"Editar":"Nueva"} categoria</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div><div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={name} onChange={e=>setName(e.target.value)}/></div><div style={fg}><label style={lbl}>Subcategorias * (una por linea)</label><textarea style={{...inp,height:120,resize:"vertical"}} value={subs} onChange={e=>setSubs(e.target.value)}/></div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={save}>Guardar</button></div></div></div>);
 }
+
 function TowerForm({tower,onSave,onClose}){
   const [name,setName]=useState(tower?tower.name:"");const [label,setLabel]=useState(tower?tower.label:"");
   return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"20px",marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{tower?"Editar":"Nueva"} torre</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div><div style={fg}><label style={lbl}>Codigo *</label><input style={inp} value={name} onChange={e=>setName(e.target.value)} placeholder="ej: A"/></div><div style={fg}><label style={lbl}>Nombre completo *</label><input style={inp} value={label} onChange={e=>setLabel(e.target.value)} placeholder="ej: Torre A"/></div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!name.trim()||!label.trim())return;onSave({...(tower||{}),name:name.trim(),label:label.trim(),active:tower?tower.active:true});}}>Guardar</button></div></div></div>);
-}
-function RespForm({resp,onSave,onClose}){
-  const [f,setF]=useState({name:"",email:"",phone:"",modules:[],active:true,...(resp||{})});
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  const toggleMod=m=>setF(p=>({...p,modules:(p.modules||[]).includes(m)?(p.modules||[]).filter(x=>x!==m):[...(p.modules||[]),m]}));
-  return(<div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{resp?"Editar":"Nuevo"} responsable</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={e=>set("name",e.target.value)}/></div><div style={fg}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>set("email",e.target.value)}/></div><div style={fg}><label style={lbl}>Telefono</label><input style={inp} value={f.phone} onChange={e=>set("phone",e.target.value)}/></div><div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Modulos</label><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>{ALL_MODS.map(m=><button key={m} onClick={()=>toggleMod(m)} style={{padding:"4px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"1.5px solid "+((f.modules||[]).includes(m)?"#6366f1":"#e2e8f0"),background:(f.modules||[]).includes(m)?"#eef2ff":"#f9fafb",color:(f.modules||[]).includes(m)?"#6366f1":"#6b7280"}}>{m}</button>)}</div></div></div><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={()=>{if(!f.name.trim()||!f.email.trim())return;onSave(f);}}>Guardar</button></div></div></div>);
 }

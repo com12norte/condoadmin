@@ -36,7 +36,20 @@ const authSignOut = async (token) => {
   await fetch(`${SUPA_URL}/auth/v1/logout`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${token}`}});
 };
 
-const normalizeReq = (r) => ({
+// ── SUPABASE STORAGE ──────────────────────────────────────────────────────────
+const uploadImage = async (file, path) => {
+  const res = await fetch(SUPA_URL+"/storage/v1/object/imagenes/"+path, {
+    method: "POST",
+    headers: {
+      "apikey": SUPA_KEY,
+      "Authorization": "Bearer "+SUPA_KEY,
+      "Content-Type": file.type||"image/jpeg",
+    },
+    body: file,
+  });
+  if (!res.ok) { const e = await res.text(); throw new Error(e); }
+  return SUPA_URL+"/storage/v1/object/public/imagenes/"+path;
+};
   comments:[], history:[], relatedTasks:[], attachmentsInitial:[],
   attachmentsProgress:[], attachmentsClosure:[], emailLogIds:[],
   assignedTo:"Sin asignar", dueDate:null, isUrgent:false,
@@ -226,6 +239,67 @@ function LoginScreen({onLogin}) {
   const [resEmail,setResEmail]=useState("");
   const [resErr,setResErr]=useState("");
 
+  // Detectar token de recuperación en la URL
+  const [recoveryToken,setRecoveryToken]=useState(null);
+  const [newPass,setNewPass]=useState("");
+  const [newPassConfirm,setNewPassConfirm]=useState("");
+  const [passErr,setPassErr]=useState("");
+  const [passOk,setPassOk]=useState(false);
+  const [passLoad,setPassLoad]=useState(false);
+
+  useEffect(()=>{
+    const hash=window.location.hash;
+    if(hash&&hash.includes("access_token")&&hash.includes("type=recovery")){
+      const params=new URLSearchParams(hash.replace("#",""));
+      const token=params.get("access_token");
+      if(token) setRecoveryToken(token);
+    }
+  },[]);
+
+  const submitCambioPass=async()=>{
+    if(!newPass||newPass.length<6){setPassErr("Mínimo 6 caracteres");return;}
+    if(newPass!==newPassConfirm){setPassErr("Las contraseñas no coinciden");return;}
+    setPassLoad(true);setPassErr("");
+    try{
+      const res=await fetch(`${SUPA_URL}/auth/v1/user`,{
+        method:"PUT",
+        headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${recoveryToken}`},
+        body:JSON.stringify({password:newPass})
+      });
+      if(!res.ok)throw new Error("Error al cambiar contraseña");
+      setPassOk(true);
+      window.location.hash="";
+      setTimeout(()=>setRecoveryToken(null),2000);
+    }catch(e){setPassErr(e.message||"Error al cambiar contraseña");}
+    setPassLoad(false);
+  };
+
+  // ── PANTALLA CAMBIO DE CONTRASEÑA ───────────────────────────────────────────
+  if(recoveryToken) return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f1f5f9",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{background:"#fff",borderRadius:16,padding:"40px 32px",width:"100%",maxWidth:400,boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:48,marginBottom:12}}>🔐</div>
+          <div style={{fontWeight:700,fontSize:20,color:"#0f172a"}}>Crear nueva contraseña</div>
+          <div style={{color:"#64748b",fontSize:13,marginTop:4}}>Ingresa tu nueva contraseña para continuar</div>
+        </div>
+        {passOk&&<div style={{...alrt("success"),marginBottom:16}}>✓ Contraseña actualizada. Redirigiendo...</div>}
+        {passErr&&<div style={{...alrt("error"),marginBottom:16}}>{passErr}</div>}
+        {!passOk&&<>
+          <div style={{marginBottom:14}}>
+            <label style={lbl}>Nueva contraseña</label>
+            <input style={inp} type="password" value={newPass} onChange={e=>setNewPass(e.target.value)} placeholder="Mínimo 6 caracteres"/>
+          </div>
+          <div style={{marginBottom:24}}>
+            <label style={lbl}>Confirmar contraseña</label>
+            <input style={inp} type="password" value={newPassConfirm} onChange={e=>setNewPassConfirm(e.target.value)} placeholder="Repite la contraseña" onKeyDown={e=>e.key==="Enter"&&submitCambioPass()}/>
+          </div>
+          <button style={{width:"100%",padding:"12px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submitCambioPass} disabled={passLoad}>{passLoad?"Guardando...":"Guardar contraseña"}</button>
+        </>}
+      </div>
+    </div>
+  );
+
   const submitPersonal = async () => {
     if (!email||!pass){setErr("Ingrese correo y contraseña");return;}
     setLoad(true);setErr("");
@@ -313,9 +387,21 @@ function LoginScreen({onLogin}) {
           <label style={{...lbl,color:"#94a3b8"}}>Correo electrónico</label>
           <input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="correo@ejemplo.cl" onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/>
         </div>
-        <div style={{marginBottom:24}}>
+        <div style={{marginBottom:8}}>
           <label style={{...lbl,color:"#94a3b8"}}>Contraseña</label>
           <input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/>
+        </div>
+        <div style={{textAlign:"right",marginBottom:20}}>
+          <button onClick={async()=>{
+            if(!email||!email.includes("@")){setErr("Ingrese su correo primero");return;}
+            try{
+              const res=await fetch(`${SUPA_URL}/auth/v1/recover`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY},body:JSON.stringify({email})});
+              if(res.ok)setErr("✓ Mail de recuperación enviado a "+email);
+              else setErr("Error al enviar. Verifique el correo.");
+            }catch(e){setErr("Error al enviar el mail.");}
+          }} style={{background:"none",border:"none",color:"#6366f1",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>
+            ¿Olvidaste tu contraseña?
+          </button>
         </div>
         <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submitPersonal} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
       </div>
@@ -752,7 +838,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
         </div>
       )}
       {tab==="history"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Bitacora</div>{safeHistory.length===0?<Empty msg="Sin historial"/>:<div style={{position:"relative",paddingLeft:20}}>{[...safeHistory].reverse().map((h,i)=><div key={i} style={{position:"relative",paddingLeft:16,paddingBottom:14}}><div style={{width:9,height:9,borderRadius:"50%",background:h.to?STATUS_COLOR[h.to]:"#3b82f6",position:"absolute",left:0,top:4}}/><div style={{fontSize:13,fontWeight:600}}>{h.action}</div>{h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div></div>)}</div>}</div>}
-      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} resps={resps}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin órdenes de trabajo"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva orden</button>}</div>}
+      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} resps={resps} reqs={reqs}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin órdenes de trabajo"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva orden</button>}</div>}
       {tab==="evidence"&&<div>{["inicial","avance","cierre"].map(type=><div key={type} style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Imagenes {type==="inicial"?"iniciales":type==="avance"?"de avance":"de cierre"}</div>{r.status!=="Cerrada"&&<button style={mkBtn("secondary",true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}</div>{myAtt(type).length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imagenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt(type).map((a,i)=><div key={a.id||i} style={{textAlign:"center"}}><img src={a.preview} alt={a.name} style={thumb} onError={e=>e.target.style.display="none"}/><div style={{fontSize:10,color:"#64748b",marginTop:3,maxWidth:70,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div></div>)}</div>}</div>)}</div>}
       {tab==="emails"&&<div style={card}>{myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span><span style={bdg("#10b981","#f0fdf4")}>{e.status}</span></div><div style={{fontSize:10,color:"#64748b",marginBottom:3}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4}}>{e.body}</div></div>)}</div>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
@@ -761,13 +847,32 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
   );
 }
 
-function TaskForm({requestId,setTasks,showToast,onClose,resps}){
+function TaskForm({requestId,setTasks,showToast,onClose,resps,reqs}){
   const RESP_ASSIGNABLE=getRespAssignable(resps);
-  const [f,setF]=useState({title:"",desc:"",responsible:RESP_ASSIGNABLE[0]||"",ejecutor:"",dueDate:"",priority:"Media"});
-  const submit=()=>{
+  const proveedores=(resps||[]).filter(u=>u.active).map(u=>u.nombre);
+  // Obtener responsable de la solicitud asociada
+  const req=(reqs||[]).find(r=>r.id===requestId);
+  const respAsignado=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:(RESP_ASSIGNABLE[0]||"");
+  const [f,setF]=useState({title:"",desc:"",responsible:respAsignado,ejecutor:proveedores[0]||"",dueDate:"",priority:"Media"});
+  const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
-    setTasks(p=>[...p,{id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f}]);
-    showToast("Orden de trabajo creada");onClose();
+    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
+    setTasks(p=>[...p,newTask]);
+    showToast("Orden de trabajo creada");
+    // Notificar al ejecutor si tiene correo
+    if(f.ejecutor){
+      try{
+        const res=await fetch(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(f.ejecutor)}&active=eq.true&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}});
+        const users=await res.json();
+        const u=users&&users[0];
+        if(u?.email){
+          const req=(reqs||[]).find(r=>r.id===requestId);
+          await fetch("https://api.emailjs.com/api/v1.0/email/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({service_id:"service_vxhdrlx",template_id:"template_90tjafk",user_id:"wKxD2rJHuftU7W-WE",template_params:{to_email:u.email,subject:"[CondoAdmin] Nueva orden de trabajo asignada",name:"CondoAdmin",email:"no-reply@condoadmin.cl",message:`Hola ${u.nombre},\n\nSe te ha asignado una nueva orden de trabajo:\n\n📋 DETALLE\n──────────────────────────\nTrabajo: ${f.title}\nDescripción: ${f.desc||"Sin descripción"}\nPrioridad: ${f.priority}\nFecha límite: ${f.dueDate||"Sin fecha"}\nResponsable: ${f.responsible}${req?`\n\nSolicitud: ${req.code}\nUbicación: Torre ${req.tower} / Unidad ${req.unit}`:""}\n──────────────────────────\nIngresa a CondoAdmin para ver el detalle.`}})});
+          console.log("Mail enviado a ejecutor:",u.email);
+        }
+      }catch(e){console.error("Error notificando ejecutor:",e);}
+    }
+    onClose();
   };
   return(
     <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
@@ -775,8 +880,22 @@ function TaskForm({requestId,setTasks,showToast,onClose,resps}){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo a realizar *</label><input style={inp} placeholder="Describe el trabajo específico..." value={f.title} onChange={e=>setF(p=>({...p,title:e.target.value}))}/></div>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción detallada</label><textarea style={{...inp,height:70,resize:"vertical"}} value={f.desc} onChange={e=>setF(p=>({...p,desc:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Responsable (supervisa)</label><select style={selSt} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>{RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Ejecutor (hace el trabajo)</label><input style={inp} placeholder="ej: Juan Técnico, Empresa X..." value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}/></div>
+        <div style={fg}>
+          <label style={lbl}>Responsable (supervisa)</label>
+          <select style={selSt} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>
+            {RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}
+          </select>
+        </div>
+        <div style={fg}>
+          <label style={lbl}>Ejecutor / Proveedor</label>
+          {proveedores.length>0
+            ?<select style={selSt} value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}>
+              <option value="">Sin asignar</option>
+              {proveedores.map(r=><option key={r}>{r}</option>)}
+            </select>
+            :<input style={inp} placeholder="ej: Juan Técnico, Empresa X..." value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}/>
+          }
+        </div>
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={e=>setF(p=>({...p,dueDate:e.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={selSt} value={f.priority} onChange={e=>setF(p=>({...p,priority:e.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
@@ -814,7 +933,19 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
       {exp&&<div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:10}}>
         {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
         {safeComments.map((c,i)=><div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}><strong>{c.user}</strong> - <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}</div>)}
-        {task.informe&&<div style={{...alrt("success"),marginBottom:10}}><div style={{fontWeight:600,marginBottom:4}}>📋 Informe del ejecutor</div><div style={{fontSize:12,whiteSpace:"pre-wrap"}}>{task.informe}</div>{task.tiempoUsado&&<div style={{fontSize:11,marginTop:4,color:"#16a34a"}}>⏱ Tiempo: {task.tiempoUsado}</div>}</div>}
+        {task.informe&&<div style={{...alrt(task.estadoFinal==="Resuelto"?"success":task.estadoFinal==="Resuelto parcialmente"?"warning":"error"),marginBottom:10}}>
+          <div style={{fontWeight:600,marginBottom:6}}>📋 Informe del ejecutor</div>
+          <div style={{fontSize:12,whiteSpace:"pre-wrap",marginBottom:6}}>{task.informe}</div>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11}}>
+            {task.fechaEjecucion&&<span>📅 {fmtD(task.fechaEjecucion)}</span>}
+            {task.horaInicio&&task.horaTermino&&<span>⏰ {task.horaInicio} - {task.horaTermino}</span>}
+            {task.estadoFinal&&<span>Estado: <strong>{task.estadoFinal}</strong></span>}
+            {task.requiereSeguimiento&&<span style={{color:"#ef4444",fontWeight:600}}>⚠️ Requiere seguimiento</span>}
+          </div>
+          {task.herramientas&&<div style={{fontSize:11,marginTop:4}}>🔧 Herramientas: {task.herramientas}</div>}
+          {task.observaciones&&<div style={{fontSize:11,marginTop:4}}>📝 {task.observaciones}</div>}
+          {task.nombreEjecutor&&<div style={{fontSize:11,marginTop:4,color:"#6366f1"}}>✍️ {task.nombreEjecutor}</div>}
+        </div>}
         <MatPanel materials={safeMaterials} setMaterials={ms=>upd({materials:ms})} readOnly={!can(role,"changeStatus")&&!can(role,"resolveTask")}/>
         <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
           <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addC()}/>
@@ -825,38 +956,124 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
         </div>
       </div>}
       {showEv&&<EvidModal type="cierre" requestId={task.requestId} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)} taskId={task.id} setTasks={setTasks}/>}
-      {showInforme&&<InformeModal task={task} onSave={inf=>{upd({informe:inf.texto,tiempoUsado:inf.tiempo});showToast("Informe guardado");setShowInforme(false);}} onClose={()=>setShowInforme(false)}/>}
+      {showInforme&&<InformeModal task={task} onSave={inf=>{upd({informe:inf.texto,tiempoUsado:`${inf.horaInicio||""}-${inf.horaTermino||""}`,fechaEjecucion:inf.fechaEjecucion,horaInicio:inf.horaInicio,horaTermino:inf.horaTermino,herramientas:inf.herramientas,estadoFinal:inf.estadoFinal,requiereSeguimiento:inf.requiereSeguimiento,observaciones:inf.observaciones,nombreEjecutor:inf.nombreEjecutor,vistoBueno:inf.vistoBueno});showToast("Informe guardado");setShowInforme(false);}} onClose={()=>setShowInforme(false)}/>}
     </div>
   );
 }
 
 function InformeModal({task,onSave,onClose}){
-  const [texto,setTexto]=useState(task.informe||"");
-  const [tiempo,setTiempo]=useState(task.tiempoUsado||"");
+  const [f,setF]=useState({
+    texto:task.informe||"",
+    tiempo:task.tiempoUsado||"",
+    fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),
+    horaInicio:task.horaInicio||"",
+    horaTermino:task.horaTermino||"",
+    herramientas:task.herramientas||"",
+    estadoFinal:task.estadoFinal||"Resuelto",
+    requiereSeguimiento:task.requiereSeguimiento||false,
+    observaciones:task.observaciones||"",
+    nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",
+    vistoBueno:task.vistoBueno||false,
+  });
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const [escuchando,setEscuchando]=useState(false);
   const recognRef=useRef(null);
+
   const iniciarVoz=()=>{
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
     if(!SR){alert("Tu navegador no soporta reconocimiento de voz. Usa Chrome.");return;}
     const recog=new SR();
     recog.lang="es-CL";recog.continuous=true;recog.interimResults=false;
-    recog.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join(" ");setTexto(p=>(p?p+" ":"")+t);};
+    recog.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join(" ");set("texto",(f.texto?f.texto+" ":"")+t);};
     recog.onerror=()=>setEscuchando(false);
     recog.onend=()=>setEscuchando(false);
     recognRef.current=recog;recog.start();setEscuchando(true);
   };
   const detenerVoz=()=>{if(recognRef.current)recognRef.current.stop();setEscuchando(false);};
+
+  const ESTADOS_FINAL=["Resuelto","Resuelto parcialmente","Requiere revisión"];
+
   return(
-    <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
-      <div style={{...card,background:"#f8fafc",marginBottom:12}}><div style={{fontSize:12,color:"#64748b",marginBottom:2}}>Orden de trabajo</div><div style={{fontWeight:600,fontSize:13}}>{task.title}</div>{task.ejecutor&&<div style={{fontSize:11,color:"#6366f1",marginTop:2}}>🔧 Ejecutor: {task.ejecutor}</div>}</div>
-      <div style={fg}><label style={lbl}>Descripción del trabajo realizado *</label><textarea style={{...inp,height:120,resize:"vertical"}} placeholder="Describe detalladamente lo que se realizó..." value={texto} onChange={e=>setTexto(e.target.value)}/></div>
+    <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:580,padding:"20px",marginTop:16,marginBottom:16,overflowY:"auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}>
+        <h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3>
+        <button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>
+      </div>
+
+      {/* Info orden */}
+      <div style={{...card,background:"#f8fafc",marginBottom:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:2}}>Orden de trabajo</div>
+        <div style={{fontWeight:600,fontSize:13}}>{task.title}</div>
+        {task.ejecutor&&<div style={{fontSize:11,color:"#6366f1",marginTop:2}}>🔧 Ejecutor: {task.ejecutor}</div>}
+      </div>
+
+      {/* Fechas y horas */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>📅 Fecha y tiempo</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+        <div style={fg}><label style={lbl}>Fecha ejecución</label><input type="date" style={inp} value={f.fechaEjecucion} onChange={e=>set("fechaEjecucion",e.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora inicio</label><input type="time" style={inp} value={f.horaInicio} onChange={e=>set("horaInicio",e.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora término</label><input type="time" style={inp} value={f.horaTermino} onChange={e=>set("horaTermino",e.target.value)}/></div>
+      </div>
+
+      {/* Descripción */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>🔧 Trabajo realizado</div>
+      <div style={fg}>
+        <label style={lbl}>Descripción detallada *</label>
+        <textarea style={{...inp,height:100,resize:"vertical"}} placeholder="Describe lo que se realizó..." value={f.texto} onChange={e=>set("texto",e.target.value)}/>
+      </div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <button style={{...mkBtn(escuchando?"danger":"purple"),flex:1,justifyContent:"center"}} onClick={escuchando?detenerVoz:iniciarVoz}>{escuchando?"⏹ Detener grabación":"🎤 Dictar por voz"}</button>
+        <button style={{...mkBtn(escuchando?"danger":"purple"),flex:1,justifyContent:"center"}} onClick={escuchando?detenerVoz:iniciarVoz}>
+          {escuchando?"⏹ Detener grabación":"🎤 Dictar por voz"}
+        </button>
         {escuchando&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}><div style={{width:8,height:8,borderRadius:"50%",background:"#ef4444",animation:"spin .8s linear infinite"}}/>Escuchando...</div>}
       </div>
-      <div style={fg}><label style={lbl}>Tiempo utilizado</label><input style={inp} placeholder="ej: 2 horas, 45 minutos..." value={tiempo} onChange={e=>setTiempo(e.target.value)}/></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("success",true)} onClick={()=>{if(!texto.trim()){alert("Ingrese la descripción del trabajo");return;}onSave({texto,tiempo});}}>Guardar informe</button></div>
+
+      {/* Herramientas */}
+      <div style={fg}>
+        <label style={lbl}>Herramientas especiales utilizadas</label>
+        <input style={inp} placeholder="ej: Taladro, Multímetro, Escalera..." value={f.herramientas} onChange={e=>set("herramientas",e.target.value)}/>
+      </div>
+
+      {/* Estado final */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>📊 Resultado</div>
+      <div style={fg}>
+        <label style={lbl}>Estado final del trabajo</label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {ESTADOS_FINAL.map(e=>(
+            <button key={e} onClick={()=>set("estadoFinal",e)} style={{padding:"6px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"2px solid "+(f.estadoFinal===e?(e==="Resuelto"?"#10b981":e==="Resuelto parcialmente"?"#f59e0b":"#ef4444"):"#e2e8f0"),background:f.estadoFinal===e?(e==="Resuelto"?"#f0fdf4":e==="Resuelto parcialmente"?"#fffbeb":"#fef2f2"):"#f9fafb",color:f.estadoFinal===e?(e==="Resuelto"?"#10b981":e==="Resuelto parcialmente"?"#f59e0b":"#ef4444"):"#6b7280"}}>
+              {e==="Resuelto"?"✅":e==="Resuelto parcialmente"?"⚠️":"🔄"} {e}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={fg}>
+        <label style={lbl}>Observaciones adicionales</label>
+        <textarea style={{...inp,height:70,resize:"vertical"}} placeholder="Notas, recomendaciones, advertencias..." value={f.observaciones} onChange={e=>set("observaciones",e.target.value)}/>
+      </div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}>
+        <input type="checkbox" id="seg" checked={f.requiereSeguimiento} onChange={e=>set("requiereSeguimiento",e.target.checked)}/>
+        <label htmlFor="seg" style={{fontSize:13,cursor:"pointer",fontWeight:500}}>⚠️ Requiere seguimiento o revisión posterior</label>
+      </div>
+
+      {/* Firma */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>✍️ Confirmación</div>
+      <div style={fg}>
+        <label style={lbl}>Nombre del ejecutor</label>
+        <input style={inp} value={f.nombreEjecutor} onChange={e=>set("nombreEjecutor",e.target.value)} placeholder="Confirma tu nombre"/>
+      </div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}>
+        <input type="checkbox" id="vb" checked={f.vistoBueno} onChange={e=>set("vistoBueno",e.target.checked)}/>
+        <label htmlFor="vb" style={{fontSize:13,cursor:"pointer",fontWeight:500,color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado según lo descrito</label>
+      </div>
+
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+        <button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button>
+        <button style={mkBtn("success",true)} onClick={()=>{
+          if(!f.texto.trim()){alert("Ingrese la descripción del trabajo");return;}
+          if(!f.vistoBueno){alert("Debe confirmar que el trabajo fue realizado");return;}
+          onSave(f);
+        }}>Guardar informe</button>
+      </div>
     </div></div>
   );
 }
@@ -883,23 +1100,51 @@ function MatPanel({materials,setMaterials,readOnly}){
 }
 
 function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,setTasks}){
-  const [previews,setPrev]=useState([]);const [comment,setCmt]=useState("");const fileRef=useRef();
-  const handleFiles=e=>Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>setPrev(p=>[...p,{name:f.name,url:ev.target.result}]);r.readAsDataURL(f);});
-  const save=()=>{
-    if(!previews.length){showToast("Seleccione imagen","error");return;}
-    const na=previews.map(p=>({id:"a"+uid(),requestId,type,name:p.name,date:new Date().toISOString(),user:role,comment,preview:p.url}));
-    setAtts(prev=>[...prev,...na]);
-    if(taskId&&setTasks)setTasks(prev=>prev.map(t=>t.id===taskId?{...t,attachments:[...(t.attachments||[]),...na]}:t));
-    showToast(previews.length+" imagen(es) guardada(s)");onClose();
+  const [previews,setPrev]=useState([]);
+  const [files,setFiles]=useState([]);
+  const [comment,setCmt]=useState("");
+  const [uploading,setUploading]=useState(false);
+  const fileRef=useRef();
+
+  const handleFiles=e=>{
+    const selected=Array.from(e.target.files);
+    selected.forEach(f=>{
+      const r=new FileReader();
+      r.onload=ev=>setPrev(p=>[...p,{name:f.name,url:ev.target.result,file:f}]);
+      r.readAsDataURL(f);
+    });
+    setFiles(p=>[...p,...selected]);
   };
+
+  const save=async()=>{
+    if(!previews.length){showToast("Seleccione imagen","error");return;}
+    setUploading(true);
+    try{
+      const uploaded=await Promise.all(previews.map(async(p,i)=>{
+        const path=`${requestId}/${type}/${uid()}_${p.name}`;
+        let url=p.url; // fallback a base64 si falla Storage
+        try{ url=await uploadImage(files[i]||p.file,path); }catch(e){ console.error("Storage error:",e); }
+        return {id:"a"+uid(),requestId,type,name:p.name,date:new Date().toISOString(),user:role,comment,preview:url};
+      }));
+      setAtts(prev=>[...prev,...uploaded]);
+      if(taskId&&setTasks)setTasks(prev=>prev.map(t=>t.id===taskId?{...t,attachments:[...(t.attachments||[]),...uploaded]}:t));
+      showToast(previews.length+" imagen(es) guardada(s)");
+      onClose();
+    }catch(e){showToast("Error al subir imagen","error");console.error(e);}
+    setUploading(false);
+  };
+
   return(
     <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:14}}>Subir evidencia - {type}</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
       <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
-      <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:20,textAlign:"center",cursor:"pointer",marginBottom:12}} onClick={()=>fileRef.current.click()}><div style={{fontSize:12,color:"#64748b"}}>Clic para seleccionar imagenes</div></div>
-      {previews.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>{previews.map((p,i)=><div key={i} style={{position:"relative"}}><img src={p.url} alt={p.name} style={{...thumb,width:80,height:64}}/><button onClick={()=>setPrev(pr=>pr.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9}}>✕</button></div>)}</div>}
+      <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:20,textAlign:"center",cursor:"pointer",marginBottom:12,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}>
+        <div style={{fontSize:32,marginBottom:6}}>📷</div>
+        <div style={{fontSize:12,color:"#64748b"}}>Toca para seleccionar imágenes</div>
+      </div>
+      {previews.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>{previews.map((p,i)=><div key={i} style={{position:"relative"}}><img src={p.url} alt={p.name} style={{...thumb,width:80,height:64}}/><button onClick={()=>{setPrev(pr=>pr.filter((_,j)=>j!==i));setFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9}}>✕</button></div>)}</div>}
       <div style={fg}><label style={lbl}>Comentario</label><input style={inp} value={comment} onChange={e=>setCmt(e.target.value)} placeholder="Descripcion..."/></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={save}>Guardar</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("primary",true)} onClick={save} disabled={uploading}>{uploading?"Subiendo...":"Guardar"}</button></div>
     </div></div>
   );
 }
@@ -951,16 +1196,31 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     if(!f.confirm)e.confirm="Debe confirmar";
     setErrs(e);return !Object.keys(e).length;
   };
-  const handleFiles=e=>Array.from(e.target.files).forEach(fi=>{const r=new FileReader();r.onload=ev=>setPrevs(p=>[...p,{name:fi.name,url:ev.target.result}]);r.readAsDataURL(fi);});
+  const [prevFiles,setPrevFiles]=useState([]);
+  const handleFiles=e=>Array.from(e.target.files).forEach(fi=>{
+    const r=new FileReader();
+    r.onload=ev=>setPrevs(p=>[...p,{name:fi.name,url:ev.target.result,file:fi}]);
+    r.readAsDataURL(fi);
+    setPrevFiles(p=>[...p,fi]);
+  });
+
   const submit=async()=>{
     if(!validate())return;
     const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
+
+    // Subir imágenes a Storage
+    const attachmentsInitial=await Promise.all(prevs.map(async(p,i)=>{
+      const path=`${code}/inicial/${uid()}_${p.name}`;
+      let url=p.url;
+      try{ url=await uploadImage(prevFiles[i]||p.file,path); }catch(e){ console.error("Storage error:",e); }
+      return {id:"a"+uid(),requestId:code,type:"inicial",name:p.name,date:now,user:f.requesterName,preview:url,comment:""};
+    }));
     const nr=normalizeReq({id:code,code,createdAt:now,...f,
       category:tipoReporte==="Administrativo"?adminCat:f.category,
       subcategory:tipoReporte==="Administrativo"?adminSub:f.subcategory,
       status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
-      attachmentsInitial:prevs.map(p=>({id:"a"+uid(),requestId:code,type:"inicial",name:p.name,date:now,user:f.requesterName,preview:p.url,comment:""})),
+      attachmentsInitial,
       dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
     addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:`Su solicitud de ${f.category} fue registrada. Código: ${code}. Nos contactaremos a la brevedad.`});

@@ -226,6 +226,67 @@ function LoginScreen({onLogin}) {
   const [resEmail,setResEmail]=useState("");
   const [resErr,setResErr]=useState("");
 
+  // Detectar token de recuperación en la URL
+  const [recoveryToken,setRecoveryToken]=useState(null);
+  const [newPass,setNewPass]=useState("");
+  const [newPassConfirm,setNewPassConfirm]=useState("");
+  const [passErr,setPassErr]=useState("");
+  const [passOk,setPassOk]=useState(false);
+  const [passLoad,setPassLoad]=useState(false);
+
+  useEffect(()=>{
+    const hash=window.location.hash;
+    if(hash&&hash.includes("access_token")&&hash.includes("type=recovery")){
+      const params=new URLSearchParams(hash.replace("#",""));
+      const token=params.get("access_token");
+      if(token) setRecoveryToken(token);
+    }
+  },[]);
+
+  const submitCambioPass=async()=>{
+    if(!newPass||newPass.length<6){setPassErr("Mínimo 6 caracteres");return;}
+    if(newPass!==newPassConfirm){setPassErr("Las contraseñas no coinciden");return;}
+    setPassLoad(true);setPassErr("");
+    try{
+      const res=await fetch(`${SUPA_URL}/auth/v1/user`,{
+        method:"PUT",
+        headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${recoveryToken}`},
+        body:JSON.stringify({password:newPass})
+      });
+      if(!res.ok)throw new Error("Error al cambiar contraseña");
+      setPassOk(true);
+      window.location.hash="";
+      setTimeout(()=>setRecoveryToken(null),2000);
+    }catch(e){setPassErr(e.message||"Error al cambiar contraseña");}
+    setPassLoad(false);
+  };
+
+  // ── PANTALLA CAMBIO DE CONTRASEÑA ───────────────────────────────────────────
+  if(recoveryToken) return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f1f5f9",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{background:"#fff",borderRadius:16,padding:"40px 32px",width:"100%",maxWidth:400,boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:48,marginBottom:12}}>🔐</div>
+          <div style={{fontWeight:700,fontSize:20,color:"#0f172a"}}>Crear nueva contraseña</div>
+          <div style={{color:"#64748b",fontSize:13,marginTop:4}}>Ingresa tu nueva contraseña para continuar</div>
+        </div>
+        {passOk&&<div style={{...alrt("success"),marginBottom:16}}>✓ Contraseña actualizada. Redirigiendo...</div>}
+        {passErr&&<div style={{...alrt("error"),marginBottom:16}}>{passErr}</div>}
+        {!passOk&&<>
+          <div style={{marginBottom:14}}>
+            <label style={lbl}>Nueva contraseña</label>
+            <input style={inp} type="password" value={newPass} onChange={e=>setNewPass(e.target.value)} placeholder="Mínimo 6 caracteres"/>
+          </div>
+          <div style={{marginBottom:24}}>
+            <label style={lbl}>Confirmar contraseña</label>
+            <input style={inp} type="password" value={newPassConfirm} onChange={e=>setNewPassConfirm(e.target.value)} placeholder="Repite la contraseña" onKeyDown={e=>e.key==="Enter"&&submitCambioPass()}/>
+          </div>
+          <button style={{width:"100%",padding:"12px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submitCambioPass} disabled={passLoad}>{passLoad?"Guardando...":"Guardar contraseña"}</button>
+        </>}
+      </div>
+    </div>
+  );
+
   const submitPersonal = async () => {
     if (!email||!pass){setErr("Ingrese correo y contraseña");return;}
     setLoad(true);setErr("");
@@ -260,7 +321,7 @@ function LoginScreen({onLogin}) {
               <div style={{color:"#fff",fontWeight:700,fontSize:17}}>Soy Residente</div>
               <div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Crea o consulta tus solicitudes fácilmente</div>
             </div>
-            <div style={{marginLeft:"auto",color:"#bfdbfe",fontSize:20}}>→</div>
+            <div style={{marginLeft:"auto",color:"#bfdbfe",fontSize:20}}>&rarr;</div>
           </button>
           <button onClick={()=>setMode("personal")} style={{background:"linear-gradient(135deg,#0f172a,#1e3a5f)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(0,0,0,.25)"}}>
             <div style={{fontSize:36,flexShrink:0}}>🔑</div>
@@ -268,7 +329,7 @@ function LoginScreen({onLogin}) {
               <div style={{color:"#fff",fontWeight:700,fontSize:17}}>Acceso Personal</div>
               <div style={{color:"#94a3b8",fontSize:12,marginTop:2}}>Administración, Conserjería, Comité</div>
             </div>
-            <div style={{marginLeft:"auto",color:"#94a3b8",fontSize:20}}>→</div>
+            <div style={{marginLeft:"auto",color:"#94a3b8",fontSize:20}}>&rarr;</div>
           </button>
         </div>
       </div>
@@ -291,7 +352,7 @@ function LoginScreen({onLogin}) {
           <input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={e=>setResEmail(e.target.value)} placeholder="tu@correo.cl" onKeyDown={e=>e.key==="Enter"&&submitResidente()}/>
         </div>
         <button onClick={submitResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer"}}>
-          Ingresar →
+          Ingresar
         </button>
         <div style={{color:"#bfdbfe",fontSize:11,textAlign:"center",marginTop:16}}>Solo necesitas tu correo, sin contraseña</div>
       </div>

@@ -374,9 +374,21 @@ function LoginScreen({onLogin}) {
           <label style={{...lbl,color:"#94a3b8"}}>Correo electrónico</label>
           <input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="correo@ejemplo.cl" onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/>
         </div>
-        <div style={{marginBottom:24}}>
+        <div style={{marginBottom:8}}>
           <label style={{...lbl,color:"#94a3b8"}}>Contraseña</label>
           <input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/>
+        </div>
+        <div style={{textAlign:"right",marginBottom:20}}>
+          <button onClick={async()=>{
+            if(!email||!email.includes("@")){setErr("Ingrese su correo primero");return;}
+            try{
+              const res=await fetch(`${SUPA_URL}/auth/v1/recover`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY},body:JSON.stringify({email})});
+              if(res.ok)setErr("✓ Mail de recuperación enviado a "+email);
+              else setErr("Error al enviar. Verifique el correo.");
+            }catch(e){setErr("Error al enviar el mail.");}
+          }} style={{background:"none",border:"none",color:"#6366f1",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>
+            ¿Olvidaste tu contraseña?
+          </button>
         </div>
         <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submitPersonal} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
       </div>
@@ -813,7 +825,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
         </div>
       )}
       {tab==="history"&&<div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Bitacora</div>{safeHistory.length===0?<Empty msg="Sin historial"/>:<div style={{position:"relative",paddingLeft:20}}>{[...safeHistory].reverse().map((h,i)=><div key={i} style={{position:"relative",paddingLeft:16,paddingBottom:14}}><div style={{width:9,height:9,borderRadius:"50%",background:h.to?STATUS_COLOR[h.to]:"#3b82f6",position:"absolute",left:0,top:4}}/><div style={{fontSize:13,fontWeight:600}}>{h.action}</div>{h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div></div>)}</div>}</div>}
-      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} resps={resps}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin órdenes de trabajo"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva orden</button>}</div>}
+      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} resps={resps} reqs={reqs}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin órdenes de trabajo"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva orden</button>}</div>}
       {tab==="evidence"&&<div>{["inicial","avance","cierre"].map(type=><div key={type} style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Imagenes {type==="inicial"?"iniciales":type==="avance"?"de avance":"de cierre"}</div>{r.status!=="Cerrada"&&<button style={mkBtn("secondary",true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}</div>{myAtt(type).length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imagenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt(type).map((a,i)=><div key={a.id||i} style={{textAlign:"center"}}><img src={a.preview} alt={a.name} style={thumb} onError={e=>e.target.style.display="none"}/><div style={{fontSize:10,color:"#64748b",marginTop:3,maxWidth:70,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div></div>)}</div>}</div>)}</div>}
       {tab==="emails"&&<div style={card}>{myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span><span style={bdg("#10b981","#f0fdf4")}>{e.status}</span></div><div style={{fontSize:10,color:"#64748b",marginBottom:3}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4}}>{e.body}</div></div>)}</div>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
@@ -822,9 +834,13 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
   );
 }
 
-function TaskForm({requestId,setTasks,showToast,onClose,resps}){
+function TaskForm({requestId,setTasks,showToast,onClose,resps,reqs}){
   const RESP_ASSIGNABLE=getRespAssignable(resps);
-  const [f,setF]=useState({title:"",desc:"",responsible:RESP_ASSIGNABLE[0]||"",ejecutor:"",dueDate:"",priority:"Media"});
+  const proveedores=(resps||[]).filter(u=>u.rol==="Proveedor"&&u.active).map(u=>u.nombre);
+  // Obtener responsable de la solicitud asociada
+  const req=(reqs||[]).find(r=>r.id===requestId);
+  const respAsignado=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:(RESP_ASSIGNABLE[0]||"");
+  const [f,setF]=useState({title:"",desc:"",responsible:respAsignado,ejecutor:proveedores[0]||"",dueDate:"",priority:"Media"});
   const submit=()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
     setTasks(p=>[...p,{id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f}]);
@@ -836,8 +852,22 @@ function TaskForm({requestId,setTasks,showToast,onClose,resps}){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo a realizar *</label><input style={inp} placeholder="Describe el trabajo específico..." value={f.title} onChange={e=>setF(p=>({...p,title:e.target.value}))}/></div>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción detallada</label><textarea style={{...inp,height:70,resize:"vertical"}} value={f.desc} onChange={e=>setF(p=>({...p,desc:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Responsable (supervisa)</label><select style={selSt} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>{RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Ejecutor (hace el trabajo)</label><input style={inp} placeholder="ej: Juan Técnico, Empresa X..." value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}/></div>
+        <div style={fg}>
+          <label style={lbl}>Responsable (supervisa)</label>
+          <select style={selSt} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>
+            {RESP_ASSIGNABLE.map(r=><option key={r}>{r}</option>)}
+          </select>
+        </div>
+        <div style={fg}>
+          <label style={lbl}>Ejecutor / Proveedor</label>
+          {proveedores.length>0
+            ?<select style={selSt} value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}>
+              <option value="">Sin asignar</option>
+              {proveedores.map(r=><option key={r}>{r}</option>)}
+            </select>
+            :<input style={inp} placeholder="ej: Juan Técnico, Empresa X..." value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}/>
+          }
+        </div>
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={e=>setF(p=>({...p,dueDate:e.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={selSt} value={f.priority} onChange={e=>setF(p=>({...p,priority:e.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>

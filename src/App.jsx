@@ -841,10 +841,25 @@ function TaskForm({requestId,setTasks,showToast,onClose,resps,reqs}){
   const req=(reqs||[]).find(r=>r.id===requestId);
   const respAsignado=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:(RESP_ASSIGNABLE[0]||"");
   const [f,setF]=useState({title:"",desc:"",responsible:respAsignado,ejecutor:proveedores[0]||"",dueDate:"",priority:"Media"});
-  const submit=()=>{
+  const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
-    setTasks(p=>[...p,{id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f}]);
-    showToast("Orden de trabajo creada");onClose();
+    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
+    setTasks(p=>[...p,newTask]);
+    showToast("Orden de trabajo creada");
+    // Notificar al ejecutor si tiene correo
+    if(f.ejecutor){
+      try{
+        const res=await fetch(`${SUPA_URL}/rest/v1/usuarios?nombre=eq.${encodeURIComponent(f.ejecutor)}&active=eq.true&select=*`,{headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}});
+        const users=await res.json();
+        const u=users&&users[0];
+        if(u?.email){
+          const req=(reqs||[]).find(r=>r.id===requestId);
+          await fetch("https://api.emailjs.com/api/v1.0/email/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({service_id:"service_vxhdrlx",template_id:"template_90tjafk",user_id:"wKxD2rJHuftU7W-WE",template_params:{to_email:u.email,subject:"[CondoAdmin] Nueva orden de trabajo asignada",name:"CondoAdmin",email:"no-reply@condoadmin.cl",message:`Hola ${u.nombre},\n\nSe te ha asignado una nueva orden de trabajo:\n\n📋 DETALLE\n──────────────────────────\nTrabajo: ${f.title}\nDescripción: ${f.desc||"Sin descripción"}\nPrioridad: ${f.priority}\nFecha límite: ${f.dueDate||"Sin fecha"}\nResponsable: ${f.responsible}${req?`\n\nSolicitud: ${req.code}\nUbicación: Torre ${req.tower} / Unidad ${req.unit}`:""}\n──────────────────────────\nIngresa a CondoAdmin para ver el detalle.`}})});
+          console.log("Mail enviado a ejecutor:",u.email);
+        }
+      }catch(e){console.error("Error notificando ejecutor:",e);}
+    }
+    onClose();
   };
   return(
     <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
@@ -905,7 +920,19 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
       {exp&&<div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:10}}>
         {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
         {safeComments.map((c,i)=><div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}><strong>{c.user}</strong> - <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}</div>)}
-        {task.informe&&<div style={{...alrt("success"),marginBottom:10}}><div style={{fontWeight:600,marginBottom:4}}>📋 Informe del ejecutor</div><div style={{fontSize:12,whiteSpace:"pre-wrap"}}>{task.informe}</div>{task.tiempoUsado&&<div style={{fontSize:11,marginTop:4,color:"#16a34a"}}>⏱ Tiempo: {task.tiempoUsado}</div>}</div>}
+        {task.informe&&<div style={{...alrt(task.estadoFinal==="Resuelto"?"success":task.estadoFinal==="Resuelto parcialmente"?"warning":"error"),marginBottom:10}}>
+          <div style={{fontWeight:600,marginBottom:6}}>📋 Informe del ejecutor</div>
+          <div style={{fontSize:12,whiteSpace:"pre-wrap",marginBottom:6}}>{task.informe}</div>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11}}>
+            {task.fechaEjecucion&&<span>📅 {fmtD(task.fechaEjecucion)}</span>}
+            {task.horaInicio&&task.horaTermino&&<span>⏰ {task.horaInicio} - {task.horaTermino}</span>}
+            {task.estadoFinal&&<span>Estado: <strong>{task.estadoFinal}</strong></span>}
+            {task.requiereSeguimiento&&<span style={{color:"#ef4444",fontWeight:600}}>⚠️ Requiere seguimiento</span>}
+          </div>
+          {task.herramientas&&<div style={{fontSize:11,marginTop:4}}>🔧 Herramientas: {task.herramientas}</div>}
+          {task.observaciones&&<div style={{fontSize:11,marginTop:4}}>📝 {task.observaciones}</div>}
+          {task.nombreEjecutor&&<div style={{fontSize:11,marginTop:4,color:"#6366f1"}}>✍️ {task.nombreEjecutor}</div>}
+        </div>}
         <MatPanel materials={safeMaterials} setMaterials={ms=>upd({materials:ms})} readOnly={!can(role,"changeStatus")&&!can(role,"resolveTask")}/>
         <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
           <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addC()}/>
@@ -916,38 +943,124 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
         </div>
       </div>}
       {showEv&&<EvidModal type="cierre" requestId={task.requestId} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)} taskId={task.id} setTasks={setTasks}/>}
-      {showInforme&&<InformeModal task={task} onSave={inf=>{upd({informe:inf.texto,tiempoUsado:inf.tiempo});showToast("Informe guardado");setShowInforme(false);}} onClose={()=>setShowInforme(false)}/>}
+      {showInforme&&<InformeModal task={task} onSave={inf=>{upd({informe:inf.texto,tiempoUsado:`${inf.horaInicio||""}-${inf.horaTermino||""}`,fechaEjecucion:inf.fechaEjecucion,horaInicio:inf.horaInicio,horaTermino:inf.horaTermino,herramientas:inf.herramientas,estadoFinal:inf.estadoFinal,requiereSeguimiento:inf.requiereSeguimiento,observaciones:inf.observaciones,nombreEjecutor:inf.nombreEjecutor,vistoBueno:inf.vistoBueno});showToast("Informe guardado");setShowInforme(false);}} onClose={()=>setShowInforme(false)}/>}
     </div>
   );
 }
 
 function InformeModal({task,onSave,onClose}){
-  const [texto,setTexto]=useState(task.informe||"");
-  const [tiempo,setTiempo]=useState(task.tiempoUsado||"");
+  const [f,setF]=useState({
+    texto:task.informe||"",
+    tiempo:task.tiempoUsado||"",
+    fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),
+    horaInicio:task.horaInicio||"",
+    horaTermino:task.horaTermino||"",
+    herramientas:task.herramientas||"",
+    estadoFinal:task.estadoFinal||"Resuelto",
+    requiereSeguimiento:task.requiereSeguimiento||false,
+    observaciones:task.observaciones||"",
+    nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",
+    vistoBueno:task.vistoBueno||false,
+  });
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const [escuchando,setEscuchando]=useState(false);
   const recognRef=useRef(null);
+
   const iniciarVoz=()=>{
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
     if(!SR){alert("Tu navegador no soporta reconocimiento de voz. Usa Chrome.");return;}
     const recog=new SR();
     recog.lang="es-CL";recog.continuous=true;recog.interimResults=false;
-    recog.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join(" ");setTexto(p=>(p?p+" ":"")+t);};
+    recog.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join(" ");set("texto",(f.texto?f.texto+" ":"")+t);};
     recog.onerror=()=>setEscuchando(false);
     recog.onend=()=>setEscuchando(false);
     recognRef.current=recog;recog.start();setEscuchando(true);
   };
   const detenerVoz=()=>{if(recognRef.current)recognRef.current.stop();setEscuchando(false);};
+
+  const ESTADOS_FINAL=["Resuelto","Resuelto parcialmente","Requiere revisión"];
+
   return(
-    <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
-      <div style={{...card,background:"#f8fafc",marginBottom:12}}><div style={{fontSize:12,color:"#64748b",marginBottom:2}}>Orden de trabajo</div><div style={{fontWeight:600,fontSize:13}}>{task.title}</div>{task.ejecutor&&<div style={{fontSize:11,color:"#6366f1",marginTop:2}}>🔧 Ejecutor: {task.ejecutor}</div>}</div>
-      <div style={fg}><label style={lbl}>Descripción del trabajo realizado *</label><textarea style={{...inp,height:120,resize:"vertical"}} placeholder="Describe detalladamente lo que se realizó..." value={texto} onChange={e=>setTexto(e.target.value)}/></div>
+    <div style={modal}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:580,padding:"20px",marginTop:16,marginBottom:16,overflowY:"auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}>
+        <h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3>
+        <button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>
+      </div>
+
+      {/* Info orden */}
+      <div style={{...card,background:"#f8fafc",marginBottom:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:2}}>Orden de trabajo</div>
+        <div style={{fontWeight:600,fontSize:13}}>{task.title}</div>
+        {task.ejecutor&&<div style={{fontSize:11,color:"#6366f1",marginTop:2}}>🔧 Ejecutor: {task.ejecutor}</div>}
+      </div>
+
+      {/* Fechas y horas */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>📅 Fecha y tiempo</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+        <div style={fg}><label style={lbl}>Fecha ejecución</label><input type="date" style={inp} value={f.fechaEjecucion} onChange={e=>set("fechaEjecucion",e.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora inicio</label><input type="time" style={inp} value={f.horaInicio} onChange={e=>set("horaInicio",e.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora término</label><input type="time" style={inp} value={f.horaTermino} onChange={e=>set("horaTermino",e.target.value)}/></div>
+      </div>
+
+      {/* Descripción */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>🔧 Trabajo realizado</div>
+      <div style={fg}>
+        <label style={lbl}>Descripción detallada *</label>
+        <textarea style={{...inp,height:100,resize:"vertical"}} placeholder="Describe lo que se realizó..." value={f.texto} onChange={e=>set("texto",e.target.value)}/>
+      </div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <button style={{...mkBtn(escuchando?"danger":"purple"),flex:1,justifyContent:"center"}} onClick={escuchando?detenerVoz:iniciarVoz}>{escuchando?"⏹ Detener grabación":"🎤 Dictar por voz"}</button>
+        <button style={{...mkBtn(escuchando?"danger":"purple"),flex:1,justifyContent:"center"}} onClick={escuchando?detenerVoz:iniciarVoz}>
+          {escuchando?"⏹ Detener grabación":"🎤 Dictar por voz"}
+        </button>
         {escuchando&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}><div style={{width:8,height:8,borderRadius:"50%",background:"#ef4444",animation:"spin .8s linear infinite"}}/>Escuchando...</div>}
       </div>
-      <div style={fg}><label style={lbl}>Tiempo utilizado</label><input style={inp} placeholder="ej: 2 horas, 45 minutos..." value={tiempo} onChange={e=>setTiempo(e.target.value)}/></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button><button style={mkBtn("success",true)} onClick={()=>{if(!texto.trim()){alert("Ingrese la descripción del trabajo");return;}onSave({texto,tiempo});}}>Guardar informe</button></div>
+
+      {/* Herramientas */}
+      <div style={fg}>
+        <label style={lbl}>Herramientas especiales utilizadas</label>
+        <input style={inp} placeholder="ej: Taladro, Multímetro, Escalera..." value={f.herramientas} onChange={e=>set("herramientas",e.target.value)}/>
+      </div>
+
+      {/* Estado final */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>📊 Resultado</div>
+      <div style={fg}>
+        <label style={lbl}>Estado final del trabajo</label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {ESTADOS_FINAL.map(e=>(
+            <button key={e} onClick={()=>set("estadoFinal",e)} style={{padding:"6px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"2px solid "+(f.estadoFinal===e?(e==="Resuelto"?"#10b981":e==="Resuelto parcialmente"?"#f59e0b":"#ef4444"):"#e2e8f0"),background:f.estadoFinal===e?(e==="Resuelto"?"#f0fdf4":e==="Resuelto parcialmente"?"#fffbeb":"#fef2f2"):"#f9fafb",color:f.estadoFinal===e?(e==="Resuelto"?"#10b981":e==="Resuelto parcialmente"?"#f59e0b":"#ef4444"):"#6b7280"}}>
+              {e==="Resuelto"?"✅":e==="Resuelto parcialmente"?"⚠️":"🔄"} {e}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={fg}>
+        <label style={lbl}>Observaciones adicionales</label>
+        <textarea style={{...inp,height:70,resize:"vertical"}} placeholder="Notas, recomendaciones, advertencias..." value={f.observaciones} onChange={e=>set("observaciones",e.target.value)}/>
+      </div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}>
+        <input type="checkbox" id="seg" checked={f.requiereSeguimiento} onChange={e=>set("requiereSeguimiento",e.target.checked)}/>
+        <label htmlFor="seg" style={{fontSize:13,cursor:"pointer",fontWeight:500}}>⚠️ Requiere seguimiento o revisión posterior</label>
+      </div>
+
+      {/* Firma */}
+      <div style={{fontWeight:600,fontSize:12,color:"#374151",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>✍️ Confirmación</div>
+      <div style={fg}>
+        <label style={lbl}>Nombre del ejecutor</label>
+        <input style={inp} value={f.nombreEjecutor} onChange={e=>set("nombreEjecutor",e.target.value)} placeholder="Confirma tu nombre"/>
+      </div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}>
+        <input type="checkbox" id="vb" checked={f.vistoBueno} onChange={e=>set("vistoBueno",e.target.checked)}/>
+        <label htmlFor="vb" style={{fontSize:13,cursor:"pointer",fontWeight:500,color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado según lo descrito</label>
+      </div>
+
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+        <button style={mkBtn("secondary",true)} onClick={onClose}>Cancelar</button>
+        <button style={mkBtn("success",true)} onClick={()=>{
+          if(!f.texto.trim()){alert("Ingrese la descripción del trabajo");return;}
+          if(!f.vistoBueno){alert("Debe confirmar que el trabajo fue realizado");return;}
+          onSave(f);
+        }}>Guardar informe</button>
+      </div>
     </div></div>
   );
 }

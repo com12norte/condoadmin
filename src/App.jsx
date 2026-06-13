@@ -672,7 +672,10 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
         </div>
       )}
       {tab==="history"&&<div style={card}>{safeHistory.length===0?<Empty msg="Sin historial"/>:<div>{[...safeHistory].reverse().map((h,i)=><div key={i} style={{paddingLeft:16,paddingBottom:14,borderLeft:"2px solid #e2e8f0",marginLeft:4}}><div style={{fontSize:13,fontWeight:600}}>{h.action}</div>{h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> &#8594; <SBadge s={h.to}/></div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div></div>)}</div>}</div>}
-      {tab==="tasks"&&<div>{showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r}/>}{myTasks.length===0&&!showTF&&<Empty msg="Sin órdenes"/>}{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}{can(role,"createTask")&&!showTF&&<button style={mkBtn("secondary")} onClick={()=>setShowTF(true)}>+ Nueva orden</button>}</div>}
+      {tab==="tasks"&&<div>
+        <TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} resps={respAssign} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>
+        {myTasks.length>0&&<div style={{marginTop:16}}><div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes creadas ({myTasks.length})</div>{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}</div>}
+      </div>}
       {tab==="evidence"&&<div>{["inicial","avance","cierre"].map(type=><div key={type} style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Imágenes {type}</div>{r.status!=="Cerrada"&&<button style={mkBtn("secondary",true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}</div>{myAtt(type).length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt(type).map((a,i)=><div key={a.id||i} style={{textAlign:"center"}}><img src={a.preview} alt={a.name} style={thumb} onError={e=>e.target.style.display="none"}/></div>)}</div>}</div>)}</div>}
       {tab==="emails"&&<div style={card}>{myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span></div><div style={{fontSize:10,color:"#64748b"}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{e.body}</div></div>)}</div>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
@@ -682,28 +685,32 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
 }
 
 // ── TASK COMPONENTS ───────────────────────────────────────────────────────────
-function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req}){
+function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:(respAssign[0]||"");
-  const [f,setF]=useState({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:"",priority:"Media"});
+  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:"",priority:"Media"});
+  const [f,setF]=useState(initF());
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
     const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
     setTasks(p=>[...p,newTask]);
     showToast("Orden de trabajo creada");
+    if(inline) setF(initF()); else onClose();
     if(f.ejecutor){
       try{
         const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(f.ejecutor)+"&active=eq.true",{headers:hdr()});
         const users=await res.json();
         const u=users&&users[0];
-        if(u?.email) await sendEmail(u.email,"[CondoAdmin] Nueva orden de trabajo asignada","Hola "+u.nombre+",\n\nSe te asignó una orden de trabajo:\n\nTrabajo: "+f.title+"\nDescripción: "+f.desc+"\nPrioridad: "+f.priority+"\nFecha límite: "+(f.dueDate||"Sin fecha")+"\nResponsable: "+f.responsible+(req?"\n\nSolicitud: "+req.code+" - Torre "+req.tower+"/"+req.unit:""));
+        if(u?.email) await sendEmail(u.email,"[CondoAdmin] Nueva orden de trabajo asignada","Hola "+u.nombre+",\n\nSe te asignó una orden:\n\nTrabajo: "+f.title+"\nDescripción: "+f.desc+"\nPrioridad: "+f.priority+"\nFecha límite: "+(f.dueDate||"Sin fecha")+"\nResponsable: "+f.responsible+(req?"\n\nSolicitud: "+req.code+" - Torre "+req.tower+"/"+req.unit:""));
       }catch(e){console.error(e);}
     }
-    onClose();
   };
   return(
     <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Nueva Orden de Trabajo</div><button style={mkBtn("ghost",true)} onClick={onClose}>✕</button></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+        <div style={{fontWeight:600,fontSize:13}}>Nueva Orden de Trabajo</div>
+        {!inline&&<button style={mkBtn("ghost",true)} onClick={onClose}>✕</button>}
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo a realizar *</label><input style={inp} placeholder="Describe el trabajo específico..." value={f.title} onChange={e=>setF(p=>({...p,title:e.target.value}))}/></div>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={e=>setF(p=>({...p,desc:e.target.value}))}/></div>
@@ -712,7 +719,7 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req}
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={e=>setF(p=>({...p,dueDate:e.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={e=>setF(p=>({...p,priority:e.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
-      <button style={mkBtn("primary",true)} onClick={submit}>Crear Orden</button>
+      <button style={mkBtn("primary",true)} onClick={submit}>+ Crear Orden</button>
     </div>
   );
 }

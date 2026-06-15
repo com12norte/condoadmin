@@ -462,6 +462,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
   const [ns,setNs]=useState(r.status);
   const [asgn,setAsgn]=useState(r.assignedTo||"Sin asignar");
   const [showTF,setShowTF]=useState(false);
+  const [showInforme,setShowInforme]=useState(null);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
   const [tab,setTab]=useState("info");
@@ -496,7 +497,13 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
     showToast("Solicitud cerrada");setShowCl(false);return true;
   };
 
-  const tabs=[{id:"info",label:"Info"},{id:"history",label:"Historial ("+safeHistory.length+")"},{id:"tasks",label:"Designaciones ("+myTasks.length+")"},{id:"evidence",label:"Evidencias"},{id:"emails",label:"Correos ("+myEmails.length+")"}];
+  const isProveedor=role==="Proveedor";
+  const tabs=[
+    ...(isProveedor?[]:[{id:"info",label:"Info"}]),
+    ...(isProveedor?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
+    {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
+    ...(isProveedor?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
+  ];
   return(
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
@@ -531,16 +538,80 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
         </div>
       )}
       {tab==="history"&&<div style={card}>{safeHistory.length===0?<Empty msg="Sin historial"/>:<div>{[...safeHistory].reverse().map((h,i)=><div key={i} style={{paddingLeft:16,paddingBottom:14,borderLeft:"2px solid #e2e8f0",marginLeft:4}}><div style={{fontSize:13,fontWeight:600}}>{h.action}</div>{h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div></div>)}</div>}</div>}
-      {tab==="tasks"&&<div>
-        {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
-        {myTasks.length>0&&<div style={{marginTop:8}}><div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Designaciones ({myTasks.length})</div>{myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}</div>}
-        {!can(role,"createTask")&&myTasks.length===0&&<Empty msg="Sin designaciones"/>}
-      </div>}
+      {tab==="tasks"&&(
+        <div>
+          {/* Fotos de la solicitud — solo para no proveedores */}
+          {!isProveedor&&(()=>{
+            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+            return ["inicial","avance","cierre"].map(type=>{
+              const myAtt=allAtts.filter(a=>a.type===type);
+              return(
+                <div key={type} style={card}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                    {r.status!=="Cerrada"&&<button style={btnSecondary(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                  </div>
+                  {myAtt.length===0
+                    ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
+                    :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={e=>e.target.style.display="none"}/>)}</div>
+                  }
+                </div>
+              );
+            });
+          })()}
+
+          {/* Órdenes de trabajo */}
+          {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+          {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
+          {myTasks.length>0&&(
+            <div style={{marginTop:8}}>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
+              {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
+            </div>
+          )}
+
+          {/* Informe Orden de Trabajo — inline, sin abrir pestaña */}
+          {myTasks.length>0&&(
+            <div style={{marginTop:16}}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:12,color:"#374151"}}>📋 Informe Orden de Trabajo</div>
+              {myTasks.map(t=>(
+                <div key={t.id} style={{...card,marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                    <div>
+                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
+                      <div style={{fontSize:11,color:"#64748b",marginTop:2}}>🔧 {t.ejecutor||"Sin ejecutor"} · <SBadge s={t.status}/></div>
+                    </div>
+                    <button style={btnPurple(true)} onClick={()=>setShowInforme(t.id)}>{t.informe?"✏️ Editar informe":"📋 Completar informe"}</button>
+                  </div>
+                  {t.informe
+                    ?<div style={{...alrt(t.estadoFinal==="Resuelto"?"success":t.estadoFinal==="Resuelto parcialmente"?"warning":"error"),fontSize:12}}>
+                        <div style={{fontWeight:600,marginBottom:4}}>{t.estadoFinal}</div>
+                        <div style={{whiteSpace:"pre-wrap",marginBottom:4}}>{t.informe}</div>
+                        {t.fechaEjecucion&&<div style={{fontSize:11}}>📅 {fmtD(t.fechaEjecucion)}{t.horaInicio?" · ⏰ "+t.horaInicio+(t.horaTermino?" - "+t.horaTermino:""):""}</div>}
+                        {t.herramientas&&<div style={{fontSize:11,marginTop:4}}>🔧 {t.herramientas}</div>}
+                        {t.requiereSeguimiento&&<div style={{color:"#ef4444",fontWeight:600,marginTop:4}}>⚠️ Requiere seguimiento</div>}
+                        {t.nombreEjecutor&&<div style={{fontSize:11,marginTop:4,color:"#6366f1"}}>✍️ {t.nombreEjecutor}</div>}
+                      </div>
+                    :<div style={{...alrt("info"),fontSize:12}}>Sin informe registrado aún.</div>
+                  }
+                  {/* Fotos de la orden */}
+                  {(t.attachments||[]).length>0&&(
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+                      {t.attachments.map((a,i)=><img key={i} src={a.preview} alt="" style={{...thumb,width:80,height:64}} onError={e=>e.target.style.display="none"}/>)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {tab==="evidence"&&<EvidenciaTab req={r} atts={atts} setAtts={setAtts} role={role} showToast={showToast} tasks={myTasks} setTasks={setTasks}/>}
-      {tab==="emails"&&<div style={card}>{myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span></div><div style={{fontSize:10,color:"#64748b"}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{e.body}</div></div>)}</div>}
+      {!isProveedor&&tab==="emails"&&<div style={card}>{myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=><div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}><div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span></div><div style={{fontSize:10,color:"#64748b"}}>{e.to} - {fmt(e.date)}</div><div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{e.body}</div></div>)}</div>}
       {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
       {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
+      {showInforme&&<InformeModal task={tasks.find(t=>t.id===showInforme)} onSave={inf=>{setTasks(p=>p.map(t=>t.id===showInforme?{...t,...inf,informe:inf.texto}:t));showToast("Informe guardado");setShowInforme(null);}} onClose={()=>setShowInforme(null)}/>}
     </div>
   );
 }

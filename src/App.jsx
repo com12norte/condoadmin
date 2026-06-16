@@ -580,42 +580,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
           {myTasks.length===0
             ? <Empty msg="No hay órdenes de trabajo para reportar."/>
             : myTasks.map(t=>(
-                <div key={t.id} style={{...card,marginBottom:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
-                    <div>
-                      <div style={{fontWeight:700,fontSize:14}}>{t.title}</div>
-                      <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
-                        👤 {t.responsible}{t.ejecutor&&" · 🔧 "+t.ejecutor} · <SBadge s={t.status}/>
-                      </div>
-                    </div>
-                    <button style={btnPurple(true)} onClick={()=>setShowInforme(t.id)}>
-                      {t.informe?"✏️ Editar informe":"📋 Completar informe"}
-                    </button>
-                  </div>
-                  {t.informe
-                    ? <div style={{...alrt(t.estadoFinal==="Resuelto"?"success":t.estadoFinal==="Resuelto parcialmente"?"warning":"error"),fontSize:12}}>
-                        <div style={{fontWeight:600,marginBottom:6}}>{t.estadoFinal}</div>
-                        <div style={{whiteSpace:"pre-wrap",marginBottom:6}}>{t.informe}</div>
-                        <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11}}>
-                          {t.fechaEjecucion&&<span>📅 {fmtD(t.fechaEjecucion)}</span>}
-                          {t.horaInicio&&t.horaTermino&&<span>⏰ {t.horaInicio} - {t.horaTermino}</span>}
-                          {t.requiereSeguimiento&&<span style={{color:"#ef4444",fontWeight:600}}>⚠️ Requiere seguimiento</span>}
-                        </div>
-                        {t.herramientas&&<div style={{fontSize:11,marginTop:4}}>🔧 {t.herramientas}</div>}
-                        {t.observaciones&&<div style={{fontSize:11,marginTop:4}}>📝 {t.observaciones}</div>}
-                        {t.nombreEjecutor&&<div style={{fontSize:11,marginTop:6,color:"#6366f1"}}>✍️ Ejecutor: {t.nombreEjecutor}</div>}
-                      </div>
-                    : <div style={{...alrt("info"),fontSize:12}}>Sin informe registrado aún.</div>
-                  }
-                  {(t.attachments||[]).length>0&&(
-                    <div style={{marginTop:10}}>
-                      <div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:6}}>Fotos adjuntas</div>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        {t.attachments.map((a,i)=><img key={i} src={a.preview} alt="" style={{...thumb,width:80,height:64}} onError={e=>e.target.style.display="none"}/>)}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <InformeInline key={t.id} task={t} setTasks={setTasks} showToast={showToast}/>
               ))
           }
         </div>
@@ -668,10 +633,8 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
 }
 
 function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
-  const [exp,setExp]=useState(false);
   const [cmt,setCmt]=useState("");
   const [showEv,setShowEv]=useState(false);
-  const [showInforme,setShowInforme]=useState(false);
   const safeComments=task.comments||[];
   const safeMaterials=task.materials||[];
   const safeAtts=task.attachments||[];
@@ -680,25 +643,83 @@ function TaskCard({task,role,tasks,setTasks,showToast,atts,setAtts}){
   const resolve=()=>{if(!safeAtts.some(a=>a.type==="cierre")){showToast("Cargue imagen de cierre","error");return;}upd({status:"Completada"});showToast("Orden completada");};
   return(
     <div style={{...card,marginBottom:10,borderLeft:"4px solid "+(PC[task.priority]||"#e2e8f0")}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",cursor:"pointer",gap:8}} onClick={()=>setExp(p=>!p)}>
-        <div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor}</div>{task.informe&&<div style={{fontSize:11,color:"#10b981",marginTop:2}}>✓ Informe registrado</div>}</div>
-        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/><span style={{color:"#94a3b8",fontSize:12}}>{exp?"▲":"▼"}</span></div>
-      </div>
-      {exp&&<div style={{marginTop:10,borderTop:"1px solid #f1f5f9",paddingTop:10}}>
-        {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
-        {safeComments.map((c,i)=><div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}><strong>{c.user}</strong> <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}</div>)}
-        {task.informe&&<div style={{...alrt(task.estadoFinal==="Resuelto"?"success":task.estadoFinal==="Resuelto parcialmente"?"warning":"error"),marginBottom:10}}><div style={{fontWeight:600,marginBottom:4}}>📋 {task.estadoFinal}</div><div style={{fontSize:12,whiteSpace:"pre-wrap"}}>{task.informe}</div>{task.requiereSeguimiento&&<div style={{color:"#ef4444",fontWeight:600,marginTop:4}}>⚠️ Requiere seguimiento</div>}</div>}
-        <MatPanel materials={safeMaterials} setMaterials={ms=>upd({materials:ms})} readOnly={!can(role,"changeStatus")&&!can(role,"resolveTask")}/>
-        <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
-          <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addC()}/>
-          <button style={btnSecondary(true)} onClick={addC}>Enviar</button>
-          <button style={btnSecondary(true)} onClick={()=>setShowEv(true)}>📷</button>
-          <button style={btnPurple(true)} onClick={()=>setShowInforme(true)}>📋 Informe</button>
-          {task.status!=="Completada"&&(can(role,"resolveTask")||can(role,"changeStatus"))&&<button style={btnSuccess(true)} onClick={resolve}>✓ Completar</button>}
+      {/* Header siempre visible */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
         </div>
-      </div>}
+        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/></div>
+      </div>
+      {/* Contenido siempre expandido */}
+      {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
+      {safeComments.map((c,i)=><div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}><strong>{c.user}</strong> <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}</div>)}
+      <MatPanel materials={safeMaterials} setMaterials={ms=>upd({materials:ms})} readOnly={!can(role,"changeStatus")&&!can(role,"resolveTask")}/>
+      <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+        <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addC()}/>
+        <button style={btnSecondary(true)} onClick={addC}>Enviar</button>
+        <button style={btnSecondary(true)} onClick={()=>setShowEv(true)}>📷</button>
+        {task.status!=="Completada"&&(can(role,"resolveTask")||can(role,"changeStatus"))&&<button style={btnSuccess(true)} onClick={resolve}>✓ Completar</button>}
+      </div>
       {showEv&&<EvidModal type="cierre" requestId={task.requestId} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)} taskId={task.id} setTasks={setTasks}/>}
-      {showInforme&&<InformeModal task={task} onSave={inf=>{upd({...inf,informe:inf.texto});showToast("Informe guardado");setShowInforme(false);}} onClose={()=>setShowInforme(false)}/>}
+    </div>
+  );
+}
+
+function InformeInline({task,setTasks,showToast}){
+  const [f,setF]=useState({texto:task.informe||"",fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),horaInicio:task.horaInicio||"",horaTermino:task.horaTermino||"",herramientas:task.herramientas||"",estadoFinal:task.estadoFinal||"Resuelto",requiereSeguimiento:task.requiereSeguimiento||false,observaciones:task.observaciones||"",nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",vistoBueno:task.vistoBueno||false});
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const [esc,setEsc]=useState(false);const recRef=useRef(null);
+  const iniciarVoz=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Usa Chrome para dictado de voz");return;}const r=new SR();r.lang="es-CL";r.continuous=true;r.interimResults=false;r.onresult=e=>{const t=Array.from(e.results).map(x=>x[0].transcript).join(" ");set("texto",(f.texto?f.texto+" ":"")+t);};r.onerror=()=>setEsc(false);r.onend=()=>setEsc(false);recRef.current=r;r.start();setEsc(true);};
+  const detenerVoz=()=>{if(recRef.current)recRef.current.stop();setEsc(false);};
+  const guardar=()=>{
+    if(!f.texto.trim()){showToast("Ingrese la descripción","error");return;}
+    if(!f.vistoBueno){showToast("Debe confirmar el trabajo realizado","error");return;}
+    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto}:t));
+    showToast("Informe guardado");
+  };
+  return(
+    <div style={{...card,marginBottom:16}}>
+      <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>{task.title}</div>
+      <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor} · <SBadge s={task.status}/></div>
+
+      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>📅 Fecha y tiempo</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
+        <div style={fg}><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.fechaEjecucion} onChange={e=>set("fechaEjecucion",e.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora inicio</label><input type="time" style={inp} value={f.horaInicio} onChange={e=>set("horaInicio",e.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora término</label><input type="time" style={inp} value={f.horaTermino} onChange={e=>set("horaTermino",e.target.value)}/></div>
+      </div>
+
+      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>🔧 Trabajo realizado</div>
+      <div style={fg}><label style={lbl}>Descripción *</label><textarea style={{...inp,height:100,resize:"vertical"}} placeholder="Describe lo que se realizó..." value={f.texto} onChange={e=>set("texto",e.target.value)}/></div>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        {esc
+          ? <button style={{...btnDanger(false),flex:1,justifyContent:"center"}} onClick={detenerVoz}>⏹ Detener</button>
+          : <button style={{...btnPurple(false),flex:1,justifyContent:"center"}} onClick={iniciarVoz}>🎤 Dictar por voz</button>
+        }
+        {esc&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}>⏺ Escuchando...</div>}
+      </div>
+      <div style={fg}><label style={lbl}>Herramientas utilizadas</label><input style={inp} placeholder="ej: Taladro, Multímetro..." value={f.herramientas} onChange={e=>set("herramientas",e.target.value)}/></div>
+
+      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>📊 Resultado</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+        {ESTADOS_INFORME.map(e=>{
+          const isSelected=f.estadoFinal===e;
+          const color=e==="Resuelto"?"#10b981":e==="Resuelto parcialmente"?"#f59e0b":"#ef4444";
+          const bg=e==="Resuelto"?"#f0fdf4":e==="Resuelto parcialmente"?"#fffbeb":"#fef2f2";
+          return <button key={e} onClick={()=>set("estadoFinal",e)} style={{padding:"6px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"2px solid "+(isSelected?color:"#e2e8f0"),background:isSelected?bg:"#f9fafb",color:isSelected?color:"#6b7280"}}>{e==="Resuelto"?"✅":e==="Resuelto parcialmente"?"⚠️":"🔄"} {e}</button>;
+        })}
+      </div>
+      <div style={fg}><label style={lbl}>Observaciones</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.observaciones} onChange={e=>set("observaciones",e.target.value)}/></div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id={"seg"+task.id} checked={f.requiereSeguimiento} onChange={e=>set("requiereSeguimiento",e.target.checked)}/><label htmlFor={"seg"+task.id} style={{fontSize:13,cursor:"pointer"}}>⚠️ Requiere seguimiento posterior</label></div>
+
+      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>✍️ Confirmación</div>
+      <div style={fg}><label style={lbl}>Nombre del ejecutor</label><input style={inp} value={f.nombreEjecutor} onChange={e=>set("nombreEjecutor",e.target.value)}/></div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}><input type="checkbox" id={"vb"+task.id} checked={f.vistoBueno} onChange={e=>set("vistoBueno",e.target.checked)}/><label htmlFor={"vb"+task.id} style={{fontSize:13,cursor:"pointer",color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado</label></div>
+
+      <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
+        <button style={btnSuccess(true)} onClick={guardar}>💾 Guardar informe</button>
+      </div>
     </div>
   );
 }

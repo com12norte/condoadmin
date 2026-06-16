@@ -272,7 +272,7 @@ export default function App(){
 
   const navItems=[
     {id:"dashboard",label:"Dashboard"},{id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
-    {id:"provider",label:"Mis Trabajos"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
+    {id:"provider",label:"Mis Trabajos"},    {id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
     {id:"mantencion",label:"Mantención"},{id:"emails",label:"Correos"},{id:"reports",label:"Reportes"},{id:"config",label:"Config"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
@@ -571,40 +571,53 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
             </div>
           )}
 
-          {/* Informe Orden de Trabajo — inline, sin abrir pestaña */}
-          {myTasks.length>0&&(
-            <div style={{marginTop:16}}>
-              <div style={{fontWeight:700,fontSize:14,marginBottom:12,color:"#374151"}}>📋 Informe Orden de Trabajo</div>
-              {myTasks.map(t=>(
+          {/* Informe Orden de Trabajo — eliminado de aquí, va en pestaña propia */}
+        </div>
+      )}
+
+      {tab==="informe"&&(
+        <div>
+          {myTasks.length===0
+            ? <Empty msg="No hay órdenes de trabajo para reportar."/>
+            : myTasks.map(t=>(
                 <div key={t.id} style={{...card,marginBottom:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
                     <div>
-                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
-                      <div style={{fontSize:11,color:"#64748b",marginTop:2}}>🔧 {t.ejecutor||"Sin ejecutor"} · <SBadge s={t.status}/></div>
+                      <div style={{fontWeight:700,fontSize:14}}>{t.title}</div>
+                      <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
+                        👤 {t.responsible}{t.ejecutor&&" · 🔧 "+t.ejecutor} · <SBadge s={t.status}/>
+                      </div>
                     </div>
-                    <button style={btnPurple(true)} onClick={()=>setShowInforme(t.id)}>{t.informe?"✏️ Editar informe":"📋 Completar informe"}</button>
+                    <button style={btnPurple(true)} onClick={()=>setShowInforme(t.id)}>
+                      {t.informe?"✏️ Editar informe":"📋 Completar informe"}
+                    </button>
                   </div>
                   {t.informe
-                    ?<div style={{...alrt(t.estadoFinal==="Resuelto"?"success":t.estadoFinal==="Resuelto parcialmente"?"warning":"error"),fontSize:12}}>
-                        <div style={{fontWeight:600,marginBottom:4}}>{t.estadoFinal}</div>
-                        <div style={{whiteSpace:"pre-wrap",marginBottom:4}}>{t.informe}</div>
-                        {t.fechaEjecucion&&<div style={{fontSize:11}}>📅 {fmtD(t.fechaEjecucion)}{t.horaInicio?" · ⏰ "+t.horaInicio+(t.horaTermino?" - "+t.horaTermino:""):""}</div>}
+                    ? <div style={{...alrt(t.estadoFinal==="Resuelto"?"success":t.estadoFinal==="Resuelto parcialmente"?"warning":"error"),fontSize:12}}>
+                        <div style={{fontWeight:600,marginBottom:6}}>{t.estadoFinal}</div>
+                        <div style={{whiteSpace:"pre-wrap",marginBottom:6}}>{t.informe}</div>
+                        <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11}}>
+                          {t.fechaEjecucion&&<span>📅 {fmtD(t.fechaEjecucion)}</span>}
+                          {t.horaInicio&&t.horaTermino&&<span>⏰ {t.horaInicio} - {t.horaTermino}</span>}
+                          {t.requiereSeguimiento&&<span style={{color:"#ef4444",fontWeight:600}}>⚠️ Requiere seguimiento</span>}
+                        </div>
                         {t.herramientas&&<div style={{fontSize:11,marginTop:4}}>🔧 {t.herramientas}</div>}
-                        {t.requiereSeguimiento&&<div style={{color:"#ef4444",fontWeight:600,marginTop:4}}>⚠️ Requiere seguimiento</div>}
-                        {t.nombreEjecutor&&<div style={{fontSize:11,marginTop:4,color:"#6366f1"}}>✍️ {t.nombreEjecutor}</div>}
+                        {t.observaciones&&<div style={{fontSize:11,marginTop:4}}>📝 {t.observaciones}</div>}
+                        {t.nombreEjecutor&&<div style={{fontSize:11,marginTop:6,color:"#6366f1"}}>✍️ Ejecutor: {t.nombreEjecutor}</div>}
                       </div>
-                    :<div style={{...alrt("info"),fontSize:12}}>Sin informe registrado aún.</div>
+                    : <div style={{...alrt("info"),fontSize:12}}>Sin informe registrado aún.</div>
                   }
-                  {/* Fotos de la orden */}
                   {(t.attachments||[]).length>0&&(
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
-                      {t.attachments.map((a,i)=><img key={i} src={a.preview} alt="" style={{...thumb,width:80,height:64}} onError={e=>e.target.style.display="none"}/>)}
+                    <div style={{marginTop:10}}>
+                      <div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:6}}>Fotos adjuntas</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {t.attachments.map((a,i)=><img key={i} src={a.preview} alt="" style={{...thumb,width:80,height:64}} onError={e=>e.target.style.display="none"}/>)}
+                      </div>
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+          }
         </div>
       )}
       {tab==="evidence"&&<EvidenciaTab req={r} atts={atts} setAtts={setAtts} role={role} showToast={showToast} tasks={myTasks} setTasks={setTasks}/>}

@@ -502,6 +502,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,setAtts,add
     ...(isProveedor?[]:[{id:"info",label:"Info"}]),
     ...(isProveedor?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
     {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
+    {id:"informe",label:"Informe Orden de Trabajo"},
     ...(isProveedor?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
   ];
   return(

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const SUPA_URL = "https://ijefrrtdtjshfquuytic.supabase.co";
 const SUPA_KEY = "sb_publishable_sZTDO3ROm8IEnzbWuEUK-w_DeOz65XG";
@@ -397,7 +397,7 @@ export default function App(){
       {viewAs&&<div style={{background:"#7c3aed",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:100,fontSize:13}}><span>Visualizando como: <strong>{viewAs}</strong></span><button style={{...btnGhost(true),color:"#fff"}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir</button></div>}
       {mob&&<div style={{background:"#0f172a",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:60}}><div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>CondoAdmin</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={bdg("#fff","#1e3a5f")}>{er}</span><button style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}} onClick={()=>setNavOpen(p=>!p)}>{navOpen?"✕":"☰"}</button></div></div>}
       <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
-        {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onClick={()=>setNavOpen(false)}/>}
+        {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onPointerDown={()=>setNavOpen(false)}/>}
         {(!mob||navOpen)&&(
           <div onClick={e=>e.stopPropagation()} style={{width:mob?260:220,background:"#0f172a",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto",position:mob?"fixed":"relative",top:0,left:0,bottom:0,height:mob?"100vh":"auto",zIndex:50}}>
             {!mob&&<div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{padding:"18px 14px 14px",borderBottom:"1px solid #1e293b",cursor:"pointer"}}><div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div><div style={{color:"#64748b",fontSize:11,marginTop:2}}>Sistema de Gestion</div></div>}
@@ -447,6 +447,14 @@ export default function App(){
               {!mob&&<span style={{...bdg("#fff",viewAs?"#7c3aed":"#1e3a5f"),fontSize:12,padding:"5px 10px"}}>{er}</span>}
             </div>
           </div>
+      {/* DEBUG: botones de navegación directa */}
+      <div style={{background:"#1e293b",padding:"8px 14px",borderBottom:"1px solid #334155",display:"flex",gap:6,flexWrap:"wrap"}}>
+        {navItems.map(n=>(
+          <button key={n.id} onClick={()=>go(n.id)} style={{background:isAct(n.id)?"#3b82f6":"#334155",color:"#fff",border:"none",borderRadius:4,padding:"4px 10px",fontSize:11,cursor:"pointer",fontWeight:isAct(n.id)?700:400}}>
+            {n.label}
+          </button>
+        ))}
+      </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
             {view==="dashboard"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}

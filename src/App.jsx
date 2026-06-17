@@ -384,12 +384,18 @@ export default function App(){
     })();
   },[session]);
 
-  // Recordatorios: desde 3 días antes hasta que se guarde el informe
+  // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
   useEffect(()=>{
     if(!session||!tasks.length) return;
     const run=async()=>{
       const hoy=new Date(); hoy.setHours(0,0,0,0);
+      const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
+      // Si ya se ejecutó hoy en esta sesión, no hacer nada
+      if(window._remDate===fechaKey) return;
+      window._remDate=fechaKey;
       if(!window._remSent) window._remSent={};
+      // Limpiar enviados de días anteriores
+      window._remSent={};
       const sent=window._remSent;
       for(const t of tasks){
         if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;

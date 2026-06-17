@@ -6,19 +6,14 @@ const EMAILJS_SID = "service_vxhdrlx";
 const EMAILJS_TID = "template_90tjafk";
 const EMAILJS_KEY = "wKxD2rJHuftU7W-WE";
 
-// Token global — se actualiza al hacer login
-let _authToken = null;
-const setAuthToken = (tok) => { _authToken = tok; };
-
-const hdr = (tok) => {
-  const t = tok || _authToken || SUPA_KEY;
-  return { "Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+t };
-};
+let _tok = null;
+const hdr = (t) => ({ "Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+(t||_tok||SUPA_KEY) });
 const dbGet = (t,f="") => fetch(SUPA_URL+"/rest/v1/"+t+(f||"?select=*"),{headers:hdr()}).then(r=>r.json());
 const dbPost = (t,b) => fetch(SUPA_URL+"/rest/v1/"+t,{method:"POST",headers:{...hdr(),"Prefer":"return=representation"},body:JSON.stringify(b)}).then(r=>r.json());
+const dbPatch = (t,f,b) => fetch(SUPA_URL+"/rest/v1/"+t+"?"+f,{method:"PATCH",headers:{...hdr(),"Prefer":"return=representation"},body:JSON.stringify(b)}).then(r=>r.json());
 const dbUpsert = (t,b) => fetch(SUPA_URL+"/rest/v1/"+t,{method:"POST",headers:{...hdr(),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify(b)});
 const dbDelete = (t,f) => fetch(SUPA_URL+"/rest/v1/"+t+"?"+f,{method:"DELETE",headers:hdr()});
-const authSignIn = async (email,pass) => {
+const signIn = async (email,pass) => {
   const r = await fetch(SUPA_URL+"/auth/v1/token?grant_type=password",{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY},body:JSON.stringify({email,password:pass})});
   const d = await r.json();
   if(!r.ok) throw new Error(d.error_description||d.msg||"Error");
@@ -29,11 +24,15 @@ const uploadImg = async (file,path) => {
   if(!res.ok) throw new Error("Storage error");
   return SUPA_URL+"/storage/v1/object/public/imagenes/"+path;
 };
-const sendEmail = async (to,subject,body) => {
+const sendMail = async (to,subject,body) => {
   if(!to||!to.includes("@")) return;
   try {
-    await fetch("https://api.emailjs.com/api/v1.0/email/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({service_id:EMAILJS_SID,template_id:EMAILJS_TID,user_id:EMAILJS_KEY,template_params:{to_email:to,subject,message:body,name:"CondoAdmin",email:"no-reply@condoadmin.cl"}})});
-  } catch(e) {}
+    await fetch("https://api.emailjs.com/api/v1.0/email/send",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({service_id:EMAILJS_SID,template_id:EMAILJS_TID,user_id:EMAILJS_KEY,
+        template_params:{to_email:to,subject,message:body,name:"CondoAdmin",email:"no-reply@condoadmin.cl"}})
+    });
+  } catch(_){}
 };
 
 const ROLES = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
@@ -56,53 +55,124 @@ const ITEM_STATES = ["Bueno","Regular","Malo","No aplica"];
 const ITEM_COLOR = {Bueno:"#10b981",Regular:"#f59e0b",Malo:"#ef4444","No aplica":"#94a3b8","":"#d1d5db"};
 const URGENCY_LEVELS = ["Baja","Media","Alta","Critica"];
 const ESTADOS_INFORME = ["Resuelto","Resuelto parcialmente","Requiere revisión"];
-const ADMIN_CATS = {"Gestión":["Circular informativa","Acta de reunión","Carta a residente","Aviso general","Otro"],"Finanzas":["Pago de gastos comunes","Deuda morosa","Cotización","Factura proveedor","Fondo de reserva","Otro"],"Documentos":["Solicitud de certificado","Reglamento interno","Contrato proveedor","Permiso municipal","Otro"],"Comité":["Convocatoria reunión","Acuerdo de comité","Votación","Otro"],"Legal":["Reclamo residente","Infracción reglamento","Denuncia","Mediación","Otro"],"Proveedores":["Solicitud de cotización","Evaluación proveedor","Término de contrato","Otro"]};
-const DEF_CATS = {Electricidad:["Corte de luz","Falla de circuito","Luminaria","Tablero electrico","Otro"],Gas:["Olor a gas","Corte suministro","Fuga","Otro"],Agua:["Corte de agua","Presion baja","Fuga","Medidor","Otro"],Filtraciones:["Techo","Muro","Piso","Ventana","Otro"],Ascensores:["Parada emergencia","Ruido anormal","Puerta defectuosa","Otro"],Citofonia:["Citofono sin senal","Puerta danada","Control acceso","Otro"],"Espacios comunes":["Sala eventos","Quincho","Piscina","Gimnasio","Estacionamiento","Otro"],Perimetral:["Reja perimetral","Porton peatonal","Porton vehicular","Muro","Cerco electrico","Otro"],Motor:["Motor porton vehicular","Motor porton peatonal","Automatismo danado","Barrera vehicular","Otro"],Seguridad:["Incidente","Camara danada","Acceso no autorizado","Alarma","Otro"],Aseo:["Pasillo sucio","Retiro basura","Area comun","Otro"],Jardines:["Poda","Riego","Dano en plantas","Sistema riego","Otro"],Otros:["Ruidos molestos","Mascotas","Dano propiedad comun","Otro"]};
-const CL_SECTIONS = [{id:"s1",label:"Cierres perimetrales",items:["Reja perimetral","Porton peatonal","Porton vehicular","Cerraduras","Bisagras","Automatizacion","Citofonia","Senaletica"]},{id:"s2",label:"Jardines",items:["Cesped","Arboles","Arbustos","Macizos","Sistema riego","Podas","Maleza","Estado general"]},{id:"s3",label:"Iluminacion",items:["Luminarias ext","Luminarias pasillos","Luces acceso","Luces estacionamiento","Alumbrado perimetral","Cableado visible","Interruptores"]},{id:"s4",label:"Mobiliario",items:["Bancas","Basureros","Juegos infantiles","Bicicleteros","Senaletica interior","Barandas","Rejas interiores"]},{id:"s5",label:"Canerias",items:["Canerias visibles","Filtraciones","Goteras","Llaves de paso","Sumideros","Canaletas","Bajadas de agua","Acumulacion agua"]},{id:"s6",label:"Techumbres",items:["Techo principal","Cubiertas","Tejas","Sellos","Senales humedad","Riesgo desprendimiento"]},{id:"s7",label:"Muros",items:["Muros perimetrales","Fachadas","Grietas","Humedad","Pintura deteriorada","Revestimientos","Vandalismo"]},{id:"s8",label:"Circulaciones",items:["Veredas","Pavimentos","Escaleras","Rampas","Pasamanos","Estacionamientos","Senalizacion","Obstaculos"]},{id:"s9",label:"Aseo",items:["Limpieza areas comunes","Basura","Escombros","Graffitis","Olores"]}];
-const EQUIP_TIPOS = [{id:"e1",nombre:"Extintores",icono:"🧯",frecuencia:"Anual"},{id:"e2",nombre:"Red húmeda/seca",icono:"🚒",frecuencia:"Anual"},{id:"e3",nombre:"Tableros eléctricos",icono:"⚡",frecuencia:"Anual"},{id:"e4",nombre:"Ascensores",icono:"🛗",frecuencia:"Semestral"},{id:"e5",nombre:"Calderas/Calefactores",icono:"🔥",frecuencia:"Anual"},{id:"e6",nombre:"Estanques de agua",icono:"💧",frecuencia:"Semestral"},{id:"e7",nombre:"Cámaras CCTV",icono:"🎥",frecuencia:"Anual"},{id:"e8",nombre:"Puertas cortafuego",icono:"🚪",frecuencia:"Anual"},{id:"e9",nombre:"Piscina",icono:"🏊",frecuencia:"Mensual"},{id:"e10",nombre:"Ventilación",icono:"🌬️",frecuencia:"Semestral"},{id:"e11",nombre:"Generador",icono:"⚙️",frecuencia:"Anual"},{id:"e12",nombre:"Bomba de agua",icono:"🔧",frecuencia:"Anual"},{id:"e13",nombre:"Motor portón",icono:"🚗",frecuencia:"Anual"},{id:"e14",nombre:"Citófonos",icono:"📞",frecuencia:"Anual"},{id:"e15",nombre:"Alarmas",icono:"🔔",frecuencia:"Anual"}];
-const PERMS = {Administrador:["create","viewAll","assign","changeStatus","closeCases","createTask","viewReports","viewEmails","manageConfig","comment","inspection","inventory","viewAs","manageWork","mantencion","mantRead"],"Administrador Edificio":["create","viewAll","assign","changeStatus","closeCases","createTask","viewReports","viewEmails","comment","inspection","inventory","manageWork","mantencion","mantRead"],Conserjeria:["create","viewOps","changeStatusLimited","comment","inspection","inventory","manageWork","mantencion","mantRead"],Residente:["create","viewOwn"],Comite:["viewAll","viewReports","inspectionRead","inventoryRead","mantRead"],Proveedor:["viewAssigned","recordProgress","uploadEvidence","resolveTask","comment","providerDash"]};
+const ADMIN_CATS = {
+  "Gestión":["Circular informativa","Acta de reunión","Carta a residente","Aviso general","Otro"],
+  "Finanzas":["Pago de gastos comunes","Deuda morosa","Cotización","Factura proveedor","Fondo de reserva","Otro"],
+  "Documentos":["Solicitud de certificado","Reglamento interno","Contrato proveedor","Permiso municipal","Otro"],
+  "Comité":["Convocatoria reunión","Acuerdo de comité","Votación","Otro"],
+  "Legal":["Reclamo residente","Infracción reglamento","Denuncia","Mediación","Otro"],
+  "Proveedores":["Solicitud de cotización","Evaluación proveedor","Término de contrato","Otro"]
+};
+const DEF_CATS = {
+  Electricidad:["Corte de luz","Falla de circuito","Luminaria","Tablero electrico","Otro"],
+  Gas:["Olor a gas","Corte suministro","Fuga","Otro"],
+  Agua:["Corte de agua","Presion baja","Fuga","Medidor","Otro"],
+  Filtraciones:["Techo","Muro","Piso","Ventana","Otro"],
+  Ascensores:["Parada emergencia","Ruido anormal","Puerta defectuosa","Otro"],
+  Citofonia:["Citofono sin senal","Puerta danada","Control acceso","Otro"],
+  "Espacios comunes":["Sala eventos","Quincho","Piscina","Gimnasio","Estacionamiento","Otro"],
+  Perimetral:["Reja perimetral","Porton peatonal","Porton vehicular","Muro","Cerco electrico","Otro"],
+  Motor:["Motor porton vehicular","Motor porton peatonal","Automatismo danado","Barrera vehicular","Otro"],
+  Seguridad:["Incidente","Camara danada","Acceso no autorizado","Alarma","Otro"],
+  Aseo:["Pasillo sucio","Retiro basura","Area comun","Otro"],
+  Jardines:["Poda","Riego","Dano en plantas","Sistema riego","Otro"],
+  Otros:["Ruidos molestos","Mascotas","Dano propiedad comun","Otro"]
+};
+const CL_SECTIONS = [
+  {id:"s1",label:"Cierres perimetrales",items:["Reja perimetral","Porton peatonal","Porton vehicular","Cerraduras","Bisagras","Automatizacion","Citofonia","Senaletica"]},
+  {id:"s2",label:"Jardines",items:["Cesped","Arboles","Arbustos","Macizos","Sistema riego","Podas","Maleza","Estado general"]},
+  {id:"s3",label:"Iluminacion",items:["Luminarias ext","Luminarias pasillos","Luces acceso","Luces estacionamiento","Alumbrado perimetral","Cableado visible","Interruptores"]},
+  {id:"s4",label:"Mobiliario",items:["Bancas","Basureros","Juegos infantiles","Bicicleteros","Senaletica interior","Barandas","Rejas interiores"]},
+  {id:"s5",label:"Canerias",items:["Canerias visibles","Filtraciones","Goteras","Llaves de paso","Sumideros","Canaletas","Bajadas de agua","Acumulacion agua"]},
+  {id:"s6",label:"Techumbres",items:["Techo principal","Cubiertas","Tejas","Sellos","Senales humedad","Riesgo desprendimiento"]},
+  {id:"s7",label:"Muros",items:["Muros perimetrales","Fachadas","Grietas","Humedad","Pintura deteriorada","Revestimientos","Vandalismo"]},
+  {id:"s8",label:"Circulaciones",items:["Veredas","Pavimentos","Escaleras","Rampas","Pasamanos","Estacionamientos","Senalizacion","Obstaculos"]},
+  {id:"s9",label:"Aseo",items:["Limpieza areas comunes","Basura","Escombros","Graffitis","Olores"]}
+];
+const EQUIP_TIPOS = [
+  {id:"e1",nombre:"Extintores",icono:"🧯",frecuencia:"Anual"},
+  {id:"e2",nombre:"Red húmeda/seca",icono:"🚒",frecuencia:"Anual"},
+  {id:"e3",nombre:"Tableros eléctricos",icono:"⚡",frecuencia:"Anual"},
+  {id:"e4",nombre:"Ascensores",icono:"🛗",frecuencia:"Semestral"},
+  {id:"e5",nombre:"Calderas/Calefactores",icono:"🔥",frecuencia:"Anual"},
+  {id:"e6",nombre:"Estanques de agua",icono:"💧",frecuencia:"Semestral"},
+  {id:"e7",nombre:"Cámaras CCTV",icono:"🎥",frecuencia:"Anual"},
+  {id:"e8",nombre:"Puertas cortafuego",icono:"🚪",frecuencia:"Anual"},
+  {id:"e9",nombre:"Piscina",icono:"🏊",frecuencia:"Mensual"},
+  {id:"e10",nombre:"Ventilación",icono:"🌬️",frecuencia:"Semestral"},
+  {id:"e11",nombre:"Generador",icono:"⚙️",frecuencia:"Anual"},
+  {id:"e12",nombre:"Bomba de agua",icono:"🔧",frecuencia:"Anual"},
+  {id:"e13",nombre:"Motor portón",icono:"🚗",frecuencia:"Anual"},
+  {id:"e14",nombre:"Citófonos",icono:"📞",frecuencia:"Anual"},
+  {id:"e15",nombre:"Alarmas",icono:"🔔",frecuencia:"Anual"}
+];
+const PERMS = {
+  Administrador:["create","viewAll","assign","changeStatus","closeCases","createTask","viewReports","viewEmails","manageConfig","comment","inspection","inventory","viewAs","manageWork","mantencion","mantRead"],
+  "Administrador Edificio":["create","viewAll","assign","changeStatus","closeCases","createTask","viewReports","viewEmails","comment","inspection","inventory","manageWork","mantencion","mantRead"],
+  Conserjeria:["create","viewOps","changeStatusLimited","comment","inspection","inventory","manageWork","mantencion","mantRead"],
+  Residente:["create","viewOwn"],
+  Comite:["viewAll","viewReports","inspectionRead","inventoryRead","mantRead"],
+  Proveedor:["viewAssigned","recordProgress","uploadEvidence","resolveTask","comment","providerDash"]
+};
 const can = (role,action) => (PERMS[role]||[]).includes(action);
-
-const fmt = d => { try { return new Date(d).toLocaleString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); } catch { return ""; }};
-const fmtD = d => { try { return new Date(d).toLocaleDateString("es-CL"); } catch { return ""; }};
+const fmt = d => { try { return new Date(d).toLocaleString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); } catch(_){ return ""; }};
+const fmtD = d => { try { return new Date(d).toLocaleDateString("es-CL"); } catch(_){ return ""; }};
 const uid = () => Math.random().toString(36).slice(2,9);
-const genCode = (arr,pfx) => { const nums=(arr||[]).map(r=>{ const n=parseInt((r.id||r.code||"").replace(pfx,"").replace(/\D/g,""),10); return isNaN(n)?0:n; }); return pfx+String((nums.length?Math.max(0,...nums):0)+1).padStart(3,"0"); };
-const getMantStatus = m => { if(!m)return"Vigente"; if(m.status==="En ejecucion"||m.status==="Completada")return m.status; if(!m.nextDate)return"Vigente"; const d=(new Date(m.nextDate)-new Date())/86400000; return d<0?"Vencida":d<=30?"Por vencer":"Vigente"; };
-const mkItems = (ov) => { const o=ov||{},items={}; CL_SECTIONS.forEach(s=>s.items.forEach(n=>{const k=s.id+"_"+n;items[k]={state:"",obs:"",urgency:"",images:[],reqId:null,...(o[k]||{})}})); return items; };
-const normalizeReq = r => ({comments:[],history:[],attachmentsInitial:[],assignedTo:"Sin asignar",dueDate:null,isUrgent:false,...(r||{})});
-const normalizeTask = t => ({comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...(t||{})});
-const normalizeMant = m => ({history:[],comments:[],documents:[],...(m||{})});
-const normalizeInsp = i => { const base=i||{}; return {...base,items:mkItems(base.items)}; };
+const genCode = (arr,pfx) => {
+  const nums = (arr||[]).map(r => { const n = parseInt((r.id||r.code||"").replace(pfx,"").replace(/\D/g,""),10); return isNaN(n)?0:n; });
+  return pfx+String((nums.length?Math.max(0,...nums):0)+1).padStart(3,"0");
+};
+const getMantStatus = m => {
+  if(!m) return "Vigente";
+  if(m.status==="En ejecucion"||m.status==="Completada") return m.status;
+  if(!m.nextDate) return "Vigente";
+  const d = (new Date(m.nextDate)-new Date())/86400000;
+  return d<0?"Vencida":d<=30?"Por vencer":"Vigente";
+};
+const mkItems = ov => {
+  const o=ov||{}, items={};
+  CL_SECTIONS.forEach(s => s.items.forEach(n => {
+    const k=s.id+"_"+n;
+    items[k]={state:"",obs:"",urgency:"",images:[],reqId:null,...(o[k]||{})};
+  }));
+  return items;
+};
+const normReq = r => ({comments:[],history:[],attachmentsInitial:[],assignedTo:"Sin asignar",dueDate:null,isUrgent:false,...(r||{})});
+const normTask = t => ({comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...(t||{})});
+const normMant = m => ({history:[],comments:[],documents:[],...(m||{})});
+const normInsp = i => { const b=i||{}; return {...b,items:mkItems(b.items)}; };
 
+// ── Styles ─────────────────────────────────────────────────────────────────
 const bdg = (c,bg) => ({display:"inline-flex",alignItems:"center",padding:"2px 6px",borderRadius:99,fontSize:10,fontWeight:600,color:c,background:bg,whiteSpace:"nowrap"});
-
 const mkBtn = (v,sm) => {
   const base={display:"inline-flex",alignItems:"center",gap:4,padding:sm?"4px 8px":"7px 12px",borderRadius:6,fontSize:sm?11:13,fontWeight:600,cursor:"pointer",border:"none",lineHeight:1.2};
   const vs={primary:{background:"#3b82f6",color:"#fff"},secondary:{background:"#f1f5f9",color:"#374151",border:"1px solid #e2e8f0"},danger:{background:"#ef4444",color:"#fff"},success:{background:"#10b981",color:"#fff"},ghost:{background:"transparent",color:"#6b7280"},warning:{background:"#f59e0b",color:"#fff"},purple:{background:"#8b5cf6",color:"#fff"}};
   return {...base,...(vs[v||"primary"])};
 };
-const btnPrimary = (sm) => mkBtn("primary",sm);
-const btnSecondary = (sm) => mkBtn("secondary",sm);
-const btnDanger = (sm) => mkBtn("danger",sm);
-const btnSuccess = (sm) => mkBtn("success",sm);
-const btnGhost = (sm) => mkBtn("ghost",sm);
-const btnWarning = (sm) => mkBtn("warning",sm);
-const btnPurple = (sm) => mkBtn("purple",sm);
+const BP=(sm)=>mkBtn("primary",sm), BS=(sm)=>mkBtn("secondary",sm), BD=(sm)=>mkBtn("danger",sm),
+      BG=(sm)=>mkBtn("ghost",sm), BSu=(sm)=>mkBtn("success",sm), BW=(sm)=>mkBtn("warning",sm), BPu=(sm)=>mkBtn("purple",sm);
+const card={background:"#fff",borderRadius:10,border:"1px solid #e2e8f0",padding:"12px",marginBottom:12};
+const inp={width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #d1d5db",fontSize:13,color:"#1e293b",background:"#fff",boxSizing:"border-box"};
+const sel={width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #d1d5db",fontSize:13,color:"#1e293b",background:"#fff",boxSizing:"border-box"};
+const lbl={fontSize:12,fontWeight:600,color:"#374151",marginBottom:3,display:"block"};
+const fg={marginBottom:10};
+const thS={textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #e2e8f0",fontWeight:600,fontSize:10,color:"#6b7280",textTransform:"uppercase",whiteSpace:"nowrap"};
+const tdS={padding:"6px 8px",borderBottom:"1px solid #f1f5f9",verticalAlign:"middle",fontSize:12};
+const tbl={width:"100%",borderCollapse:"collapse",fontSize:12};
+const kpi={background:"#fff",borderRadius:10,border:"1px solid #e2e8f0",padding:"12px"};
+const alrt = t => ({padding:"8px 12px",borderRadius:6,fontSize:12,marginBottom:10,
+  background:t==="error"?"#fef2f2":t==="success"?"#f0fdf4":t==="warning"?"#fffbeb":"#eff6ff",
+  color:t==="error"?"#dc2626":t==="success"?"#16a34a":t==="warning"?"#92400e":"#1d4ed8",
+  border:"1px solid "+(t==="error"?"#fca5a5":t==="success"?"#86efac":t==="warning"?"#fde68a":"#bfdbfe")});
+const MSt={position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"8px",overflowY:"auto"};
+const thumb={width:64,height:48,objectFit:"cover",borderRadius:6,border:"1px solid #e2e8f0"};
 
-const card = {background:"#fff",borderRadius:10,border:"1px solid #e2e8f0",padding:"12px",marginBottom:12};
-const inp = {width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #d1d5db",fontSize:13,color:"#1e293b",background:"#fff",boxSizing:"border-box"};
-const sel = {width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #d1d5db",fontSize:13,color:"#1e293b",background:"#fff",boxSizing:"border-box"};
-const lbl = {fontSize:12,fontWeight:600,color:"#374151",marginBottom:3,display:"block"};
-const fg = {marginBottom:10};
-const thSt = {textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #e2e8f0",fontWeight:600,fontSize:10,color:"#6b7280",textTransform:"uppercase",whiteSpace:"nowrap"};
-const tdSt = {padding:"6px 8px",borderBottom:"1px solid #f1f5f9",verticalAlign:"middle",fontSize:12};
-const tbl = {width:"100%",borderCollapse:"collapse",fontSize:12};
-const kpi = {background:"#fff",borderRadius:10,border:"1px solid #e2e8f0",padding:"12px"};
-const alrt = t => ({padding:"8px 12px",borderRadius:6,fontSize:12,marginBottom:10,background:t==="error"?"#fef2f2":t==="success"?"#f0fdf4":t==="warning"?"#fffbeb":"#eff6ff",color:t==="error"?"#dc2626":t==="success"?"#16a34a":t==="warning"?"#92400e":"#1d4ed8",border:"1px solid "+(t==="error"?"#fca5a5":t==="success"?"#86efac":t==="warning"?"#fde68a":"#bfdbfe")});
-const modalSt = {position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"8px",overflowY:"auto"};
-const thumb = {width:64,height:48,objectFit:"cover",borderRadius:6,border:"1px solid #e2e8f0"};
-
-function useMob(){const[m,setM]=useState(window.innerWidth<768);useEffect(()=>{const h=()=>setM(window.innerWidth<768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);return m;}
+// ── Helpers ────────────────────────────────────────────────────────────────
+function useMob(){
+  const [m,setM]=useState(window.innerWidth<768);
+  useEffect(()=>{const h=()=>setM(window.innerWidth<768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return m;
+}
 function SBadge({s}){const c=SC[s]||"#64748b";return <span style={bdg(c,c+"22")}>{s}</span>;}
 function PBadge({p}){return <span style={{...bdg(PC[p]||"#64748b",PB[p]||"#f9fafb"),fontWeight:700}}>{p==="Emergencia"?"⚠ ":""}{p}</span>;}
 function MBadge({m}){const st=getMantStatus(m);const dot=st==="Vigente"?"✓":st==="Por vencer"?"!":st==="Vencida"?"✗":"~";return <span style={bdg(MANT_SC[st]||"#64748b",MANT_SB[st]||"#f9fafb")}>{dot} {st}</span>;}
@@ -110,32 +180,82 @@ function IR({l,v}){return <div style={{display:"flex",justifyContent:"space-betw
 function Empty({msg}){return <div style={{textAlign:"center",padding:"40px 20px",color:"#94a3b8",fontSize:13}}>{msg}</div>;}
 function Kpi({value,label,color,mob}){return <div style={{...kpi,borderTop:"3px solid "+color}}><div style={{fontSize:mob?18:24,fontWeight:700,color}}>{value}</div><div style={{fontSize:11,color:"#64748b",marginTop:3}}>{label}</div></div>;}
 function Grid({cols,mob,children}){return <div style={{display:"grid",gridTemplateColumns:"repeat("+(mob?2:cols)+",1fr)",gap:12,marginBottom:16}}>{children}</div>;}
-function Tabs({tabs,active,onChange,accent}){const ac=accent||"#3b82f6";return <div style={{display:"flex",borderBottom:"2px solid #e2e8f0",marginBottom:12,overflowX:"auto"}}>{tabs.map(t=><button key={t.id} onClick={()=>onChange(t.id)} style={{...btnGhost(false),borderRadius:0,padding:"8px 12px",whiteSpace:"nowrap",borderBottom:active===t.id?"2px solid "+ac:"2px solid transparent",marginBottom:-2,color:active===t.id?ac:"#64748b",fontWeight:active===t.id?700:400}}>{t.label}</button>)}</div>;}
+function Tabs({tabs,active,onChange,accent}){
+  const ac=accent||"#3b82f6";
+  return (
+    <div style={{display:"flex",borderBottom:"2px solid #e2e8f0",marginBottom:12,overflowX:"auto"}}>
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>onChange(t.id)} style={{...BG(false),borderRadius:0,padding:"8px 12px",whiteSpace:"nowrap",borderBottom:active===t.id?"2px solid "+ac:"2px solid transparent",marginBottom:-2,color:active===t.id?ac:"#64748b",fontWeight:active===t.id?700:400}}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando...</div><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
 
+// ── Sidebar ────────────────────────────────────────────────────────────────
+function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,er,mob}){
+  const navTo = id => { setView(id); setNavOpen(false); };
+  const isAct = id => view===id||(view==="detail"&&id==="requests");
+  return (
+    <div style={{width:mob?260:220,background:"#0f172a",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto",position:mob?"fixed":"relative",top:0,left:0,bottom:0,height:mob?"100vh":"auto",zIndex:50}}>
+      {!mob&&(
+        <div onClick={()=>navTo(er==="Proveedor"?"provider":"dashboard")} style={{padding:"18px 14px 14px",borderBottom:"1px solid #1e293b",cursor:"pointer"}}>
+          <div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div>
+          <div style={{color:"#64748b",fontSize:11,marginTop:2}}>Sistema de Gestion</div>
+        </div>
+      )}
+      <nav style={{padding:"6px 0",flex:1}}>
+        {navItems.map(n=>(
+          <button key={n.id} onClick={()=>navTo(n.id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",cursor:"pointer",fontSize:13,color:isAct(n.id)?"#fff":"#94a3b8",background:isAct(n.id)?"#1e3a5f":"transparent",borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",borderTop:"none",borderRight:"none",borderBottom:"none",fontWeight:isAct(n.id)?600:400,outline:"none"}}>
+            {n.label}
+          </button>
+        ))}
+      </nav>
+      <div style={{padding:"10px 14px",borderTop:"1px solid #1e293b"}}>
+        <div style={{marginBottom:10}}>
+          <div style={{color:"#fff",fontSize:12,fontWeight:600,marginBottom:2}}>{session.nombre}</div>
+          <div style={{color:"#64748b",fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:4}}>{session.email}</div>
+          <span style={bdg("#93c5fd","#1e3a5f")}>{session.rol}</span>
+        </div>
+        {can(session.rol,"viewAs")&&!viewAs&&(
+          <div style={{marginBottom:8}}>
+            <div style={{color:"#64748b",fontSize:10,textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>Ver como</div>
+            <select style={{width:"100%",background:"#1e293b",color:"#a78bfa",border:"1px solid #4c1d95",borderRadius:6,padding:"6px 8px",fontSize:12}} defaultValue="" onChange={ev=>{if(ev.target.value){setViewAs(ev.target.value);setView(ev.target.value==="Proveedor"?"provider":"dashboard");}}}>
+              <option value="">Seleccionar perfil...</option>
+              {ROLES.filter(r=>r!==session.rol).map(r=><option key={r}>{r}</option>)}
+            </select>
+          </div>
+        )}
+        {viewAs&&<button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir de vista</button>}
+        <button style={{...BD(true),width:"100%",justifyContent:"center"}} onClick={handleLogout}>Cerrar sesion</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Login ──────────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
   const [mode,setMode]=useState(null);
-  const [email,setEmail]=useState("");
-  const [pass,setPass]=useState("");
-  const [load,setLoad]=useState(false);
-  const [err,setErr]=useState("");
-  const [resEmail,setResEmail]=useState("");
-  const [resErr,setResErr]=useState("");
+  const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
+  const [load,setLoad]=useState(false); const [err,setErr]=useState("");
+  const [resEmail,setResEmail]=useState(""); const [resErr,setResErr]=useState("");
 
-  const submitPersonal=async()=>{
+  const doLogin=async()=>{
     if(!email||!pass){setErr("Ingrese correo y contraseña");return;}
     setLoad(true);setErr("");
     try{
-      const auth=await authSignIn(email,pass);
+      const auth=await signIn(email,pass);
       const res=await fetch(SUPA_URL+"/rest/v1/usuarios?email=eq."+encodeURIComponent(email)+"&active=eq.true",{headers:hdr(auth.access_token)});
       const users=await res.json();
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
       onLogin({...users[0],token:auth.access_token});
-    }catch(e){setErr(e.message||"Credenciales incorrectas");}
+    }catch(ex){setErr(ex.message||"Credenciales incorrectas");}
     setLoad(false);
   };
 
-  const submitResidente=()=>{
+  const doResidente=()=>{
     if(!resEmail||!/\S+@\S+\.\S+/.test(resEmail)){setResErr("Ingrese un correo válido");return;}
     onLogin({id:"guest",nombre:"Residente",email:resEmail,rol:"Residente",token:null,openNewReq:true});
   };
@@ -170,8 +290,8 @@ function LoginScreen({onLogin}){
         <button onClick={()=>{setMode(null);setResErr("");setResEmail("");}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
         <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div></div>
         {resErr&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{resErr}</div>}
-        <div style={{marginBottom:20}}><label style={{...lbl,color:"#bfdbfe"}}>Correo electrónico</label><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={e=>setResEmail(e.target.value)} placeholder="tu@correo.cl" onKeyDown={e=>e.key==="Enter"&&submitResidente()}/></div>
-        <button onClick={submitResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
+        <div style={{marginBottom:20}}><label style={{...lbl,color:"#bfdbfe"}}>Correo electrónico</label><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>ev.key==="Enter"&&doResidente()}/></div>
+        <button onClick={doResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
       </div>
     </div>
   );
@@ -182,23 +302,21 @@ function LoginScreen({onLogin}){
         <button onClick={()=>{setMode(null);setErr("");}} style={{background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",color:"#94a3b8",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
         <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🔑</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Acceso Personal</div></div>
         {err&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{err}</div>}
-        <div style={{marginBottom:14}}><label style={{...lbl,color:"#94a3b8"}}>Correo</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/></div>
-        <div style={{marginBottom:8}}><label style={{...lbl,color:"#94a3b8"}}>Contraseña</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submitPersonal()}/></div>
+        <div style={{marginBottom:14}}><label style={{...lbl,color:"#94a3b8"}}>Correo</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="email" value={email} onChange={ev=>setEmail(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&doLogin()}/></div>
+        <div style={{marginBottom:8}}><label style={{...lbl,color:"#94a3b8"}}>Contraseña</label><input style={{...inp,background:"#1e293b",border:"1px solid #334155",color:"#fff"}} type="password" value={pass} onChange={ev=>setPass(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&doLogin()}/></div>
         <div style={{textAlign:"right",marginBottom:20}}>
           <button onClick={async()=>{
             if(!email||!email.includes("@")){setErr("Ingrese su correo primero");return;}
-            try{
-              const res=await fetch(SUPA_URL+"/auth/v1/recover",{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY},body:JSON.stringify({email})});
-              if(res.ok)setErr("✓ Mail enviado a "+email);else setErr("Error al enviar.");
-            }catch(e){setErr("Error al enviar.");}
+            try{const res=await fetch(SUPA_URL+"/auth/v1/recover",{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY},body:JSON.stringify({email})});if(res.ok)setErr("✓ Mail enviado a "+email);else setErr("Error al enviar.");}catch(_){setErr("Error al enviar.");}
           }} style={{background:"none",border:"none",color:"#6366f1",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>¿Olvidaste tu contraseña?</button>
         </div>
-        <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={submitPersonal} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
+        <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={doLogin} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
       </div>
     </div>
   );
 }
 
+// ── App ────────────────────────────────────────────────────────────────────
 export default function App(){
   const mob=useMob();
   const [session,setSession]=useState(null);
@@ -211,11 +329,10 @@ export default function App(){
   const [emails,setEmails]=useState([]);
   const [inspections,setInsp]=useState([]);
   const [inventory,setInv]=useState([]);
-  const [dispatch,setDispatch]=useState([]);
   const [mant,setMant]=useState([]);
   const [cats,setCats]=useState(Object.entries(DEF_CATS).map(([name,subs],i)=>({id:"cat"+i,name,subs,active:true,order:i})));
   const [towers,setTowers]=useState([{id:"t1",name:"A",label:"Torre A",active:true},{id:"t2",name:"B",label:"Torre B",active:true},{id:"t3",name:"C",label:"Torre C",active:true},{id:"t4",name:"Comun",label:"Area Comun",active:true}]);
-  const [equipos,setEquipos]=useState(EQUIP_TIPOS.map(e=>({...e,active:false})));
+  const [equipos,setEquipos]=useState(EQUIP_TIPOS.map(eq=>({...eq,active:false})));
   const [certs,setCerts]=useState([]);
   const [usuarios,setUsuarios]=useState([]);
   const [selReq,setSelReq]=useState(null);
@@ -225,12 +342,13 @@ export default function App(){
 
   const er=session?(viewAs||session.rol):"Residente";
   const showToast=(msg,type)=>{setToast({msg,type:type||"success"});setTimeout(()=>setToast(null),3200);};
-  const handleLogin=(user)=>{
+
+  const handleLogin=user=>{
     setSession(user);
-    if(user.token) setAuthToken(user.token);
-    if(user.openNewReq)setShowNew(true);
+    if(user.token) _tok=user.token;
+    if(user.openNewReq) setShowNew(true);
   };
-  const handleLogout=()=>{setSession(null);setViewAs(null);setView("dashboard");setAuthToken(null);};
+  const handleLogout=()=>{setSession(null);setViewAs(null);setView("dashboard");_tok=null;};
 
   useEffect(()=>{setLoading(false);},[]);
 
@@ -238,135 +356,94 @@ export default function App(){
     if(!session) return;
     (async()=>{
       try{
-        const [rR,rT,rI,rM,rIn,rE,rD,rCfg,rU]=await Promise.all([
+        const [rR,rT,rI,rM,rIn,rE,rCfg,rU]=await Promise.all([
           dbGet("solicitudes","?order=created_at.desc"),
           dbGet("tareas","?order=id.asc"),
           dbGet("inventario","?order=id.asc"),
           dbGet("mantenciones","?order=id.asc"),
           dbGet("inspecciones","?order=id.asc"),
           dbGet("correos","?order=id.asc"),
-          dbGet("despachos","?order=id.asc"),
           dbGet("config","?select=*"),
           fetch(SUPA_URL+"/rest/v1/usuarios?active=eq.true&select=*",{headers:hdr()}).then(r=>r.json()),
         ]);
-        if(Array.isArray(rR)) setReqs(rR.map(r=>normalizeReq(r.data)).filter(Boolean));
-        if(Array.isArray(rT)) setTasks(rT.map(r=>normalizeTask(r.data)).filter(Boolean));
+        if(Array.isArray(rR)) setReqs(rR.map(r=>normReq(r.data)).filter(Boolean));
+        if(Array.isArray(rT)) setTasks(rT.map(r=>normTask(r.data)).filter(Boolean));
         if(Array.isArray(rI)) setInv(rI.map(r=>r.data).filter(Boolean));
-        if(Array.isArray(rM)) setMant(rM.map(r=>normalizeMant(r.data)).filter(Boolean));
-        if(Array.isArray(rIn)) setInsp(rIn.map(r=>normalizeInsp(r.data)).filter(Boolean));
+        if(Array.isArray(rM)) setMant(rM.map(r=>normMant(r.data)).filter(Boolean));
+        if(Array.isArray(rIn)) setInsp(rIn.map(r=>normInsp(r.data)).filter(Boolean));
         if(Array.isArray(rE)) setEmails(rE.map(r=>r.data).filter(Boolean));
-        if(Array.isArray(rD)) setDispatch(rD.map(r=>r.data).filter(Boolean));
         if(Array.isArray(rU)) setUsuarios(rU);
         if(Array.isArray(rCfg)) rCfg.forEach(c=>{
-          if(!c||!c.data)return;
-          if(c.key==="cats")setCats(c.data);
-          if(c.key==="towers")setTowers(c.data);
-          if(c.key==="equipos")setEquipos(c.data);
-          if(c.key==="certs")setCerts(c.data);
+          if(!c||!c.data) return;
+          if(c.key==="cats") setCats(c.data);
+          if(c.key==="towers") setTowers(c.data);
+          if(c.key==="equipos") setEquipos(c.data);
+          if(c.key==="certs") setCerts(c.data);
         });
-      }catch(e){console.error("load error",e);}
+      }catch(ex){console.error("load error",ex);}
     })();
   },[session]);
 
-  const persist = async (table,item) => { try { await dbUpsert(table,{id:item.id,data:item}); } catch(e){} };
-  const persistCfg = async (key,data) => { try { await dbUpsert("config",{key,data}); } catch(e){} };
-  const mkDB = (setter,table) => updater => setter(prev=>{
+  // Recordatorios: desde 3 días antes hasta que se guarde el informe
+  useEffect(()=>{
+    if(!session||!tasks.length) return;
+    const run=async()=>{
+      const hoy=new Date(); hoy.setHours(0,0,0,0);
+      if(!window._remSent) window._remSent={};
+      const sent=window._remSent;
+      for(const t of tasks){
+        if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;
+        const due=new Date(t.dueDate); due.setHours(0,0,0,0);
+        const diff=Math.ceil((due-hoy)/86400000);
+        if(diff>3||sent[t.id]) continue;
+        sent[t.id]=true;
+        const esV=diff<0;
+        const diasTxt=esV?"venció hace "+Math.abs(diff)+" día(s)":diff===0?"vence HOY":"vence en "+diff+" día(s)";
+        const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
+        const cuerpo="Hola"+(t.responsible?" "+t.responsible:"")+",\n\nLa orden \""+t.title+"\" "+diasTxt+" ("+fmtD(t.dueDate)+") y aún no tiene informe.\n\n— CondoAdmin";
+        try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.responsible||"")+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
+        if(t.ejecutor&&t.ejecutor!==t.responsible){try{const r2=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.ejecutor)+"&active=eq.true",{headers:hdr()});const u2s=await r2.json();const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
+      }
+    };
+    const timer=setTimeout(()=>run().catch(()=>{}),3000);
+    return()=>clearTimeout(timer);
+  },[tasks,session]);
+
+  const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
+  const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};
+
+  const mkDB=(setter,table)=>updater=>setter(prev=>{
     const next=typeof updater==="function"?updater(prev):updater;
     next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persist(table,item);});
     return next;
   });
-  const mkDBWithDelete = (setter,table) => ({
-    set: updater => setter(prev=>{
-      const next=typeof updater==="function"?updater(prev):updater;
-      next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persist(table,item);});
-      return next;
-    }),
-    del: async (id) => {
-      setter(prev=>prev.filter(x=>x.id!==id));
-      try{ await dbDelete(table,"id=eq."+id); }catch(e){ console.warn("delete error",e); }
-    }
-  });
-  const reqsDB = mkDBWithDelete(setReqs,"solicitudes");
-  const tasksDB = mkDBWithDelete(setTasks,"tareas");
-  const setReqsDB = reqsDB.set;
-  const setTasksDB = tasksDB.set;
-  const deleteReq = reqsDB.del;
-  const deleteTask = tasksDB.del;
+  const mkDBDel=(setter,table)=>{
+    const set=mkDB(setter,table);
+    const del=async id=>{setter(prev=>prev.filter(x=>x.id!==id));try{await dbDelete(table,"id=eq."+id);}catch(_){}};
+    return {set,del};
+  };
+
+  const reqsDB=mkDBDel(setReqs,"solicitudes");
+  const tasksDB=mkDBDel(setTasks,"tareas");
+  const setReqsDB=reqsDB.set; const deleteReq=reqsDB.del;
+  const setTasksDB=tasksDB.set; const deleteTask=tasksDB.del;
   const setInvDB=mkDB(setInv,"inventario");
   const setMantDB=mkDB(setMant,"mantenciones");
   const setInspDB=mkDB(setInsp,"inspecciones");
-  const setDispatchDB=updater=>setDispatch(prev=>{const next=typeof updater==="function"?updater(prev):updater;next.forEach(item=>{const old=prev.find(x=>x.id===item.id);if(!old||JSON.stringify(old)!==JSON.stringify(item))persist("despachos",item);});return next;});
   const setCatsDB=updater=>setCats(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("cats",next);return next;});
   const setTowersDB=updater=>setTowers(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("towers",next);return next;});
   const setEquiposDB=updater=>setEquipos(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("equipos",next);return next;});
   const setCertsDB=updater=>setCerts(prev=>{const next=typeof updater==="function"?updater(prev):updater;persistCfg("certs",next);return next;});
 
-  const addEmail=async(log)=>{
+  const addEmail=async log=>{
     const item={id:"e"+uid(),...log};
     setEmails(p=>[item,...p]);
-    try{await dbPost("correos",{id:item.id,request_id:item.requestId||"",data:item});}catch(e){}
-    await sendEmail(log.to,log.subject,log.body);
+    try{await dbPost("correos",{id:item.id,request_id:item.requestId||"",data:item});}catch(_){}
+    await sendMail(log.to,log.subject,log.body);
   };
 
-  // Recordatorios diarios: desde 3 días antes del vencimiento hasta que se guarde el informe
-  useEffect(()=>{
-    if(!session||!tasks.length) return;
-    const hoy=new Date();hoy.setHours(0,0,0,0);
-    const STORAGE_KEY="condoadmin_reminders_"+hoy.toISOString().slice(0,10);
-    // Guardar en memoria qué correos ya enviamos hoy para no duplicar
-    if(!window._remindersSentToday) window._remindersSentToday={};
-    const sentToday=window._remindersSentToday;
-
-    tasks.forEach(async t=>{
-      // Solo aplica si: tiene fecha límite, no tiene informe guardado, y no está completada/cancelada
-      if(!t.dueDate) return;
-      if(t.informe&&t.informe.trim()) return;
-      if(t.status==="Completada"||t.status==="Cancelada") return;
-
-      const due=new Date(t.dueDate);due.setHours(0,0,0,0);
-      const diff=Math.ceil((due-hoy)/86400000); // positivo = días restantes, negativo = días vencido
-
-      // Enviar si faltan 3 días o menos (incluyendo días vencidos)
-      if(diff>3) return;
-
-      // Evitar enviar duplicado en la misma sesión/día
-      if(sentToday[t.id]) return;
-      sentToday[t.id]=true;
-
-      const esVencida=diff<0;
-      const diasTexto=esVencida
-        ?"venció hace "+Math.abs(diff)+" día(s)"
-        :diff===0?"vence HOY"
-        :"vence en "+diff+" día(s)";
-
-      const asunto=esVencida
-        ?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title
-        :"[CondoAdmin] Recordatorio: Orden "+diasTexto+" — "+t.title;
-
-      const cuerpo=
-        "Hola"+(t.responsible?" "+t.responsible:"")+",\n\n"+
-        "La orden de trabajo \""+t.title+"\" "+diasTexto+" ("+fmtD(t.dueDate)+") y aún no tiene informe guardado.\n\n"+
-        "Por favor completa el informe lo antes posible.\n\n"+
-        "— CondoAdmin";
-
-      // Enviar al responsable
-      try{
-        const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.responsible||"")+"&active=eq.true",{headers:hdr()});
-        const users=await res.json();const u=users&&users[0];
-        if(u?.email) await sendEmail(u.email,asunto,cuerpo);
-      }catch(e){}
-
-      // Enviar también al ejecutor si es distinto del responsable
-      if(t.ejecutor&&t.ejecutor!==t.responsible){
-        try{
-          const res2=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.ejecutor)+"&active=eq.true",{headers:hdr()});
-          const users2=await res2.json();const u2=users2&&users2[0];
-          if(u2?.email) await sendEmail(u2.email,asunto,cuerpo);
-        }catch(e){}
-      }
-    });
-  },[tasks,session]);
   const openReq=r=>{setSelReq(r);setView("detail");setNavOpen(false);};
+
   const respList=usuarios.length?[...usuarios.filter(u=>u.active&&u.rol!=="Residente").map(u=>u.nombre),"Sin asignar"]:["Sin asignar"];
   const respAssign=usuarios.length?usuarios.filter(u=>u.active&&u.rol!=="Residente").map(u=>u.nombre):[];
 
@@ -386,7 +463,7 @@ export default function App(){
     if(n.id==="dashboard"&&er==="Proveedor") return false;
     return true;
   });
-  const isAct=id=>view===id||(view==="detail"&&id==="requests");
+
   useEffect(()=>{if(er==="Proveedor"&&view==="dashboard")setView("provider");},[er]);
 
   if(loading) return <Loader/>;
@@ -394,47 +471,12 @@ export default function App(){
 
   return(
     <div style={{display:"flex",flexDirection:"column",height:"100vh",fontFamily:"system-ui,sans-serif",background:"#f1f5f9",color:"#1e293b",overflow:"hidden"}}>
-      {viewAs&&<div style={{background:"#7c3aed",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:100,fontSize:13}}><span>Visualizando como: <strong>{viewAs}</strong></span><button style={{...btnGhost(true),color:"#fff"}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir</button></div>}
-      {mob&&<div style={{background:"#0f172a",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:60}}><div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>CondoAdmin</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={bdg("#fff","#1e3a5f")}>{er}</span><button style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}} onClick={()=>setNavOpen(p=>!p)}>{navOpen?"✕":"☰"}</button></div></div>}
+      {viewAs&&<div style={{background:"#7c3aed",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:100,fontSize:13}}><span>Visualizando como: <strong>{viewAs}</strong></span><button style={{...BG(true),color:"#fff"}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir</button></div>}
+      {mob&&<div style={{background:"#0f172a",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:60}}><div onClick={()=>{setView(er==="Proveedor"?"provider":"dashboard");setNavOpen(false);}} style={{color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>CondoAdmin</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={bdg("#fff","#1e3a5f")}>{er}</span><button style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}} onClick={()=>setNavOpen(p=>!p)}>{navOpen?"✕":"☰"}</button></div></div>}
       <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
-        {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onPointerDown={()=>setNavOpen(false)}/>}
+        {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onClick={()=>setNavOpen(false)}/>}
         {(!mob||navOpen)&&(
-          <div onClick={e=>e.stopPropagation()} style={{width:mob?260:220,background:"#0f172a",display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto",position:mob?"fixed":"relative",top:0,left:0,bottom:0,height:mob?"100vh":"auto",zIndex:50}}>
-            {!mob&&<div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{padding:"18px 14px 14px",borderBottom:"1px solid #1e293b",cursor:"pointer"}}><div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div><div style={{color:"#64748b",fontSize:11,marginTop:2}}>Sistema de Gestion</div></div>}
-            <nav style={{padding:"6px 0",flex:1}}>
-              {navItems.map(n=>(
-                <div
-                  key={n.id}
-                  onPointerDown={e=>{e.stopPropagation();go(n.id);}}
-                  style={{padding:"10px 14px",cursor:"pointer",userSelect:"none",fontSize:13,
-                    color:isAct(n.id)?"#fff":"#94a3b8",
-                    background:isAct(n.id)?"#1e3a5f":"transparent",
-                    borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",
-                    fontWeight:isAct(n.id)?600:400}}
-                >
-                  {n.label}
-                </div>
-              ))}
-            </nav>
-            <div style={{padding:"10px 14px",borderTop:"1px solid #1e293b"}}>
-              <div style={{marginBottom:10}}>
-                <div style={{color:"#fff",fontSize:12,fontWeight:600,marginBottom:2}}>{session.nombre}</div>
-                <div style={{color:"#64748b",fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:4}}>{session.email}</div>
-                <span style={bdg("#93c5fd","#1e3a5f")}>{session.rol}</span>
-              </div>
-              {can(session.rol,"viewAs")&&!viewAs&&(
-                <div style={{marginBottom:8}}>
-                  <div style={{color:"#64748b",fontSize:10,textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>Ver como</div>
-                  <select style={{width:"100%",background:"#1e293b",color:"#a78bfa",border:"1px solid #4c1d95",borderRadius:6,padding:"6px 8px",fontSize:12}} defaultValue="" onChange={e=>{if(e.target.value){setViewAs(e.target.value);setView(e.target.value==="Proveedor"?"provider":"dashboard");}}}>
-                    <option value="">Seleccionar perfil...</option>
-                    {ROLES.filter(r=>r!==session.rol).map(r=><option key={r}>{r}</option>)}
-                  </select>
-                </div>
-              )}
-              {viewAs&&<button style={{...btnSecondary(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir de vista</button>}
-              <button style={{...btnDanger(true),width:"100%",justifyContent:"center"}} onClick={handleLogout}>Cerrar sesion</button>
-            </div>
-          </div>
+          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} er={er} mob={mob}/>
         )}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}}>
@@ -443,29 +485,21 @@ export default function App(){
               {!mob&&<div style={{color:"#64748b",fontSize:11,marginTop:1}}>{new Date().toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>}
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-              {can(er,"create")&&!viewAs&&<button style={btnPrimary(mob)} onClick={()=>setShowNew(true)}>{mob?"+ Sol.":"+ Nueva Solicitud"}</button>}
+              {can(er,"create")&&!viewAs&&<button style={BP(mob)} onClick={()=>setShowNew(true)}>{mob?"+ Sol.":"+ Nueva Solicitud"}</button>}
               {!mob&&<span style={{...bdg("#fff",viewAs?"#7c3aed":"#1e3a5f"),fontSize:12,padding:"5px 10px"}}>{er}</span>}
             </div>
           </div>
-      {/* DEBUG: botones de navegación directa */}
-      <div style={{background:"#1e293b",padding:"8px 14px",borderBottom:"1px solid #334155",display:"flex",gap:6,flexWrap:"wrap"}}>
-        {navItems.map(n=>(
-          <button key={n.id} onClick={()=>go(n.id)} style={{background:isAct(n.id)?"#3b82f6":"#334155",color:"#fff",border:"none",borderRadius:4,padding:"4px 10px",fontSize:11,cursor:"pointer",fontWeight:isAct(n.id)?700:400}}>
-            {n.label}
-          </button>
-        ))}
-      </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
             {view==="dashboard"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob} respAssign={respAssign}/>}
-            {view==="provider"&&<ProviderDash role={er} showToast={showToast} mob={mob} reqs={reqs} session={session}/>}
-            {view==="inspections"&&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} role={er} mob={mob} towers={towers}/>}
-            {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} dispatch={dispatch} setDispatch={setDispatchDB} reqs={reqs} role={er} showToast={showToast} mob={mob} respAssign={respAssign}/>}
-            {view==="mantencion"&&<MantView mant={mant} setMant={setMantDB} reqs={reqs} role={er} showToast={showToast} addEmail={addEmail} mob={mob} respList={respList} towers={towers} equipos={equipos} setEquipos={setEquiposDB} certs={certs} setCerts={setCertsDB}/>}
+            {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
+            {view==="inspections"&&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} showToast={showToast} role={er} mob={mob} towers={towers}/>}
+            {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
+            {view==="mantencion"&&<MantView mant={mant} setMant={setMantDB} role={er} showToast={showToast} mob={mob} respList={respList} towers={towers} equipos={equipos} setEquipos={setEquiposDB} certs={certs} setCerts={setCertsDB}/>}
             {view==="emails"&&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
-            {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob} respAssign={respAssign}/>}
+            {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
             {view==="config"&&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} equipos={equipos} setEquipos={setEquiposDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
           </div>
         </div>
@@ -476,6 +510,7 @@ export default function App(){
   );
 }
 
+// ── Dashboard ──────────────────────────────────────────────────────────────
 function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
   const emerg=reqs.filter(r=>r.priority==="Emergencia"&&!["Cerrada","Rechazada"].includes(r.status));
   const recent=[...reqs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,5);
@@ -484,10 +519,10 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
   const mp=mant.filter(m=>getMantStatus(m)==="Por vencer").length;
   return(
     <div>
-      {emerg.map(e=>(
-        <div key={e.id} style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",cursor:"pointer",display:"flex",alignItems:"center",gap:10}} onClick={()=>onOpen(e)}>
+      {emerg.map(em=>(
+        <div key={em.id} style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",cursor:"pointer",display:"flex",alignItems:"center",gap:10}} onClick={()=>onOpen(em)}>
           <span style={{fontWeight:700,color:"#dc2626"}}>⚠</span>
-          <div style={{flex:1}}><strong style={{color:"#dc2626"}}>EMERGENCIA: {e.code}</strong><div style={{fontSize:12,color:"#ef4444"}}>{e.category}</div></div>
+          <div style={{flex:1}}><strong style={{color:"#dc2626"}}>EMERGENCIA: {em.code}</strong><div style={{fontSize:12,color:"#ef4444"}}>{em.category}</div></div>
         </div>
       ))}
       {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
@@ -502,7 +537,7 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
         <div style={card}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <div style={{fontWeight:600,fontSize:13}}>Solicitudes recientes</div>
-            {can(role,"create")&&<button style={btnPrimary(true)} onClick={onNew}>+ Nueva</button>}
+            {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
           </div>
           {recent.length===0?<Empty msg="Sin solicitudes"/>:mob?(
             <div>{recent.map(r=>(
@@ -513,14 +548,14 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
             ))}</div>
           ):(
             <table style={tbl}>
-              <thead><tr>{["ID","Categoria","Prioridad","Estado","Fecha"].map(h=><th key={h} style={thSt}>{h}</th>)}</tr></thead>
+              <thead><tr>{["ID","Categoria","Prioridad","Estado","Fecha"].map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{recent.map(r=>(
                 <tr key={r.id} style={{cursor:"pointer"}} onClick={()=>onOpen(r)}>
-                  <td style={tdSt}><span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span></td>
-                  <td style={tdSt}>{r.category}</td>
-                  <td style={tdSt}><PBadge p={r.priority}/></td>
-                  <td style={tdSt}><SBadge s={r.status}/></td>
-                  <td style={tdSt}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
+                  <td style={tdS}><span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span></td>
+                  <td style={tdS}>{r.category}</td>
+                  <td style={tdS}><PBadge p={r.priority}/></td>
+                  <td style={tdS}><SBadge s={r.status}/></td>
+                  <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -540,6 +575,7 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
   );
 }
 
+// ── ReqList ────────────────────────────────────────────────────────────────
 function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towers,respList,session}){
   const [fi,setFi]=useState({status:"",priority:"",tower:"",q:""});
   const [sort,setSort]=useState("date");
@@ -556,24 +592,25 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
   const quickSt=(r,ns)=>{
     if(!can(role,"changeStatus")){showToast("Sin permisos","error");return;}
     const upd={...r,status:ns,history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Estado cambiado",from:r.status,to:ns}]};
-    setReqs(p=>p.map(x=>x.id===r.id?upd:x));showToast("Estado actualizado");
+    setReqs(p=>p.map(x=>x.id===r.id?upd:x));
+    showToast("Estado actualizado");
   };
 
   return(
     <div>
       <div style={{...card,padding:12,marginBottom:12}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
-          <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/>
+          <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
           {[["status","Estado",STATUSES],["priority","Prioridad",PRIORITIES],["tower","Torre",actTowers]].map(([k,l,opts])=>(
-            <select key={k} style={{...sel,flex:1}} value={fi[k]} onChange={e=>setFi(p=>({...p,[k]:e.target.value}))}>
+            <select key={k} style={{...sel,flex:1}} value={fi[k]} onChange={ev=>setFi(p=>({...p,[k]:ev.target.value}))}>
               <option value="">...{l}</option>
               {opts.map(o=><option key={o}>{o}</option>)}
             </select>
           ))}
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <button style={sort==="date"?btnPrimary(true):btnSecondary(true)} onClick={()=>setSort("date")}>Fecha</button>
-          <button style={sort==="priority"?btnPrimary(true):btnSecondary(true)} onClick={()=>setSort("priority")}>Prioridad</button>
+          <button style={sort==="date"?BP(true):BS(true)} onClick={()=>setSort("date")}>Fecha</button>
+          <button style={sort==="priority"?BP(true):BS(true)} onClick={()=>setSort("priority")}>Prioridad</button>
           <span style={{marginLeft:"auto",fontSize:11,color:"#64748b"}}>{visible.length} solicitudes</span>
         </div>
       </div>
@@ -589,27 +626,27 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       ):(
         <div style={card}>
           <table style={tbl}>
-            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Fecha",""].map((h,i)=><th key={i} style={thSt}>{h}</th>)}</tr></thead>
+            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
             <tbody>{visible.map(r=>(
               <tr key={r.id} style={{background:r.priority==="Emergencia"?"#fef2f2":"",cursor:"pointer"}} onClick={()=>onOpen(r)}>
-                <td style={tdSt}>{r.priority==="Emergencia"?"⚠":""}</td>
-                <td style={tdSt}><span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span></td>
-                <td style={tdSt}><div>{r.requesterName}</div><div style={{fontSize:10,color:"#94a3b8"}}>{r.requesterEmail}</div></td>
-                <td style={tdSt}>{r.category}</td>
-                <td style={tdSt}>{r.tower}/{r.unit}</td>
-                <td style={tdSt}><PBadge p={r.priority}/></td>
-                <td style={tdSt}><SBadge s={r.status}/></td>
-                <td style={tdSt}>{r.assignedTo}</td>
-                <td style={tdSt}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
-                <td style={tdSt} onClick={e=>e.stopPropagation()}>
+                <td style={tdS}>{r.priority==="Emergencia"?"⚠":""}</td>
+                <td style={tdS}><span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span></td>
+                <td style={tdS}><div>{r.requesterName}</div><div style={{fontSize:10,color:"#94a3b8"}}>{r.requesterEmail}</div></td>
+                <td style={tdS}>{r.category}</td>
+                <td style={tdS}>{r.tower}/{r.unit}</td>
+                <td style={tdS}><PBadge p={r.priority}/></td>
+                <td style={tdS}><SBadge s={r.status}/></td>
+                <td style={tdS}>{r.assignedTo}</td>
+                <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
+                <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
                     {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-                      <select style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={e=>quickSt(r,e.target.value)}>
+                      <select style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
                         {STATUSES.map(s=><option key={s}>{s}</option>)}
                       </select>
                     )}
                     {can(role,"manageConfig")&&(
-                      <button style={btnDanger(true)} onClick={e=>{e.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"?"))deleteReq(r.id);}}>🗑</button>
+                      <button style={BD(true)} onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"?"))deleteReq(r.id);}}>🗑</button>
                     )}
                   </div>
                 </td>
@@ -622,17 +659,17 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
   );
 }
 
+// ── ReqDetail ──────────────────────────────────────────────────────────────
 function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,setAtts,addEmail,showToast,onBack,setSelReq,mob,respList,respAssign,usuarios}){
   const r=reqs.find(x=>x.id===req.id)||req;
   const safeHistory=r.history||[];
   const safeComments=r.comments||[];
   const myTasks=tasks.filter(t=>t.requestId===r.id);
-  const myEmails=emails.filter(e=>e.requestId===r.id);
+  const myEmails=emails.filter(em=>em.requestId===r.id);
   const [comment,setComment]=useState("");
   const [ns,setNs]=useState(r.status);
   const [asgn,setAsgn]=useState(r.assignedTo||"Sin asignar");
   const [showTF,setShowTF]=useState(false);
-  const [showInforme,setShowInforme]=useState(null);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
   const [tab,setTab]=useState("info");
@@ -642,7 +679,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     setReqs(p=>p.map(x=>x.id===r.id?updated:x));
     setSelReq(prev=>({...prev,...ch}));
   };
-
   const applyStatus=()=>{
     if(ns===r.status) return;
     if(ns==="Cerrada"){setShowCl(true);return;}
@@ -650,41 +686,41 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
   };
-
   const applyAsgn=async()=>{
     if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
     upd({assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:r.status,to:"Asignada"});
     showToast("Responsable asignado");
     try{
       const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(asgn)+"&active=eq.true",{headers:hdr()});
-      const users=await res.json();
-      const u=users&&users[0];
+      const users=await res.json(); const u=users&&users[0];
       if(u?.email) addEmail({requestId:r.id,date:new Date().toISOString(),to:u.email,subject:"[CondoAdmin] Solicitud "+r.code+" asignada",type:"Asignacion",status:"Enviado",body:"Hola "+u.nombre+", se te asignó: "+r.code});
-    }catch(e){}
+    }catch(_){}
   };
-
-  const addCmt=()=>{if(!comment.trim())return;upd({comments:[...safeComments,{id:"c"+uid(),user:role,date:new Date().toISOString(),text:comment}]});setComment("");showToast("Comentario agregado");};
-
+  const addCmt=()=>{
+    if(!comment.trim()) return;
+    upd({comments:[...safeComments,{id:"c"+uid(),user:role,date:new Date().toISOString(),text:comment}]});
+    setComment(""); showToast("Comentario agregado");
+  };
   const closeFinal=()=>{
     const closure=atts.filter(a=>a.requestId===r.id&&a.type==="cierre");
     if(!closure.length){showToast("Cargue evidencia de cierre","error");return false;}
     upd({status:"Cerrada"},{action:"Caso cerrado",from:"Resuelta",to:"Cerrada"});
-    showToast("Solicitud cerrada");setShowCl(false);return true;
+    showToast("Solicitud cerrada"); setShowCl(false); return true;
   };
 
-  const isProveedor=role==="Proveedor";
+  const isProv=role==="Proveedor";
   const tabs=[
-    ...(isProveedor?[]:[{id:"info",label:"Info"}]),
-    ...(isProveedor?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
+    ...(isProv?[]:[{id:"info",label:"Info"}]),
+    ...(isProv?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
     {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
-    {id:"informe",label:"Informe Orden de Trabajo"},
-    ...(isProveedor?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
+    {id:"informe",label:"Informe OT"},
+    ...(isProv?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
   ];
 
   return(
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
-        <button style={btnSecondary(true)} onClick={onBack}>← Volver</button>
+        <button style={BS(true)} onClick={onBack}>← Volver</button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?16:20}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
           <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.category} - Torre {r.tower}/{r.unit}</div>
@@ -694,26 +730,22 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
         <div style={{...card,padding:12,marginBottom:12}}>
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
             {can(role,"changeStatus")&&(
-              <div>
-                <label style={lbl}>Estado</label>
-                <div style={{display:"flex",gap:6}}>
-                  <select style={{...sel,width:140}} value={ns} onChange={e=>setNs(e.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
-                  <button style={btnPrimary(true)} onClick={applyStatus}>OK</button>
-                </div>
-              </div>
+              <div><label style={lbl}>Estado</label>
+              <div style={{display:"flex",gap:6}}>
+                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+                <button style={BP(true)} onClick={applyStatus}>OK</button>
+              </div></div>
             )}
             {can(role,"assign")&&(
-              <div>
-                <label style={lbl}>Responsable</label>
-                <div style={{display:"flex",gap:6}}>
-                  <select style={{...sel,width:150}} value={asgn} onChange={e=>setAsgn(e.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
-                  <button style={btnSecondary(true)} onClick={applyAsgn}>Asignar</button>
-                </div>
-              </div>
+              <div><label style={lbl}>Responsable</label>
+              <div style={{display:"flex",gap:6}}>
+                <select style={{...sel,width:150}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
+                <button style={BS(true)} onClick={applyAsgn}>Asignar</button>
+              </div></div>
             )}
-            {can(role,"createTask")&&<button style={btnSecondary(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
-            {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={btnSuccess(true)} onClick={()=>setShowCl(true)}>Cerrar</button>}
-            <button style={btnSecondary(true)} onClick={()=>setShowEv("avance")}>Evidencia</button>
+            {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
+            {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>Cerrar</button>}
+            <button style={BS(true)} onClick={()=>setShowEv("avance")}>Evidencia</button>
           </div>
         </div>
       )}
@@ -733,8 +765,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
             ))}
             {can(role,"comment")&&(
               <div style={{marginTop:10,display:"flex",gap:8}}>
-                <input style={{...inp,flex:1}} placeholder="Comentario..." value={comment} onChange={e=>setComment(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCmt()}/>
-                <button style={btnPrimary(true)} onClick={addCmt}>Enviar</button>
+                <input style={{...inp,flex:1}} placeholder="Comentario..." value={comment} onChange={ev=>setComment(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&addCmt()}/>
+                <button style={BP(true)} onClick={addCmt}>Enviar</button>
               </div>
             )}
           </div>
@@ -755,7 +787,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       )}
       {tab==="tasks"&&(
         <div>
-          {!isProveedor&&(()=>{
+          {!isProv&&(()=>{
             const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
             return ["inicial","avance","cierre"].map(type=>{
               const myAtt=allAtts.filter(a=>a.type===type);
@@ -763,12 +795,9 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                 <div key={type} style={card}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                     <div style={{fontWeight:600,fontSize:13}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                    {r.status!=="Cerrada"&&<button style={btnSecondary(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
                   </div>
-                  {myAtt.length===0
-                    ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
-                    :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={e=>e.target.style.display="none"}/>)}</div>
-                  }
+                  {myAtt.length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>}
                 </div>
               );
             });
@@ -778,26 +807,21 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           {myTasks.length>0&&(
             <div style={{marginTop:8}}>
               <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
-              {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} tasks={tasks} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
+              {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
             </div>
           )}
         </div>
       )}
       {tab==="informe"&&(
-        <div>
-          {myTasks.length===0
-            ?<Empty msg="No hay órdenes de trabajo para reportar."/>
-            :myTasks.map(t=><InformeInline key={t.id} task={t} setTasks={setTasks} showToast={showToast}/>)
-          }
-        </div>
+        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=><InformeInline key={t.id} task={t} setTasks={setTasks} showToast={showToast}/>)
       )}
-      {!isProveedor&&tab==="emails"&&(
+      {!isProv&&tab==="emails"&&(
         <div style={card}>
-          {myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((e,i)=>(
-            <div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}>
-              <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1}}>{e.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{e.type}</span></div>
-              <div style={{fontSize:10,color:"#64748b"}}>{e.to} - {fmt(e.date)}</div>
-              <div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{e.body}</div>
+          {myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((em,i)=>(
+            <div key={em.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}>
+              <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1}}>{em.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{em.type}</span></div>
+              <div style={{fontSize:10,color:"#64748b"}}>{em.to} - {fmt(em.date)}</div>
+              <div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{em.body}</div>
             </div>
           ))}
         </div>
@@ -805,11 +829,11 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
       {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
-      {showInforme&&<InformeModal task={tasks.find(t=>t.id===showInforme)} onSave={inf=>{setTasks(p=>p.map(t=>t.id===showInforme?{...t,...inf,informe:inf.texto}:t));showToast("Informe guardado");setShowInforme(null);}} onClose={()=>setShowInforme(null)}/>}
     </div>
   );
 }
 
+// ── TaskForm ───────────────────────────────────────────────────────────────
 function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
@@ -818,44 +842,41 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
     const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
-    setTasks(p=>[...p,newTask]);showToast("Orden de trabajo creada");
+    setTasks(p=>[...p,newTask]); showToast("Orden creada");
     if(inline) setF(initF()); else onClose();
     if(f.ejecutor){
       try{
         const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(f.ejecutor)+"&active=eq.true",{headers:hdr()});
-        const users=await res.json();
-        const u=users&&users[0];
-        if(u?.email) await sendEmail(u.email,"[CondoAdmin] Nueva orden asignada","Hola "+u.nombre+", orden: "+f.title+(req?"\nSolicitud: "+req.code:""));
-      }catch(e){}
+        const users=await res.json(); const u=users&&users[0];
+        if(u?.email) await sendMail(u.email,"[CondoAdmin] Nueva orden asignada","Hola "+u.nombre+", orden: "+f.title+(req?"\nSolicitud: "+req.code:""));
+      }catch(_){}
     }
   };
   return(
     <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-        <div style={{fontWeight:600,fontSize:13}}>Nueva Orden de Trabajo</div>
-        {!inline&&<button style={btnGhost(true)} onClick={onClose}>✕</button>}
-      </div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Nueva Orden de Trabajo</div>{!inline&&<button style={BG(true)} onClick={onClose}>✕</button>}</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo a realizar *</label><input style={inp} placeholder="Describe el trabajo..." value={f.title} onChange={e=>setF(p=>({...p,title:e.target.value}))}/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={e=>setF(p=>({...p,desc:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={e=>setF(p=>({...p,ejecutor:e.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={e=>setF(p=>({...p,dueDate:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={e=>setF(p=>({...p,priority:e.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo *</label><input style={inp} placeholder="Describe el trabajo..." value={f.title} onChange={ev=>setF(p=>({...p,title:ev.target.value}))}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={ev=>setF(p=>({...p,desc:ev.target.value}))}/></div>
+        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={ev=>setF(p=>({...p,dueDate:ev.target.value}))}/></div>
+        <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={ev=>setF(p=>({...p,priority:ev.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
-      <button style={btnPrimary(true)} onClick={submit}>+ Crear Orden</button>
+      <button style={BP(true)} onClick={submit}>+ Crear Orden</button>
     </div>
   );
 }
 
-function TaskCard({task,role,tasks,setTasks,deleteTask,showToast,atts,setAtts}){
+// ── TaskCard ───────────────────────────────────────────────────────────────
+function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
   const [cmt,setCmt]=useState("");
   const [showEv,setShowEv]=useState(false);
   const safeComments=task.comments||[];
   const safeMaterials=task.materials||[];
   const safeAtts=task.attachments||[];
   const upd=ch=>setTasks(p=>p.map(t=>t.id===task.id?{...t,...ch}:t));
-  const addC=()=>{if(!cmt.trim())return;upd({comments:[...safeComments,{user:role,date:new Date().toISOString(),text:cmt}]});setCmt("");};
+  const addC=()=>{if(!cmt.trim()) return;upd({comments:[...safeComments,{user:role,date:new Date().toISOString(),text:cmt}]});setCmt("");};
   const resolve=()=>{if(!safeAtts.some(a=>a.type==="cierre")){showToast("Cargue imagen de cierre","error");return;}upd({status:"Completada"});showToast("Orden completada");};
   return(
     <div style={{...card,marginBottom:10,borderLeft:"4px solid "+(PC[task.priority]||"#e2e8f0")}}>
@@ -874,23 +895,38 @@ function TaskCard({task,role,tasks,setTasks,deleteTask,showToast,atts,setAtts}){
       ))}
       <MatPanel materials={safeMaterials} setMaterials={ms=>upd({materials:ms})} readOnly={!can(role,"changeStatus")&&!can(role,"resolveTask")}/>
       <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
-        <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addC()}/>
-        <button style={btnSecondary(true)} onClick={addC}>Enviar</button>
-        <button style={btnSecondary(true)} onClick={()=>setShowEv(true)}>📷</button>
-        {task.status!=="Completada"&&(can(role,"resolveTask")||can(role,"changeStatus"))&&<button style={btnSuccess(true)} onClick={resolve}>✓ Completar</button>}
-        {can(role,"manageConfig")&&deleteTask&&<button style={btnDanger(true)} onClick={()=>{if(window.confirm("¿Eliminar esta orden?"))deleteTask(task.id);}}>🗑 Eliminar</button>}
+        <input style={{...inp,flex:1,minWidth:100,fontSize:12}} placeholder="Comentario..." value={cmt} onChange={ev=>setCmt(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&addC()}/>
+        <button style={BS(true)} onClick={addC}>Enviar</button>
+        <button style={BS(true)} onClick={()=>setShowEv(true)}>📷</button>
+        {task.status!=="Completada"&&(can(role,"resolveTask")||can(role,"changeStatus"))&&<button style={BSu(true)} onClick={resolve}>✓ Completar</button>}
+        {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar esta orden?"))deleteTask(task.id);}}>🗑 Eliminar</button>}
       </div>
       {showEv&&<EvidModal type="cierre" requestId={task.requestId} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)} taskId={task.id} setTasks={setTasks}/>}
     </div>
   );
 }
 
+// ── InformeInline ──────────────────────────────────────────────────────────
 function InformeInline({task,setTasks,showToast}){
-  const [f,setF]=useState({texto:task.informe||"",fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),horaInicio:task.horaInicio||"",horaTermino:task.horaTermino||"",herramientas:task.herramientas||"",estadoFinal:task.estadoFinal||"Resuelto",requiereSeguimiento:task.requiereSeguimiento||false,observaciones:task.observaciones||"",nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",vistoBueno:task.vistoBueno||false});
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const [f,setF]=useState({
+    texto:task.informe||"",
+    fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),
+    horaInicio:task.horaInicio||"",horaTermino:task.horaTermino||"",
+    herramientas:task.herramientas||"",estadoFinal:task.estadoFinal||"Resuelto",
+    requiereSeguimiento:task.requiereSeguimiento||false,observaciones:task.observaciones||"",
+    nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",vistoBueno:task.vistoBueno||false
+  });
+  const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
   const [esc,setEsc]=useState(false);
   const recRef=useRef(null);
-  const iniciarVoz=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Usa Chrome para dictado de voz");return;}const r=new SR();r.lang="es-CL";r.continuous=true;r.interimResults=false;r.onresult=e=>{const t=Array.from(e.results).map(x=>x[0].transcript).join(" ");set("texto",(f.texto?f.texto+" ":"")+t);};r.onerror=()=>setEsc(false);r.onend=()=>setEsc(false);recRef.current=r;r.start();setEsc(true);};
+  const iniciarVoz=()=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){alert("Usa Chrome");return;}
+    const rec=new SR(); rec.lang="es-CL"; rec.continuous=true; rec.interimResults=false;
+    rec.onresult=ev=>{const t=Array.from(ev.results).map(x=>x[0].transcript).join(" ");setFld("texto",(f.texto?f.texto+" ":"")+t);};
+    rec.onerror=()=>setEsc(false); rec.onend=()=>setEsc(false);
+    recRef.current=rec; rec.start(); setEsc(true);
+  };
   const detenerVoz=()=>{if(recRef.current)recRef.current.stop();setEsc(false);};
   const guardar=()=>{
     if(!f.texto.trim()){showToast("Ingrese la descripción","error");return;}
@@ -902,110 +938,54 @@ function InformeInline({task,setTasks,showToast}){
     <div style={{...card,marginBottom:16}}>
       <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>{task.title}</div>
       <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor} · <SBadge s={task.status}/></div>
-      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>📅 Fecha y tiempo</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
-        <div style={fg}><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.fechaEjecucion} onChange={e=>set("fechaEjecucion",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Hora inicio</label><input type="time" style={inp} value={f.horaInicio} onChange={e=>set("horaInicio",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Hora término</label><input type="time" style={inp} value={f.horaTermino} onChange={e=>set("horaTermino",e.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.fechaEjecucion} onChange={ev=>setFld("fechaEjecucion",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora inicio</label><input type="time" style={inp} value={f.horaInicio} onChange={ev=>setFld("horaInicio",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Hora término</label><input type="time" style={inp} value={f.horaTermino} onChange={ev=>setFld("horaTermino",ev.target.value)}/></div>
       </div>
-      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>🔧 Trabajo realizado</div>
-      <div style={fg}><label style={lbl}>Descripción *</label><textarea style={{...inp,height:100,resize:"vertical"}} placeholder="Describe lo que se realizó..." value={f.texto} onChange={e=>set("texto",e.target.value)}/></div>
+      <div style={fg}><label style={lbl}>Descripción *</label><textarea style={{...inp,height:100,resize:"vertical"}} placeholder="Describe lo que se realizó..." value={f.texto} onChange={ev=>setFld("texto",ev.target.value)}/></div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
-        {esc
-          ?<button style={{...btnDanger(false),flex:1,justifyContent:"center"}} onClick={detenerVoz}>⏹ Detener</button>
-          :<button style={{...btnPurple(false),flex:1,justifyContent:"center"}} onClick={iniciarVoz}>🎤 Dictar por voz</button>
-        }
+        {esc?<button style={{...BD(false),flex:1,justifyContent:"center"}} onClick={detenerVoz}>⏹ Detener</button>:<button style={{...BPu(false),flex:1,justifyContent:"center"}} onClick={iniciarVoz}>🎤 Dictar por voz</button>}
         {esc&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}>⏺ Escuchando...</div>}
       </div>
-      <div style={fg}><label style={lbl}>Herramientas utilizadas</label><input style={inp} placeholder="ej: Taladro, Multímetro..." value={f.herramientas} onChange={e=>set("herramientas",e.target.value)}/></div>
-      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>📊 Resultado</div>
+      <div style={fg}><label style={lbl}>Herramientas</label><input style={inp} placeholder="ej: Taladro, Multímetro..." value={f.herramientas} onChange={ev=>setFld("herramientas",ev.target.value)}/></div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        {ESTADOS_INFORME.map(e=>{
-          const isSelected=f.estadoFinal===e;
-          const color=e==="Resuelto"?"#10b981":e==="Resuelto parcialmente"?"#f59e0b":"#ef4444";
-          const bg=e==="Resuelto"?"#f0fdf4":e==="Resuelto parcialmente"?"#fffbeb":"#fef2f2";
-          return <button key={e} onClick={()=>set("estadoFinal",e)} style={{padding:"6px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"2px solid "+(isSelected?color:"#e2e8f0"),background:isSelected?bg:"#f9fafb",color:isSelected?color:"#6b7280"}}>{e==="Resuelto"?"✅":e==="Resuelto parcialmente"?"⚠️":"🔄"} {e}</button>;
+        {ESTADOS_INFORME.map(est=>{
+          const isSel=f.estadoFinal===est;
+          const color=est==="Resuelto"?"#10b981":est==="Resuelto parcialmente"?"#f59e0b":"#ef4444";
+          const bg=est==="Resuelto"?"#f0fdf4":est==="Resuelto parcialmente"?"#fffbeb":"#fef2f2";
+          return <button key={est} onClick={()=>setFld("estadoFinal",est)} style={{padding:"6px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"2px solid "+(isSel?color:"#e2e8f0"),background:isSel?bg:"#f9fafb",color:isSel?color:"#6b7280"}}>{est==="Resuelto"?"✅":est==="Resuelto parcialmente"?"⚠️":"🔄"} {est}</button>;
         })}
       </div>
-      <div style={fg}><label style={lbl}>Observaciones</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.observaciones} onChange={e=>set("observaciones",e.target.value)}/></div>
-      <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id={"seg"+task.id} checked={f.requiereSeguimiento} onChange={e=>set("requiereSeguimiento",e.target.checked)}/><label htmlFor={"seg"+task.id} style={{fontSize:13,cursor:"pointer"}}>⚠️ Requiere seguimiento posterior</label></div>
-      <div style={{fontWeight:600,fontSize:11,color:"#64748b",marginBottom:8,textTransform:"uppercase"}}>✍️ Confirmación</div>
-      <div style={fg}><label style={lbl}>Nombre del ejecutor</label><input style={inp} value={f.nombreEjecutor} onChange={e=>set("nombreEjecutor",e.target.value)}/></div>
-      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}><input type="checkbox" id={"vb"+task.id} checked={f.vistoBueno} onChange={e=>set("vistoBueno",e.target.checked)}/><label htmlFor={"vb"+task.id} style={{fontSize:13,cursor:"pointer",color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado</label></div>
-      <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
-        <button style={btnSuccess(true)} onClick={guardar}>💾 Guardar informe</button>
-      </div>
+      <div style={fg}><label style={lbl}>Observaciones</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.observaciones} onChange={ev=>setFld("observaciones",ev.target.value)}/></div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id={"seg"+task.id} checked={f.requiereSeguimiento} onChange={ev=>setFld("requiereSeguimiento",ev.target.checked)}/><label htmlFor={"seg"+task.id} style={{fontSize:13,cursor:"pointer"}}>⚠️ Requiere seguimiento posterior</label></div>
+      <div style={fg}><label style={lbl}>Nombre del ejecutor</label><input style={inp} value={f.nombreEjecutor} onChange={ev=>setFld("nombreEjecutor",ev.target.value)}/></div>
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}><input type="checkbox" id={"vb"+task.id} checked={f.vistoBueno} onChange={ev=>setFld("vistoBueno",ev.target.checked)}/><label htmlFor={"vb"+task.id} style={{fontSize:13,cursor:"pointer",color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado</label></div>
+      <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}><button style={BSu(true)} onClick={guardar}>💾 Guardar informe</button></div>
     </div>
   );
 }
 
-function InformeModal({task,onSave,onClose}){
-  const [f,setF]=useState({texto:task.informe||"",fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),horaInicio:task.horaInicio||"",horaTermino:task.horaTermino||"",herramientas:task.herramientas||"",estadoFinal:task.estadoFinal||"Resuelto",requiereSeguimiento:task.requiereSeguimiento||false,observaciones:task.observaciones||"",nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",vistoBueno:task.vistoBueno||false});
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  const [esc,setEsc]=useState(false);
-  const recRef=useRef(null);
-  const iniciarVoz=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Usa Chrome");return;}const r=new SR();r.lang="es-CL";r.continuous=true;r.interimResults=false;r.onresult=e=>{const t=Array.from(e.results).map(x=>x[0].transcript).join(" ");set("texto",(f.texto?f.texto+" ":"")+t);};r.onerror=()=>setEsc(false);r.onend=()=>setEsc(false);recRef.current=r;r.start();setEsc(true);};
-  const detenerVoz=()=>{if(recRef.current)recRef.current.stop();setEsc(false);};
-  return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:580,padding:"20px",marginTop:16,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>📋 Informe del Ejecutor</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
-      <div style={{...card,background:"#f8fafc",marginBottom:12}}><div style={{fontWeight:600,fontSize:13}}>{task.title}</div>{task.ejecutor&&<div style={{fontSize:11,color:"#6366f1"}}>🔧 {task.ejecutor}</div>}</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
-        <div style={fg}><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.fechaEjecucion} onChange={e=>set("fechaEjecucion",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Hora inicio</label><input type="time" style={inp} value={f.horaInicio} onChange={e=>set("horaInicio",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Hora término</label><input type="time" style={inp} value={f.horaTermino} onChange={e=>set("horaTermino",e.target.value)}/></div>
-      </div>
-      <div style={fg}><label style={lbl}>Descripción *</label><textarea style={{...inp,height:100,resize:"vertical"}} value={f.texto} onChange={e=>set("texto",e.target.value)}/></div>
-      <div style={{display:"flex",gap:8,marginBottom:12}}>
-        {esc
-          ?<button style={{...btnDanger(false),flex:1,justifyContent:"center"}} onClick={detenerVoz}>⏹ Detener</button>
-          :<button style={{...btnPurple(false),flex:1,justifyContent:"center"}} onClick={iniciarVoz}>🎤 Dictar por voz</button>
-        }
-        {esc&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}>⏺ Escuchando...</div>}
-      </div>
-      <div style={fg}><label style={lbl}>Herramientas</label><input style={inp} value={f.herramientas} onChange={e=>set("herramientas",e.target.value)}/></div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        {ESTADOS_INFORME.map(e=>{
-          const isSelected=f.estadoFinal===e;
-          const color=e==="Resuelto"?"#10b981":e==="Resuelto parcialmente"?"#f59e0b":"#ef4444";
-          const bg=e==="Resuelto"?"#f0fdf4":e==="Resuelto parcialmente"?"#fffbeb":"#fef2f2";
-          return <button key={e} onClick={()=>set("estadoFinal",e)} style={{padding:"6px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"2px solid "+(isSelected?color:"#e2e8f0"),background:isSelected?bg:"#f9fafb",color:isSelected?color:"#6b7280"}}>{e==="Resuelto"?"✅":e==="Resuelto parcialmente"?"⚠️":"🔄"} {e}</button>;
-        })}
-      </div>
-      <div style={fg}><label style={lbl}>Observaciones</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.observaciones} onChange={e=>set("observaciones",e.target.value)}/></div>
-      <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="seg2" checked={f.requiereSeguimiento} onChange={e=>set("requiereSeguimiento",e.target.checked)}/><label htmlFor="seg2" style={{fontSize:13,cursor:"pointer"}}>⚠️ Requiere seguimiento</label></div>
-      <div style={fg}><label style={lbl}>Nombre ejecutor</label><input style={inp} value={f.nombreEjecutor} onChange={e=>set("nombreEjecutor",e.target.value)}/></div>
-      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}><input type="checkbox" id="vb2" checked={f.vistoBueno} onChange={e=>set("vistoBueno",e.target.checked)}/><label htmlFor="vb2" style={{fontSize:13,cursor:"pointer",color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado</label></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
-        <button style={btnSecondary(true)} onClick={onClose}>Cancelar</button>
-        <button style={btnSuccess(true)} onClick={()=>{if(!f.texto.trim()||!f.vistoBueno)return;onSave(f);}}>Guardar informe</button>
-      </div>
-    </div></div>
-  );
-}
-
+// ── MatPanel ───────────────────────────────────────────────────────────────
 function MatPanel({materials,setMaterials,readOnly}){
   const [showAdd,setShowAdd]=useState(false);
   const [nm,setNm]=useState({name:"",qty:1,unit:INV_UNITS[0],cost:0,status:"Por adquirir"});
-  const addMat=()=>{if(!nm.name)return;setMaterials(p=>[...p,{id:"m"+uid(),...nm}]);setNm({name:"",qty:1,unit:INV_UNITS[0],cost:0,status:"Por adquirir"});setShowAdd(false);};
+  const addMat=()=>{if(!nm.name) return;setMaterials(p=>[...p,{id:"m"+uid(),...nm}]);setNm({name:"",qty:1,unit:INV_UNITS[0],cost:0,status:"Por adquirir"});setShowAdd(false);};
   const safeMat=materials||[];
   return(
     <div style={{marginTop:12}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <span style={{fontWeight:600,fontSize:12}}>Materiales ({safeMat.length})</span>
-        {!readOnly&&<button style={btnSecondary(true)} onClick={()=>setShowAdd(p=>!p)}>+ Agregar</button>}
+        {!readOnly&&<button style={BS(true)} onClick={()=>setShowAdd(p=>!p)}>+ Agregar</button>}
       </div>
       {showAdd&&!readOnly&&(
         <div style={{background:"#f8fafc",borderRadius:8,padding:10,marginBottom:10,border:"1px solid #e2e8f0"}}>
           <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8,marginBottom:8}}>
-            <input style={inp} placeholder="Material *" value={nm.name} onChange={e=>setNm(p=>({...p,name:e.target.value}))}/>
-            <input type="number" style={inp} value={nm.qty} min="1" onChange={e=>setNm(p=>({...p,qty:Math.max(1,+e.target.value)}))}/>
-            <select style={sel} value={nm.unit} onChange={e=>setNm(p=>({...p,unit:e.target.value}))}>{INV_UNITS.map(u=><option key={u}>{u}</option>)}</select>
+            <input style={inp} placeholder="Material *" value={nm.name} onChange={ev=>setNm(p=>({...p,name:ev.target.value}))}/>
+            <input type="number" style={inp} value={nm.qty} min="1" onChange={ev=>setNm(p=>({...p,qty:Math.max(1,+ev.target.value)}))}/>
+            <select style={sel} value={nm.unit} onChange={ev=>setNm(p=>({...p,unit:ev.target.value}))}>{INV_UNITS.map(u=><option key={u}>{u}</option>)}</select>
           </div>
-          <div style={{display:"flex",gap:8}}>
-            <button style={btnPrimary(true)} onClick={addMat}>Agregar</button>
-            <button style={btnGhost(true)} onClick={()=>setShowAdd(false)}>✕</button>
-          </div>
+          <div style={{display:"flex",gap:8}}><button style={BP(true)} onClick={addMat}>Agregar</button><button style={BG(true)} onClick={()=>setShowAdd(false)}>✕</button></div>
         </div>
       )}
       {safeMat.length===0&&!showAdd&&<div style={{fontSize:12,color:"#94a3b8"}}>Sin materiales.</div>}
@@ -1018,7 +998,7 @@ function MatPanel({materials,setMaterials,readOnly}){
               {MAT_STATUS.map(s=>(
                 <button key={s} onClick={()=>setMaterials(p=>p.map(x=>x.id===m.id?{...x,status:s}:x))} style={{padding:"3px 8px",borderRadius:99,fontSize:10,border:"1.5px solid "+(m.status===s?MAT_COLOR[s]:"#e2e8f0"),color:m.status===s?MAT_COLOR[s]:"#94a3b8",background:m.status===s?MAT_COLOR[s]+"18":"transparent",cursor:"pointer"}}>{s}</button>
               ))}
-              <button style={btnGhost(true)} onClick={()=>setMaterials(p=>p.filter(x=>x.id!==m.id))}>✕</button>
+              <button style={BG(true)} onClick={()=>setMaterials(p=>p.filter(x=>x.id!==m.id))}>✕</button>
             </div>
           }
         </div>
@@ -1027,68 +1007,80 @@ function MatPanel({materials,setMaterials,readOnly}){
   );
 }
 
+// ── EvidModal ──────────────────────────────────────────────────────────────
 function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,setTasks}){
   const [previews,setPrev]=useState([]);
   const [rawFiles,setRawFiles]=useState([]);
   const [comment,setCmt]=useState("");
   const [uploading,setUploading]=useState(false);
   const fileRef=useRef();
-  const handleFiles=e=>{const files=Array.from(e.target.files);files.forEach(f=>{const r=new FileReader();r.onload=ev=>setPrev(p=>[...p,{name:f.name,url:ev.target.result}]);r.readAsDataURL(f);});setRawFiles(p=>[...p,...files]);};
+  const handleFiles=ev=>{
+    const files=Array.from(ev.target.files);
+    files.forEach(fi=>{const rd=new FileReader();rd.onload=e2=>setPrev(p=>[...p,{name:fi.name,url:e2.target.result}]);rd.readAsDataURL(fi);});
+    setRawFiles(p=>[...p,...files]);
+  };
   const save=async()=>{
     if(!previews.length){showToast("Seleccione imagen","error");return;}
     setUploading(true);
     try{
-      const uploaded=await Promise.all(previews.map(async(p,i)=>{
-        const path=requestId+"/"+type+"/"+uid()+"_"+p.name;
-        let url=p.url;
-        try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(e){}
-        return{id:"a"+uid(),requestId,type,name:p.name,date:new Date().toISOString(),user:role,comment,preview:url};
+      const uploaded=await Promise.all(previews.map(async(pv,i)=>{
+        const path=requestId+"/"+type+"/"+uid()+"_"+pv.name;
+        let url=pv.url;
+        try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
+        return{id:"a"+uid(),requestId,type,name:pv.name,date:new Date().toISOString(),user:role,comment,preview:url};
       }));
       setAtts(prev=>[...prev,...uploaded]);
-      if(taskId&&setTasks)setTasks(prev=>prev.map(t=>t.id===taskId?{...t,attachments:[...(t.attachments||[]),...uploaded]}:t));
-      showToast(previews.length+" imagen(es) guardada(s)");onClose();
-    }catch(e){showToast("Error al subir","error");}
+      if(taskId&&setTasks) setTasks(prev=>prev.map(t=>t.id===taskId?{...t,attachments:[...(t.attachments||[]),...uploaded]}:t));
+      showToast(previews.length+" imagen(es) guardada(s)"); onClose();
+    }catch(_){showToast("Error al subir","error");}
     setUploading(false);
   };
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:14}}>📷 Evidencia - {type}</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
-      <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
-      <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:20,textAlign:"center",cursor:"pointer",marginBottom:12,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:32,marginBottom:6}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para seleccionar imágenes</div></div>
-      {previews.length>0&&(
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-          {previews.map((p,i)=>(
-            <div key={i} style={{position:"relative"}}>
-              <img src={p.url} alt={p.name} style={{...thumb,width:80,height:64}}/>
-              <button onClick={()=>{setPrev(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9}}>✕</button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div style={fg}><label style={lbl}>Comentario</label><input style={inp} value={comment} onChange={e=>setCmt(e.target.value)} placeholder="Descripción..."/></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={save} disabled={uploading}>{uploading?"Subiendo...":"Guardar"}</button></div>
-    </div></div>
+    <div style={MSt}>
+      <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:14}}>📷 Evidencia - {type}</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
+        <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
+        <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:20,textAlign:"center",cursor:"pointer",marginBottom:12,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:32,marginBottom:6}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para seleccionar imágenes</div></div>
+        {previews.length>0&&(
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+            {previews.map((pv,i)=>(
+              <div key={i} style={{position:"relative"}}>
+                <img src={pv.url} alt={pv.name} style={{...thumb,width:80,height:64}}/>
+                <button onClick={()=>{setPrev(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9}}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={fg}><label style={lbl}>Comentario</label><input style={inp} value={comment} onChange={ev=>setCmt(ev.target.value)} placeholder="Descripción..."/></div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={save} disabled={uploading}>{uploading?"Subiendo...":"Guardar"}</button></div>
+      </div>
+    </div>
   );
 }
 
+// ── CloseModal ─────────────────────────────────────────────────────────────
 function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
   const closure=atts.filter(a=>a.requestId===req.id&&a.type==="cierre");
   const [showEv,setShowEv]=useState(false);
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:440,padding:"20px",marginTop:16}}>
-      <h3 style={{margin:"0 0 10px",fontSize:14}}>Cerrar solicitud {req.code}</h3>
-      {closure.length===0
-        ?<div><div style={alrt("error")}>Cargue al menos una imagen de cierre.</div><button style={btnPrimary(true)} onClick={()=>setShowEv(true)}>Cargar evidencia</button></div>
-        :<div><div style={alrt("success")}>{closure.length} imagen(es) de cierre.</div><p style={{fontSize:13}}>¿Confirmar cierre definitivo?</p></div>
-      }
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
-        <button style={btnSecondary(true)} onClick={onClose}>Cancelar</button>
-        {closure.length>0&&<button style={btnSuccess(true)} onClick={onConfirm}>Confirmar</button>}
+    <div style={MSt}>
+      <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:440,padding:"20px",marginTop:16}}>
+        <h3 style={{margin:"0 0 10px",fontSize:14}}>Cerrar solicitud {req.code}</h3>
+        {closure.length===0
+          ?<div><div style={alrt("error")}>Cargue al menos una imagen de cierre.</div><button style={BP(true)} onClick={()=>setShowEv(true)}>Cargar evidencia</button></div>
+          :<div><div style={alrt("success")}>{closure.length} imagen(es) de cierre.</div><p style={{fontSize:13}}>¿Confirmar cierre definitivo?</p></div>
+        }
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+          <button style={BS(true)} onClick={onClose}>Cancelar</button>
+          {closure.length>0&&<button style={BSu(true)} onClick={onConfirm}>Confirmar</button>}
+        </div>
       </div>
-    </div>{showEv&&<EvidModal type="cierre" requestId={req.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)}/>}</div>
+      {showEv&&<EvidModal type="cierre" requestId={req.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)}/>}
+    </div>
   );
 }
 
+// ── NewReqModal ────────────────────────────────────────────────────────────
 function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
   const actCats=cats.filter(c=>c.active);
   const actTowers=towers.filter(t=>t.active);
@@ -1106,121 +1098,140 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const [done,setDone]=useState(null);
   const [saving,setSaving]=useState(false);
   const fileRef=useRef();
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
 
   const validate=()=>{
-    const e={};
+    const err={};
     if(tipo==="Incidencia"){
-      if(!f.requesterName)e.requesterName="Requerido";
-      if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail))e.requesterEmail="Email inválido";
-      if(!f.unit)e.unit="Requerido";
+      if(!f.requesterName) err.requesterName="Requerido";
+      if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail)) err.requesterEmail="Email inválido";
+      if(!f.unit) err.unit="Requerido";
     }
-    if(!f.description||f.description.length<10)e.description="Min. 10 caracteres";
-    if(!f.confirm)e.confirm="Debe confirmar";
-    setErrs(e);
-    return !Object.keys(e).length;
+    if(!f.description||f.description.length<10) err.description="Min. 10 caracteres";
+    if(!f.confirm) err.confirm="Debe confirmar";
+    setErrs(err);
+    return !Object.keys(err).length;
   };
 
-  const handleFiles=e=>Array.from(e.target.files).forEach(fi=>{const r=new FileReader();r.onload=ev=>setPrevs(p=>[...p,{name:fi.name,url:ev.target.result}]);r.readAsDataURL(fi);setRawFiles(p=>[...p,fi]);});
+  const handleFiles=ev=>Array.from(ev.target.files).forEach(fi=>{
+    const rd=new FileReader();
+    rd.onload=e2=>setPrevs(p=>[...p,{name:fi.name,url:e2.target.result}]);
+    rd.readAsDataURL(fi);
+    setRawFiles(p=>[...p,fi]);
+  });
 
   const submit=async()=>{
-    if(!validate())return;setSaving(true);
-    const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
-    const attachmentsInitial=await Promise.all(prevs.map(async(p,i)=>{
-      const path=code+"/inicial/"+uid()+"_"+p.name;let url=p.url;
-      try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(e){}
-      return{id:"a"+uid(),requestId:code,type:"inicial",name:p.name,date:now,user:f.requesterName,preview:url,comment:""};
+    if(!validate()) return;
+    setSaving(true);
+    const code=genCode(reqs,"SOL-"); const now=new Date().toISOString();
+    const attachmentsInitial=await Promise.all(prevs.map(async(pv,i)=>{
+      const path=code+"/inicial/"+uid()+"_"+pv.name; let url=pv.url;
+      try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
+      return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:f.requesterName,preview:url,comment:""};
     }));
-    const nr=normalizeReq({id:code,code,createdAt:now,...f,category:tipo==="Administrativo"?adminCat:f.category,subcategory:tipo==="Administrativo"?adminSub:f.subcategory,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
+    const nr=normReq({id:code,code,createdAt:now,...f,category:tipo==="Administrativo"?adminCat:f.category,subcategory:tipo==="Administrativo"?adminSub:f.subcategory,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
     addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+"."});
     try{
       const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email);
       admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva: "+code+" · "+f.requesterName+" · "+(tipo==="Administrativo"?adminCat:f.category)+" · "+f.priority}));
-    }catch(e){}
-    setDone(nr);showToast("Solicitud "+code+" creada");setSaving(false);
+    }catch(_){}
+    setDone(nr); showToast("Solicitud "+code+" creada"); setSaving(false);
   };
 
   const curCat=actCats.find(c=>c.name===f.category);
 
   if(done) return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"24px",marginTop:16,textAlign:"center"}}>
-      <div style={{fontSize:48,marginBottom:8}}>✅</div>
-      <h3 style={{margin:"0 0 6px"}}>Solicitud registrada</h3>
-      <div style={{...bdg("#10b981","#f0fdf4"),fontSize:15,padding:"5px 14px",display:"inline-flex",marginBottom:20}}>{done.code}</div>
-      <div style={{display:"flex",gap:8,justifyContent:"center"}}>
-        <button style={btnPrimary(true)} onClick={()=>{onClose();onOpen(done);}}>Ver detalle</button>
-        <button style={btnSecondary(true)} onClick={onClose}>Cerrar</button>
+    <div style={MSt}>
+      <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"24px",marginTop:16,textAlign:"center"}}>
+        <div style={{fontSize:48,marginBottom:8}}>✅</div>
+        <h3 style={{margin:"0 0 6px"}}>Solicitud registrada</h3>
+        <div style={{...bdg("#10b981","#f0fdf4"),fontSize:15,padding:"5px 14px",display:"inline-flex",marginBottom:20}}>{done.code}</div>
+        <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+          <button style={BP(true)} onClick={()=>{onClose();onOpen(done);}}>Ver detalle</button>
+          <button style={BS(true)} onClick={onClose}>Cerrar</button>
+        </div>
       </div>
-    </div></div>
+    </div>
   );
 
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:680,padding:"20px",marginTop:16,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>Nueva solicitud</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
-      {isAdmin&&(
-        <div style={{display:"flex",gap:10,marginBottom:16}}>
-          {["Administrativo","Incidencia"].map(t=>{
-            const isActive=tipo===t;
-            const color=t==="Administrativo"?"#6366f1":"#ef4444";
-            return <button key={t} onClick={()=>setTipo(t)} style={{flex:1,padding:"12px",borderRadius:10,border:"2px solid "+(isActive?color:"#e2e8f0"),background:isActive?(t==="Administrativo"?"#eef2ff":"#fef2f2"):"#f9fafb",color:isActive?color:"#6b7280",fontWeight:isActive?700:400,cursor:"pointer",fontSize:14}}>{t==="Administrativo"?"📋 Administrativo":"🚨 Incidencia"}</button>;
-          })}
+    <div style={MSt}>
+      <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:680,padding:"20px",marginTop:16,marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>Nueva solicitud</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
+        {isAdmin&&(
+          <div style={{display:"flex",gap:10,marginBottom:16}}>
+            {["Administrativo","Incidencia"].map(tp=>{
+              const isActive=tipo===tp;
+              const color=tp==="Administrativo"?"#6366f1":"#ef4444";
+              return <button key={tp} onClick={()=>setTipo(tp)} style={{flex:1,padding:"12px",borderRadius:10,border:"2px solid "+(isActive?color:"#e2e8f0"),background:isActive?(tp==="Administrativo"?"#eef2ff":"#fef2f2"):"#f9fafb",color:isActive?color:"#6b7280",fontWeight:isActive?700:400,cursor:"pointer",fontSize:14}}>{tp==="Administrativo"?"📋 Administrativo":"🚨 Incidencia"}</button>;
+            })}
+          </div>
+        )}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {tipo==="Incidencia"&&(
+            <>
+              {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,lb,tp])=>(
+                <div key={k} style={fg}><label style={lbl}>{lb}</label><input type={tp} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={ev=>setFld(k,ev.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
+              ))}
+              <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>setFld("tower",ev.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Unidad *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
+              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
+            </>
+          )}
+          {isAdmin&&tipo==="Administrativo"&&(
+            <>
+              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={adminCat} onChange={ev=>{setAdminCat(ev.target.value);setAdminSub(ADMIN_CATS[ev.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={adminSub} onChange={ev=>setAdminSub(ev.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
+            </>
+          )}
+          <div style={{...fg,gridColumn:"1/-1"}}>
+            <label style={lbl}>Descripción *</label>
+            <textarea style={{...inp,height:tipo==="Administrativo"?120:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={ev=>setFld("description",ev.target.value)} placeholder={tipo==="Administrativo"?"Detalle administrativo...":"Describa el problema..."}/>
+            {errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}
+          </div>
+          <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={ev=>setFld("priority",ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+          {tipo==="Incidencia"&&(
+            <>
+              <div style={{...fg,gridColumn:"1/-1"}}>
+                <label style={lbl}>Imágenes (opcional)</label>
+                <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
+                <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:24,marginBottom:4}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div></div>
+                {prevs.length>0&&(
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {prevs.map((pv,i)=>(
+                      <div key={i} style={{position:"relative"}}>
+                        <img src={pv.url} alt={pv.name} style={{...thumb,width:72,height:56}}/>
+                        <button onClick={()=>{setPrevs(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={ev=>setFld("accessPermission",ev.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
+            </>
+          )}
+          <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}>
+            <input type="checkbox" id="conf" checked={f.confirm} onChange={ev=>setFld("confirm",ev.target.checked)}/>
+            <label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la información es correcta *</label>
+            {errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}
+          </div>
         </div>
-      )}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        {tipo==="Incidencia"&&(
-          <>
-            {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,l,t])=>(
-              <div key={k} style={fg}><label style={lbl}>{l}</label><input type={t} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={e=>set(k,e.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
-            ))}
-            <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={e=>set("tower",e.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
-            <div style={fg}><label style={lbl}>Unidad *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={e=>set("unit",e.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
-            <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={e=>{const c=actCats.find(x=>x.name===e.target.value);set("category",e.target.value);set("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
-            <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={e=>set("subcategory",e.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
-          </>
-        )}
-        {isAdmin&&tipo==="Administrativo"&&(
-          <>
-            <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={adminCat} onChange={e=>{setAdminCat(e.target.value);setAdminSub(ADMIN_CATS[e.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
-            <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={adminSub} onChange={e=>setAdminSub(e.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
-          </>
-        )}
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción *</label><textarea style={{...inp,height:tipo==="Administrativo"?120:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={e=>set("description",e.target.value)} placeholder={tipo==="Administrativo"?"Detalle administrativo...":"Describa el problema..."}/>{errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}</div>
-        <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={e=>set("priority",e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
-        {tipo==="Incidencia"&&(
-          <>
-            <div style={{...fg,gridColumn:"1/-1"}}>
-              <label style={lbl}>Imágenes (opcional)</label>
-              <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
-              <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:24,marginBottom:4}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div></div>
-              {prevs.length>0&&(
-                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {prevs.map((p,i)=>(
-                    <div key={i} style={{position:"relative"}}>
-                      <img src={p.url} alt={p.name} style={{...thumb,width:72,height:56}}/>
-                      <button onClick={()=>{setPrevs(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10}}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={e=>set("accessPermission",e.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
-          </>
-        )}
-        <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="conf" checked={f.confirm} onChange={e=>set("confirm",e.target.checked)}/><label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la información es correcta *</label>{errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}</div>
+        {tipo==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA</strong></div>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
+          <button style={BS(true)} onClick={onClose}>Cancelar</button>
+          {tipo==="Administrativo"
+            ?<button style={BPu(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
+            :<button style={BP(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
+          }
+        </div>
       </div>
-      {tipo==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA</strong></div>}
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
-        <button style={btnSecondary(true)} onClick={onClose}>Cancelar</button>
-        {tipo==="Administrativo"
-          ?<button style={btnPurple(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
-          :<button style={btnPrimary(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
-        }
-      </div>
-    </div></div>
+    </div>
   );
 }
 
+// ── TasksView ──────────────────────────────────────────────────────────────
 function TasksView({tasks,reqs,role,setTasks,showToast,mob,respAssign}){
   const [fi,setFi]=useState({status:"",responsible:"",q:""});
   const visible=tasks.filter(t=>(!fi.status||t.status===fi.status)&&(!fi.responsible||t.responsible===fi.responsible)&&(!fi.q||(t.title+" "+(t.responsible||"")).toLowerCase().includes(fi.q.toLowerCase())));
@@ -1228,9 +1239,9 @@ function TasksView({tasks,reqs,role,setTasks,showToast,mob,respAssign}){
     <div>
       <div style={{...card,padding:12,marginBottom:12}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar órdenes..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/>
-          <select style={{...sel,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos los estados</option>{["Ingresada","En proceso","Completada"].map(s=><option key={s}>{s}</option>)}</select>
-          <select style={{...sel,flex:1}} value={fi.responsible} onChange={e=>setFi(p=>({...p,responsible:e.target.value}))}><option value="">Todos</option>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select>
+          <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar órdenes..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
+          <select style={{...sel,flex:1}} value={fi.status} onChange={ev=>setFi(p=>({...p,status:ev.target.value}))}><option value="">Todos los estados</option>{["Ingresada","En proceso","Completada"].map(s=><option key={s}>{s}</option>)}</select>
+          <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}><option value="">Todos</option>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select>
         </div>
       </div>
       {visible.length===0?<Empty msg="Sin órdenes"/>:visible.map(t=>{
@@ -1252,7 +1263,8 @@ function TasksView({tasks,reqs,role,setTasks,showToast,mob,respAssign}){
   );
 }
 
-function ProviderDash({role,showToast,mob,reqs,session}){
+// ── ProviderDash ───────────────────────────────────────────────────────────
+function ProviderDash({role,mob,reqs,session}){
   const myReqs=reqs.filter(r=>r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email));
   return(
     <div>
@@ -1275,14 +1287,13 @@ function ProviderDash({role,showToast,mob,reqs,session}){
   );
 }
 
-function Inspections({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,mob,towers}){
+// ── Inspections ────────────────────────────────────────────────────────────
+function Inspections({inspections,setInsp,reqs,setReqs,showToast,role,mob,towers}){
   const [sub,setSub]=useState("list");
   const [selIns,setSelIns]=useState(null);
   const readOnly=!can(role,"inspection");
-
-  if(sub==="new") return <InspForm inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} addEmail={addEmail} showToast={showToast} role={role} onBack={()=>setSub("list")} mob={mob} towers={towers}/>;
-  if(sub==="detail"&&selIns){const ins=inspections.find(i=>i.id===selIns.id)||selIns;return <InspDetail inspection={normalizeInsp(ins)} inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} showToast={showToast} role={role} onBack={()=>setSub("list")} readOnly={readOnly} mob={mob}/>;}
-
+  if(sub==="new") return <InspForm inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} showToast={showToast} role={role} onBack={()=>setSub("list")} mob={mob} towers={towers}/>;
+  if(sub==="detail"&&selIns){const ins=inspections.find(i=>i.id===selIns.id)||selIns;return <InspDetail inspection={normInsp(ins)} inspections={inspections} setInsp={setInsp} reqs={reqs} setReqs={setReqs} showToast={showToast} role={role} onBack={()=>setSub("list")} readOnly={readOnly} mob={mob}/>;}
   return(
     <div>
       <Grid cols={4} mob={mob}>
@@ -1292,7 +1303,7 @@ function Inspections({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,m
         <Kpi value={inspections.reduce((a,i)=>a+Object.values(i.items||{}).filter(v=>v.state==="Regular").length,0)} label="Regulares" color="#f59e0b" mob={mob}/>
       </Grid>
       <div style={{...card,padding:12,marginBottom:12,display:"flex",justifyContent:"flex-end"}}>
-        {!readOnly&&<button style={btnPrimary(true)} onClick={()=>setSub("new")}>+ Nueva inspección</button>}
+        {!readOnly&&<button style={BP(true)} onClick={()=>setSub("new")}>+ Nueva inspección</button>}
       </div>
       {inspections.length===0?<Empty msg="Sin inspecciones"/>:(
         <div>{[...inspections].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(ins=>{
@@ -1304,10 +1315,7 @@ function Inspections({inspections,setInsp,reqs,setReqs,addEmail,showToast,role,m
                 <div><span style={{fontWeight:700,color:"#6366f1"}}>{ins.id}</span><div style={{fontSize:12,color:"#64748b"}}>{ins.sector} - {fmtD(ins.date)}</div></div>
                 <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
                   <span style={bdg(ins.status==="Finalizada"?"#10b981":"#f59e0b",ins.status==="Finalizada"?"#f0fdf4":"#fffbeb")}>{ins.status}</span>
-                  <div style={{display:"flex",gap:4}}>
-                    {mal>0&&<span style={bdg("#ef4444","#fef2f2")}>{mal} malos</span>}
-                    {reg>0&&<span style={bdg("#f59e0b","#fffbeb")}>{reg} reg.</span>}
-                  </div>
+                  <div style={{display:"flex",gap:4}}>{mal>0&&<span style={bdg("#ef4444","#fef2f2")}>{mal} malos</span>}{reg>0&&<span style={bdg("#f59e0b","#fffbeb")}>{reg} reg.</span>}</div>
                 </div>
               </div>
             </div>
@@ -1327,104 +1335,47 @@ function InspForm({inspections,setInsp,reqs,setReqs,showToast,role,onBack,mob,to
   const [actSec,setActSec]=useState("s1");
   const fileRef=useRef();
   const [pendImg,setPendImg]=useState(null);
-
   const setItem=(sid,name,field,val)=>{const k=sid+"_"+name;setItems(p=>({...p,[k]:{...p[k],[field]:val}}));};
   const getItem=(sid,name)=>items[sid+"_"+name]||{state:"",obs:"",urgency:"",images:[],reqId:null};
-  const all=Object.values(items);
-  const answered=all.filter(v=>v.state).length;
-  const pct=Math.round((answered/all.length)*100);
-
-  const handleImg=e=>{
-    if(!pendImg)return;
-    const f=e.target.files[0];if(!f)return;
-    const r=new FileReader();
-    r.onload=ev=>{const{sid,name}=pendImg;setItem(sid,name,"images",[...(getItem(sid,name).images||[]),ev.target.result]);};
-    r.readAsDataURL(f);e.target.value="";
-  };
-
-  const createReq=(sid,name)=>{
-    const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);
-    const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
-    const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";
-    const nr=normalizeReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});
-    setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");
-  };
-
-  const save=st=>{
-    if(!meta.sector||!meta.inspector){showToast("Complete sector e inspector","error");return;}
-    if(st==="Finalizada"&&!meta.conclusion.trim()){showToast("Ingrese conclusión","error");return;}
-    const code=genCode(inspections,"INS-");
-    setInsp(p=>[{id:code,date:meta.date,inspector:meta.inspector,sector:meta.sector,status:st,conclusion:meta.conclusion,items},...p]);
-    showToast(st==="Finalizada"?"Inspección finalizada":"Borrador guardado");onBack();
-  };
-
-  const secIdx=CL_SECTIONS.findIndex(s=>s.id===actSec);
-  const sec=CL_SECTIONS[secIdx];
-
+  const all=Object.values(items); const answered=all.filter(v=>v.state).length; const pct=Math.round((answered/all.length)*100);
+  const handleImg=ev=>{if(!pendImg)return;const fi=ev.target.files[0];if(!fi)return;const rd=new FileReader();rd.onload=e2=>{const{sid,name}=pendImg;setItem(sid,name,"images",[...(getItem(sid,name).images||[]),e2.target.result]);};rd.readAsDataURL(fi);ev.target.value="";};
+  const createReq=(sid,name)=>{const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");};
+  const save=st=>{if(!meta.sector||!meta.inspector){showToast("Complete sector e inspector","error");return;}if(st==="Finalizada"&&!meta.conclusion.trim()){showToast("Ingrese conclusión","error");return;}const code=genCode(inspections,"INS-");setInsp(p=>[{id:code,date:meta.date,inspector:meta.inspector,sector:meta.sector,status:st,conclusion:meta.conclusion,items},...p]);showToast(st==="Finalizada"?"Inspección finalizada":"Borrador guardado");onBack();};
+  const secIdx=CL_SECTIONS.findIndex(s=>s.id===actSec); const sec=CL_SECTIONS[secIdx];
   return(
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-        <button style={btnSecondary(true)} onClick={onBack}>← Volver</button>
-        <div style={{fontWeight:700,fontSize:mob?15:18}}>Nueva Inspección</div>
-      </div>
-      <div style={card}>
-        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr 1fr",gap:10}}>
-          <div style={fg}><label style={lbl}>Fecha</label><input type="datetime-local" style={inp} value={meta.date} onChange={e=>setMeta(p=>({...p,date:e.target.value}))}/></div>
-          <div style={fg}><label style={lbl}>Inspector</label><input style={inp} value={meta.inspector} onChange={e=>setMeta(p=>({...p,inspector:e.target.value}))}/></div>
-          <div style={fg}><label style={lbl}>Sector</label><select style={sel} value={meta.sector} onChange={e=>setMeta(p=>({...p,sector:e.target.value}))}>{allSectors.map(s=><option key={s}>{s}</option>)}</select></div>
-        </div>
-      </div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}><button style={BS(true)} onClick={onBack}>← Volver</button><div style={{fontWeight:700,fontSize:mob?15:18}}>Nueva Inspección</div></div>
+      <div style={card}><div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr 1fr",gap:10}}><div style={fg}><label style={lbl}>Fecha</label><input type="datetime-local" style={inp} value={meta.date} onChange={ev=>setMeta(p=>({...p,date:ev.target.value}))}/></div><div style={fg}><label style={lbl}>Inspector</label><input style={inp} value={meta.inspector} onChange={ev=>setMeta(p=>({...p,inspector:ev.target.value}))}/></div><div style={fg}><label style={lbl}>Sector</label><select style={sel} value={meta.sector} onChange={ev=>setMeta(p=>({...p,sector:ev.target.value}))}>{allSectors.map(s=><option key={s}>{s}</option>)}</select></div></div></div>
       <div style={{...card,padding:14,marginBottom:12}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-          <div style={{fontWeight:600,fontSize:12}}>Progreso: {answered}/{all.length}</div>
-          <div style={{display:"flex",gap:6}}>
-            <span style={bdg("#10b981","#f0fdf4")}>{all.filter(v=>v.state==="Bueno").length} ok</span>
-            <span style={bdg("#f59e0b","#fffbeb")}>{all.filter(v=>v.state==="Regular").length} reg.</span>
-            <span style={bdg("#ef4444","#fef2f2")}>{all.filter(v=>v.state==="Malo").length} malos</span>
-          </div>
-        </div>
-        <div style={{height:7,background:"#f1f5f9",borderRadius:99}}>
-          <div style={{height:7,background:pct===100?"#10b981":"#3b82f6",borderRadius:99,width:pct+"%",transition:"width .3s"}}/>
-        </div>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div style={{fontWeight:600,fontSize:12}}>Progreso: {answered}/{all.length}</div><div style={{display:"flex",gap:6}}><span style={bdg("#10b981","#f0fdf4")}>{all.filter(v=>v.state==="Bueno").length} ok</span><span style={bdg("#f59e0b","#fffbeb")}>{all.filter(v=>v.state==="Regular").length} reg.</span><span style={bdg("#ef4444","#fef2f2")}>{all.filter(v=>v.state==="Malo").length} malos</span></div></div>
+        <div style={{height:7,background:"#f1f5f9",borderRadius:99}}><div style={{height:7,background:pct===100?"#10b981":"#3b82f6",borderRadius:99,width:pct+"%",transition:"width .3s"}}/></div>
       </div>
       <div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:12,paddingBottom:4}}>
-        {CL_SECTIONS.map(s=>{
-          const sm=s.items.map(n=>getItem(s.id,n)).filter(v=>v.state==="Malo").length;
-          const isActive=actSec===s.id;
-          return <button key={s.id} style={isActive?btnPrimary(true):btnSecondary(true)} onClick={()=>setActSec(s.id)}>{s.label.split(" ")[0]}{sm>0?" ["+sm+"]":""}</button>;
-        })}
+        {CL_SECTIONS.map(s=>{const sm=s.items.map(n=>getItem(s.id,n)).filter(v=>v.state==="Malo").length;return <button key={s.id} style={actSec===s.id?BP(true):BS(true)} onClick={()=>setActSec(s.id)}>{s.label.split(" ")[0]}{sm>0?" ["+sm+"]":""}</button>;})}
       </div>
       <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleImg}/>
       {sec&&(
         <div style={card}>
           <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>{sec.label}</div>
           {sec.items.map(name=>{
-            const it=getItem(sec.id,name);
-            const isMalo=it.state==="Malo";
+            const it=getItem(sec.id,name); const isMalo=it.state==="Malo";
             return(
               <div key={name} style={{borderBottom:"1px solid #f1f5f9",paddingBottom:12,marginBottom:12}}>
                 <div style={{fontWeight:600,fontSize:12,marginBottom:6}}>{name}</div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
-                  {ITEM_STATES.map(s=>(
-                    <button key={s} onClick={()=>setItem(sec.id,name,"state",s)} style={{padding:"3px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"2px solid "+(it.state===s?ITEM_COLOR[s]:"#e2e8f0"),background:it.state===s?ITEM_COLOR[s]+"22":"#f9fafb",color:it.state===s?ITEM_COLOR[s]:"#6b7280"}}>{s}</button>
-                  ))}
+                  {ITEM_STATES.map(s=><button key={s} onClick={()=>setItem(sec.id,name,"state",s)} style={{padding:"3px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"2px solid "+(it.state===s?ITEM_COLOR[s]:"#e2e8f0"),background:it.state===s?ITEM_COLOR[s]+"22":"#f9fafb",color:it.state===s?ITEM_COLOR[s]:"#6b7280"}}>{s}</button>)}
                 </div>
                 {it.state&&it.state!=="No aplica"&&(
                   <div style={{display:"flex",gap:8,marginBottom:6}}>
-                    <input style={{...inp,flex:1,fontSize:12}} placeholder="Observación..." value={it.obs} onChange={e=>setItem(sec.id,name,"obs",e.target.value)}/>
-                    {isMalo&&(
-                      <select style={{...sel,width:110,fontSize:12}} value={it.urgency} onChange={e=>setItem(sec.id,name,"urgency",e.target.value)}>
-                        <option value="">Urgencia...</option>
-                        {URGENCY_LEVELS.map(u=><option key={u}>{u}</option>)}
-                      </select>
-                    )}
+                    <input style={{...inp,flex:1,fontSize:12}} placeholder="Observación..." value={it.obs} onChange={ev=>setItem(sec.id,name,"obs",ev.target.value)}/>
+                    {isMalo&&<select style={{...sel,width:110,fontSize:12}} value={it.urgency} onChange={ev=>setItem(sec.id,name,"urgency",ev.target.value)}><option value="">Urgencia...</option>{URGENCY_LEVELS.map(u=><option key={u}>{u}</option>)}</select>}
                   </div>
                 )}
                 {(it.state==="Malo"||it.state==="Regular")&&(
                   <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                    <button style={btnSecondary(true)} onClick={()=>{setPendImg({sid:sec.id,name});fileRef.current.click();}}>Foto</button>
+                    <button style={BS(true)} onClick={()=>{setPendImg({sid:sec.id,name});fileRef.current.click();}}>Foto</button>
                     {(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:50,height:40}}/>)}
-                    {isMalo&&!it.reqId&&<button style={btnDanger(true)} onClick={()=>createReq(sec.id,name)}>+ Solicitud</button>}
+                    {isMalo&&!it.reqId&&<button style={BD(true)} onClick={()=>createReq(sec.id,name)}>+ Solicitud</button>}
                     {isMalo&&it.reqId&&<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>}
                   </div>
                 )}
@@ -1432,17 +1383,17 @@ function InspForm({inspections,setInsp,reqs,setReqs,showToast,role,onBack,mob,to
             );
           })}
           <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
-            {secIdx>0&&<button style={btnSecondary(true)} onClick={()=>setActSec(CL_SECTIONS[secIdx-1].id)}>← Anterior</button>}
-            {secIdx<CL_SECTIONS.length-1&&<button style={{...btnPrimary(true),marginLeft:"auto"}} onClick={()=>setActSec(CL_SECTIONS[secIdx+1].id)}>Siguiente →</button>}
+            {secIdx>0&&<button style={BS(true)} onClick={()=>setActSec(CL_SECTIONS[secIdx-1].id)}>← Anterior</button>}
+            {secIdx<CL_SECTIONS.length-1&&<button style={{...BP(true),marginLeft:"auto"}} onClick={()=>setActSec(CL_SECTIONS[secIdx+1].id)}>Siguiente →</button>}
           </div>
         </div>
       )}
       <div style={card}>
         <label style={lbl}>Conclusión general *</label>
-        <textarea style={{...inp,height:80,resize:"vertical"}} placeholder="Resuma los hallazgos..." value={meta.conclusion} onChange={e=>setMeta(p=>({...p,conclusion:e.target.value}))}/>
+        <textarea style={{...inp,height:80,resize:"vertical"}} placeholder="Resuma los hallazgos..." value={meta.conclusion} onChange={ev=>setMeta(p=>({...p,conclusion:ev.target.value}))}/>
         <div style={{display:"flex",gap:8,marginTop:10,justifyContent:"flex-end"}}>
-          <button style={btnSecondary(true)} onClick={()=>save("Borrador")}>Guardar borrador</button>
-          <button style={btnPrimary(true)} onClick={()=>save("Finalizada")}>Finalizar</button>
+          <button style={BS(true)} onClick={()=>save("Borrador")}>Guardar borrador</button>
+          <button style={BP(true)} onClick={()=>save("Finalizada")}>Finalizar</button>
         </div>
       </div>
     </div>
@@ -1453,49 +1404,24 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
   const [tab,setTab]=useState("resumen");
   const safeItems=inspection.items||mkItems();
   const allEntries=Object.entries(safeItems);
-  const malos=allEntries.filter(e=>e[1].state==="Malo");
-  const regs=allEntries.filter(e=>e[1].state==="Regular");
-  const bues=allEntries.filter(e=>e[1].state==="Bueno");
-
-  const createReq=(key,it)=>{
-    if(it.reqId){showToast("Ya existe","error");return;}
-    const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");
-    const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
-    const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";
-    const nr=normalizeReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});
-    setReqs(p=>[nr,...p]);
-    setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));
-    showToast("Solicitud "+code+" creada");
-  };
-
+  const malos=allEntries.filter(en=>en[1].state==="Malo");
+  const regs=allEntries.filter(en=>en[1].state==="Regular");
+  const bues=allEntries.filter(en=>en[1].state==="Bueno");
+  const createReq=(key,it)=>{if(it.reqId){showToast("Ya existe","error");return;}const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));showToast("Solicitud "+code+" creada");};
   const tabs=[{id:"resumen",label:"Resumen"},{id:"hallazgos",label:"Hallazgos ("+(malos.length+regs.length)+")"},{id:"checklist",label:"Checklist"}];
   return(
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
-        <button style={btnSecondary(true)} onClick={onBack}>← Volver</button>
-        <div style={{flex:1}}>
-          <span style={{fontWeight:700,fontSize:mob?15:18}}>{inspection.id}</span>
-          <span style={{...bdg(inspection.status==="Finalizada"?"#10b981":"#f59e0b",inspection.status==="Finalizada"?"#f0fdf4":"#fffbeb"),marginLeft:8}}>{inspection.status}</span>
-          <div style={{fontSize:11,color:"#64748b"}}>{inspection.sector} - {fmt(inspection.date)}</div>
-        </div>
+        <button style={BS(true)} onClick={onBack}>← Volver</button>
+        <div style={{flex:1}}><span style={{fontWeight:700,fontSize:mob?15:18}}>{inspection.id}</span><span style={{...bdg(inspection.status==="Finalizada"?"#10b981":"#f59e0b",inspection.status==="Finalizada"?"#f0fdf4":"#fffbeb"),marginLeft:8}}>{inspection.status}</span><div style={{fontSize:11,color:"#64748b"}}>{inspection.sector} - {fmt(inspection.date)}</div></div>
       </div>
       <Tabs tabs={tabs} active={tab} onChange={setTab} accent="#6366f1"/>
-      {tab==="resumen"&&(
-        <div>
-          <Grid cols={4} mob={mob}>
-            <Kpi value={bues.length+regs.length+malos.length} label="Revisados" color="#3b82f6" mob={mob}/>
-            <Kpi value={bues.length} label="Buenos" color="#10b981" mob={mob}/>
-            <Kpi value={regs.length} label="Regulares" color="#f59e0b" mob={mob}/>
-            <Kpi value={malos.length} label="Malos" color="#ef4444" mob={mob}/>
-          </Grid>
-          <div style={card}><p style={{fontSize:13,margin:0}}>{inspection.conclusion||"Sin conclusión."}</p></div>
-        </div>
-      )}
+      {tab==="resumen"&&<div><Grid cols={4} mob={mob}><Kpi value={bues.length+regs.length+malos.length} label="Revisados" color="#3b82f6" mob={mob}/><Kpi value={bues.length} label="Buenos" color="#10b981" mob={mob}/><Kpi value={regs.length} label="Regulares" color="#f59e0b" mob={mob}/><Kpi value={malos.length} label="Malos" color="#ef4444" mob={mob}/></Grid><div style={card}><p style={{fontSize:13,margin:0}}>{inspection.conclusion||"Sin conclusión."}</p></div></div>}
       {tab==="hallazgos"&&(
         <div>
           {malos.length+regs.length===0?<Empty msg="Sin hallazgos"/>:[...malos,...regs].map(entry=>{
-            const key=entry[0];const it=entry[1];
-            const parts=key.split("_");const name=parts.slice(1).join("_");
+            const key=entry[0]; const it=entry[1];
+            const parts=key.split("_"); const name=parts.slice(1).join("_");
             const isMalo=it.state==="Malo";
             return(
               <div key={key} style={{...card,borderLeft:"4px solid "+(isMalo?"#ef4444":"#f59e0b"),padding:12,marginBottom:8}}>
@@ -1505,10 +1431,7 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
                 </div>
                 <div style={{display:"flex",gap:6,marginTop:8}}>
                   {(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:54,height:42}}/>)}
-                  {it.reqId
-                    ?<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>
-                    :(isMalo&&!readOnly&&<button style={btnDanger(true)} onClick={()=>createReq(key,it)}>+ Solicitud</button>)
-                  }
+                  {it.reqId?<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>:(isMalo&&!readOnly&&<button style={BD(true)} onClick={()=>createReq(key,it)}>+ Solicitud</button>)}
                 </div>
               </div>
             );
@@ -1519,20 +1442,8 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
         <div>{CL_SECTIONS.map(sec=>(
           <div key={sec.id} style={{...card,marginBottom:8}}>
             <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>{sec.label}</div>
-            <table style={tbl}>
-              <thead><tr>{["Item","Estado","Obs","Solicitud"].map(h=><th key={h} style={thSt}>{h}</th>)}</tr></thead>
-              <tbody>{sec.items.map(name=>{
-                const it=safeItems[sec.id+"_"+name]||{};
-                return(
-                  <tr key={name}>
-                    <td style={tdSt}>{name}</td>
-                    <td style={tdSt}>{it.state?<span style={bdg(ITEM_COLOR[it.state]||"#94a3b8",(ITEM_COLOR[it.state]||"#94a3b8")+"22")}>{it.state}</span>:"---"}</td>
-                    <td style={tdSt}><span style={{fontSize:10,color:"#64748b"}}>{it.obs||"---"}</span></td>
-                    <td style={tdSt}>{it.reqId?<span style={bdg("#10b981","#f0fdf4")}>{it.reqId}</span>:"---"}</td>
-                  </tr>
-                );
-              })}</tbody>
-            </table>
+            <table style={tbl}><thead><tr>{["Item","Estado","Obs","Solicitud"].map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
+            <tbody>{sec.items.map(name=>{const it=safeItems[sec.id+"_"+name]||{};return(<tr key={name}><td style={tdS}>{name}</td><td style={tdS}>{it.state?<span style={bdg(ITEM_COLOR[it.state]||"#94a3b8",(ITEM_COLOR[it.state]||"#94a3b8")+"22")}>{it.state}</span>:"---"}</td><td style={tdS}><span style={{fontSize:10,color:"#64748b"}}>{it.obs||"---"}</span></td><td style={tdS}>{it.reqId?<span style={bdg("#10b981","#f0fdf4")}>{it.reqId}</span>:"---"}</td></tr>);})}</tbody></table>
           </div>
         ))}</div>
       )}
@@ -1540,7 +1451,8 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
   );
 }
 
-function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob,respAssign}){
+// ── InvView ────────────────────────────────────────────────────────────────
+function InvView({inventory,setInv,reqs,role,showToast,mob}){
   const [fi,setFi]=useState({cat:"",q:"",low:false});
   const [showForm,setShowForm]=useState(false);
   const [editItem,setEditItem]=useState(null);
@@ -1562,9 +1474,9 @@ function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob,
       {lowStock>0&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginBottom:12}} onClick={()=>setFi(p=>({...p,low:true}))}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626"}}>{lowStock} insumo(s) bajo el mínimo</strong></div>}
       <div style={{...card,padding:12,marginBottom:12}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-          <input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/>
-          <select style={{...sel,flex:1}} value={fi.cat} onChange={e=>setFi(p=>({...p,cat:e.target.value}))}><option value="">Todas las categorías</option>{INV_CATS.map(c=><option key={c}>{c}</option>)}</select>
-          {!readOnly&&<button style={btnPrimary(true)} onClick={()=>{setEditItem(null);setShowForm(true);}}>+ Agregar</button>}
+          <input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
+          <select style={{...sel,flex:1}} value={fi.cat} onChange={ev=>setFi(p=>({...p,cat:ev.target.value}))}><option value="">Todas las categorías</option>{INV_CATS.map(c=><option key={c}>{c}</option>)}</select>
+          {!readOnly&&<button style={BP(true)} onClick={()=>{setEditItem(null);setShowForm(true);}}>+ Agregar</button>}
         </div>
       </div>
       {visible.length===0?<Empty msg="Sin insumos"/>:(
@@ -1578,10 +1490,10 @@ function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob,
               </div>
               {!readOnly&&(
                 <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
-                  <button style={btnSecondary(true)} onClick={()=>setMov({item,dir:1})}>+ Stock</button>
-                  <button style={btnSecondary(true)} onClick={()=>setMov({item,dir:-1})}>- Stock</button>
-                  <button style={btnGhost(true)} onClick={()=>{setEditItem(item);setShowForm(true);}}>Editar</button>
-                  <button style={btnGhost(true)} onClick={()=>setInv(p=>p.filter(i=>i.id!==item.id))}>Eliminar</button>
+                  <button style={BS(true)} onClick={()=>setMov({item,dir:1})}>+ Stock</button>
+                  <button style={BS(true)} onClick={()=>setMov({item,dir:-1})}>- Stock</button>
+                  <button style={BG(true)} onClick={()=>{setEditItem(item);setShowForm(true);}}>Editar</button>
+                  <button style={BG(true)} onClick={()=>setInv(p=>p.filter(i=>i.id!==item.id))}>Eliminar</button>
                 </div>
               )}
             </div>
@@ -1595,64 +1507,70 @@ function InvView({inventory,setInv,dispatch,setDispatch,reqs,role,showToast,mob,
 }
 
 function InvForm({item,onSave,onClose}){
-  const [f,setF]=useState({name:"",category:INV_CATS[0],unit:INV_UNITS[0],stock:0,minStock:1,location:"Bodega",cost:0,supplier:"",...(item||{})});
+  const [f,setF]=useState({name:"",category:INV_CATS[0],unit:INV_UNITS[0],stock:0,minStock:1,location:"Bodega",cost:0,...(item||{})});
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:500,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>{item?"Editar":"Nuevo"} insumo</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
+    <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:500,padding:"20px",marginTop:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>{item?"Editar":"Nuevo"} insumo</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={e=>setF(p=>({...p,category:e.target.value}))}>{INV_CATS.map(c=><option key={c}>{c}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Unidad</label><select style={sel} value={f.unit} onChange={e=>setF(p=>({...p,unit:e.target.value}))}>{INV_UNITS.map(u=><option key={u}>{u}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Stock actual</label><input type="number" min="0" style={inp} value={f.stock} onChange={e=>setF(p=>({...p,stock:Math.max(0,+e.target.value)}))}/></div>
-        <div style={fg}><label style={lbl}>Stock mínimo</label><input type="number" min="0" style={inp} value={f.minStock} onChange={e=>setF(p=>({...p,minStock:Math.max(0,+e.target.value)}))}/></div>
-        <div style={fg}><label style={lbl}>Costo unit.</label><input type="number" min="0" style={inp} value={f.cost} onChange={e=>setF(p=>({...p,cost:Math.max(0,+e.target.value)}))}/></div>
-        <div style={fg}><label style={lbl}>Ubicación</label><input style={inp} value={f.location} onChange={e=>setF(p=>({...p,location:e.target.value}))}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={ev=>setF(p=>({...p,name:ev.target.value}))}/></div>
+        <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>setF(p=>({...p,category:ev.target.value}))}>{INV_CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Unidad</label><select style={sel} value={f.unit} onChange={ev=>setF(p=>({...p,unit:ev.target.value}))}>{INV_UNITS.map(u=><option key={u}>{u}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Stock actual</label><input type="number" min="0" style={inp} value={f.stock} onChange={ev=>setF(p=>({...p,stock:Math.max(0,+ev.target.value)}))}/></div>
+        <div style={fg}><label style={lbl}>Stock mínimo</label><input type="number" min="0" style={inp} value={f.minStock} onChange={ev=>setF(p=>({...p,minStock:Math.max(0,+ev.target.value)}))}/></div>
+        <div style={fg}><label style={lbl}>Costo unit.</label><input type="number" min="0" style={inp} value={f.cost} onChange={ev=>setF(p=>({...p,cost:Math.max(0,+ev.target.value)}))}/></div>
+        <div style={fg}><label style={lbl}>Ubicación</label><input style={inp} value={f.location} onChange={ev=>setF(p=>({...p,location:ev.target.value}))}/></div>
       </div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={()=>{if(!f.name.trim())return;onSave(f);}}>Guardar</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={()=>{if(!f.name.trim())return;onSave(f);}}>Guardar</button></div>
     </div></div>
   );
 }
 
 function StockModal({data,onConfirm,onClose}){
   const [qty,setQty]=useState(1);
-  const isIn=data.dir>0;const max=isIn?9999:data.item.stock;const safeQty=Math.min(Math.max(1,qty),max);
+  const isIn=data.dir>0; const max=isIn?9999:data.item.stock; const safeQty=Math.min(Math.max(1,qty),max);
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:380,padding:"20px",marginTop:16}}>
+    <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:380,padding:"20px",marginTop:16}}>
       <h3 style={{margin:"0 0 12px",fontSize:15}}>{isIn?"Ingreso":"Egreso"} - {data.item.name}</h3>
       <div style={{...alrt(isIn?"success":"error"),marginBottom:12}}>Stock actual: <strong>{data.item.stock} {data.item.unit}</strong></div>
-      <div style={fg}><label style={lbl}>Cantidad</label><input type="number" min="1" max={max} style={inp} value={qty} onChange={e=>setQty(Math.max(1,+e.target.value))}/></div>
+      <div style={fg}><label style={lbl}>Cantidad</label><input type="number" min="1" max={max} style={inp} value={qty} onChange={ev=>setQty(Math.max(1,+ev.target.value))}/></div>
       <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Resultante: <strong>{data.item.stock+(isIn?safeQty:-safeQty)} {data.item.unit}</strong></div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <button style={btnSecondary(true)} onClick={onClose}>Cancelar</button>
+        <button style={BS(true)} onClick={onClose}>Cancelar</button>
         {isIn
-          ?<button style={btnSuccess(true)} onClick={()=>onConfirm(data.item.id,safeQty)}>Confirmar ingreso</button>
-          :<button style={btnDanger(true)} disabled={qty>data.item.stock} onClick={()=>onConfirm(data.item.id,-safeQty)}>Confirmar egreso</button>
+          ?<button style={BSu(true)} onClick={()=>onConfirm(data.item.id,safeQty)}>Confirmar ingreso</button>
+          :<button style={BD(true)} disabled={qty>data.item.stock} onClick={()=>onConfirm(data.item.id,-safeQty)}>Confirmar egreso</button>
         }
       </div>
     </div></div>
   );
 }
 
+// ── EmailsView ─────────────────────────────────────────────────────────────
 function EmailsView({logs,setEmails,role}){
   const [q,setQ]=useState("");
-  const visible=[...logs].sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(e=>!q||((e.to||"")+(e.subject||"")).toLowerCase().includes(q.toLowerCase()));
+  const visible=[...logs].sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(lg=>!q||((lg.to||"")+(lg.subject||"")).toLowerCase().includes(q.toLowerCase()));
   return(
     <div>
       <div style={{...card,padding:12,marginBottom:12,display:"flex",gap:8}}>
-        <input style={{...inp,flex:1}} placeholder="Buscar..." value={q} onChange={e=>setQ(e.target.value)}/>
-        {can(role,"manageConfig")&&logs.length>0&&<button style={btnDanger(true)} onClick={()=>{if(window.confirm("¿Eliminar todos los correos?"))setEmails([]);}}>🗑 Limpiar</button>}
+        <input style={{...inp,flex:1}} placeholder="Buscar..." value={q} onChange={ev=>setQ(ev.target.value)}/>
+        {can(role,"manageConfig")&&logs.length>0&&(
+          <button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar todos?"))setEmails([]);}}>🗑 Limpiar</button>
+        )}
       </div>
       <div style={card}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Bandeja</div><span style={bdg("#10b981","#f0fdf4")}>{logs.length} enviados</span></div>
-        {visible.length===0?<Empty msg="Sin correos"/>:visible.map((e,i)=>(
-          <div key={e.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+          <div style={{fontWeight:600,fontSize:13}}>Bandeja</div>
+          <span style={bdg("#10b981","#f0fdf4")}>{logs.length} enviados</span>
+        </div>
+        {visible.length===0?<Empty msg="Sin correos"/>:visible.map((lg,i)=>(
+          <div key={lg.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}>
             <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
-              <span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</span>
-              <span style={bdg("#6366f1","#eef2ff")}>{e.type}</span>
-              {can(role,"manageConfig")&&<button style={{...btnGhost(true),padding:"2px 6px",fontSize:11,color:"#ef4444"}} onClick={()=>setEmails(p=>p.filter(x=>x.id!==e.id))}>🗑</button>}
+              <span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lg.subject}</span>
+              <span style={bdg("#6366f1","#eef2ff")}>{lg.type}</span>
+              {can(role,"manageConfig")&&<button style={{...BG(true),padding:"2px 6px",fontSize:11,color:"#ef4444"}} onClick={()=>setEmails(p=>p.filter(x=>x.id!==lg.id))}>🗑</button>}
             </div>
-            <div style={{fontSize:10,color:"#64748b"}}>{e.to} - {fmt(e.date)}</div>
-            <div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{e.body}</div>
+            <div style={{fontSize:10,color:"#64748b"}}>{lg.to} - {fmt(lg.date)}</div>
+            <div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{lg.body}</div>
           </div>
         ))}
       </div>
@@ -1660,7 +1578,8 @@ function EmailsView({logs,setEmails,role}){
   );
 }
 
-function Reports({reqs,tasks,inventory,mob,respAssign}){
+// ── Reports ────────────────────────────────────────────────────────────────
+function Reports({reqs,tasks,inventory,mob}){
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
   const maxCat=Math.max(...byCat.map(x=>x.n),1);
   return(
@@ -1668,19 +1587,15 @@ function Reports({reqs,tasks,inventory,mob,respAssign}){
       <Grid cols={4} mob={mob}>{PRIORITIES.map(p=><Kpi key={p} value={reqs.filter(r=>r.priority===p).length} label={p} color={PC[p]} mob={mob}/>)}</Grid>
       <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por estado</div>{STATUSES.map(s=>{const c=reqs.filter(r=>r.status===s).length;return c?<div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><SBadge s={s}/><span style={{fontWeight:600}}>{c}</span></div>:null;})}</div>
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>{byCat.map(x=>(
-          <div key={x.c} style={{marginBottom:8}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div>
-            <div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div>
-          </div>
-        ))}</div>
+        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>{byCat.map(x=><div key={x.c} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div><div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div></div>)}</div>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Activas" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Cerradas" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Órdenes totales" v={tasks.length}/><IR l="Stock crítico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
       </div>
     </div>
   );
 }
 
-function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,respList,towers,equipos,setEquipos,certs,setCerts}){
+// ── MantView ───────────────────────────────────────────────────────────────
+function MantView({mant,setMant,role,showToast,mob,respList,towers,equipos,setEquipos,certs,setCerts}){
   const [sub,setSub]=useState("list");
   const [sel,setSel]=useState(null);
   const [showForm,setShowForm]=useState(false);
@@ -1690,33 +1605,33 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,respList,towers
   const [showCertForm,setShowCertForm]=useState(false);
   const [editCert,setEditCert]=useState(null);
   const readOnly=!can(role,"mantencion");
-  const activeEquipos=(equipos||[]).filter(e=>e.active);
+  const activeEquipos=(equipos||[]).filter(eq=>eq.active);
   const enriched=mant.map(m=>({...m,computedStatus:getMantStatus(m)}));
   const vencidas=enriched.filter(m=>m.computedStatus==="Vencida").length;
   const porVencer=enriched.filter(m=>m.computedStatus==="Por vencer").length;
   const certsVenc=(certs||[]).filter(c=>{if(!c.vencimiento)return false;return Math.ceil((new Date(c.vencimiento)-new Date())/86400000)<0;}).length;
   const certsPorV=(certs||[]).filter(c=>{if(!c.vencimiento)return false;const d=Math.ceil((new Date(c.vencimiento)-new Date())/86400000);return d>=0&&d<=30;}).length;
   const visible=enriched.filter(m=>{
-    if(fi.cat&&m.category!==fi.cat)return false;
-    if(fi.status&&m.computedStatus!==fi.status)return false;
-    if(fi.q&&!((m.asset||"")+" "+(m.provider||"")).toLowerCase().includes(fi.q.toLowerCase()))return false;
+    if(fi.cat&&m.category!==fi.cat) return false;
+    if(fi.status&&m.computedStatus!==fi.status) return false;
+    if(fi.q&&!((m.asset||"")+" "+(m.provider||"")).toLowerCase().includes(fi.q.toLowerCase())) return false;
     return true;
   }).sort((a,b)=>{const ord={Vencida:0,"Por vencer":1,"En ejecucion":2,Vigente:3,Completada:4};return(ord[a.computedStatus]??9)-(ord[b.computedStatus]??9);});
 
   const saveMant=item=>{
     const ts=new Date().toISOString();
     if(editItem){setMant(p=>p.map(m=>m.id===item.id?item:m));showToast("Actualizado");}
-    else{const code=genCode(mant,"MAN-");setMant(p=>[normalizeMant({...item,id:code,code,createdAt:ts}),...p]);showToast("Mantención "+code+" creada");}
-    setShowForm(false);setEdit(null);
+    else{const code=genCode(mant,"MAN-");setMant(p=>[normMant({...item,id:code,code,createdAt:ts}),...p]);showToast("Mantención "+code+" creada");}
+    setShowForm(false); setEdit(null);
   };
   const saveCert=item=>{
     if(editCert?.id){setCerts(p=>p.map(c=>c.id===item.id?item:c));showToast("Actualizado");}
     else{setCerts(p=>[{...item,id:"cert"+uid()},...p]);showToast("Certificación registrada");}
-    setShowCertForm(false);setEditCert(null);
+    setShowCertForm(false); setEditCert(null);
   };
 
   if(sub==="detail"&&sel){
-    const item=normalizeMant(mant.find(m=>m.id===sel.id)||sel);
+    const item=normMant(mant.find(m=>m.id===sel.id)||sel);
     return <MantDetail item={item} mant={mant} setMant={setMant} role={role} showToast={showToast} mob={mob} readOnly={readOnly} onBack={()=>{setSub("list");setMantTab("mant");}} respList={respList}/>;
   }
 
@@ -1732,10 +1647,10 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,respList,towers
         <div>
           <div style={{...card,padding:12,marginBottom:12}}>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-              <input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar..." value={fi.q} onChange={e=>setFi(p=>({...p,q:e.target.value}))}/>
-              <select style={{...sel,flex:1}} value={fi.cat} onChange={e=>setFi(p=>({...p,cat:e.target.value}))}><option value="">Todas</option>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select>
-              <select style={{...sel,flex:1}} value={fi.status} onChange={e=>setFi(p=>({...p,status:e.target.value}))}><option value="">Todos</option>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>
-              {!readOnly&&<button style={btnPrimary(true)} onClick={()=>{setEdit(null);setShowForm(true);}}>+ Nueva</button>}
+              <input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
+              <select style={{...sel,flex:1}} value={fi.cat} onChange={ev=>setFi(p=>({...p,cat:ev.target.value}))}><option value="">Todas</option>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select>
+              <select style={{...sel,flex:1}} value={fi.status} onChange={ev=>setFi(p=>({...p,status:ev.target.value}))}><option value="">Todos</option>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>
+              {!readOnly&&<button style={BP(true)} onClick={()=>{setEdit(null);setShowForm(true);}}>+ Nueva</button>}
             </div>
           </div>
           {visible.length===0?<Empty msg="Sin mantenciones"/>:(
@@ -1755,9 +1670,9 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,respList,towers
                     </div>
                   </div>
                   {!readOnly&&(
-                    <div style={{display:"flex",gap:6,marginTop:10}} onClick={e=>e.stopPropagation()}>
-                      <button style={btnSecondary(true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button>
-                      <button style={btnGhost(true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button>
+                    <div style={{display:"flex",gap:6,marginTop:10}} onClick={ev=>ev.stopPropagation()}>
+                      <button style={BS(true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button>
+                      <button style={BG(true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button>
                     </div>
                   )}
                 </div>
@@ -1773,7 +1688,7 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,respList,towers
             <div>
               <div style={{...card,padding:12,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,color:"#64748b"}}>{activeEquipos.length} equipos activos</div>
-                {!readOnly&&<button style={btnPrimary(true)} onClick={()=>{setEditCert(null);setShowCertForm(true);}}>+ Nueva certificación</button>}
+                {!readOnly&&<button style={BP(true)} onClick={()=>{setEditCert(null);setShowCertForm(true);}}>+ Nueva certificación</button>}
               </div>
               {activeEquipos.map(eq=>{
                 const equipCerts=(certs||[]).filter(c=>c.equipoId===eq.id).sort((a,b)=>new Date(b.vencimiento)-new Date(a.vencimiento));
@@ -1797,17 +1712,12 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,respList,towers
                           </div>
                         ):<div style={{...alrt("warning"),margin:"6px 0 0"}}>Sin certificación registrada</div>}
                       </div>
-                      {!readOnly&&<button style={btnSecondary(true)} onClick={()=>{setEditCert({equipoId:eq.id,equipoNombre:eq.nombre});setShowCertForm(true);}}>+ Registrar</button>}
+                      {!readOnly&&<button style={BS(true)} onClick={()=>{setEditCert({equipoId:eq.id,equipoNombre:eq.nombre});setShowCertForm(true);}}>+ Registrar</button>}
                     </div>
                     {equipCerts.length>1&&(
                       <details style={{marginTop:8}}>
                         <summary style={{fontSize:11,color:"#6366f1",cursor:"pointer"}}>Historial ({equipCerts.length})</summary>
-                        <div>{equipCerts.map(c=>(
-                          <div key={c.id} style={{fontSize:11,padding:"4px 0",borderBottom:"1px solid #f1f5f9",display:"flex",justifyContent:"space-between"}}>
-                            <span>{fmtD(c.fecha)} → {fmtD(c.vencimiento)}</span>
-                            <span style={{color:"#64748b"}}>{c.empresa}</span>
-                          </div>
-                        ))}</div>
+                        <div>{equipCerts.map(c=><div key={c.id} style={{fontSize:11,padding:"4px 0",borderBottom:"1px solid #f1f5f9",display:"flex",justifyContent:"space-between"}}><span>{fmtD(c.fecha)} → {fmtD(c.vencimiento)}</span><span style={{color:"#64748b"}}>{c.empresa}</span></div>)}</div>
                       </details>
                     )}
                   </div>
@@ -1825,20 +1735,20 @@ function MantView({mant,setMant,reqs,role,showToast,addEmail,mob,respList,towers
 function CertForm({cert,equipos,towers,onSave,onClose}){
   const actT=(towers||[]).filter(t=>t.active);
   const [f,setF]=useState({equipoId:cert?.equipoId||equipos[0]?.id||"",equipoNombre:cert?.equipoNombre||equipos[0]?.nombre||"",fecha:new Date().toISOString().slice(0,10),vencimiento:"",empresa:"",torre:"",ubicacion:"",notas:"",...(cert?.id?cert:{})});
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>Registrar Certificación</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
+    <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:520,padding:"20px",marginTop:16,marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>Registrar Certificación</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Equipo *</label><select style={sel} value={f.equipoId} onChange={e=>{const eq=equipos.find(x=>x.id===e.target.value);set("equipoId",e.target.value);set("equipoNombre",eq?.nombre||"");}}>{equipos.map(e=><option key={e.id} value={e.id}>{e.icono} {e.nombre}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.torre} onChange={e=>set("torre",e.target.value)}><option value="">Sin torre</option>{actT.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Ubicación</label><input style={inp} placeholder="ej: Subterráneo..." value={f.ubicacion} onChange={e=>set("ubicacion",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Fecha certificación *</label><input type="date" style={inp} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Fecha vencimiento *</label><input type="date" style={inp} value={f.vencimiento} onChange={e=>set("vencimiento",e.target.value)}/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Empresa responsable</label><input style={inp} value={f.empresa} onChange={e=>set("empresa",e.target.value)}/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Notas</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.notas} onChange={e=>set("notas",e.target.value)}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Equipo *</label><select style={sel} value={f.equipoId} onChange={ev=>{const eq=equipos.find(x=>x.id===ev.target.value);setFld("equipoId",ev.target.value);setFld("equipoNombre",eq?.nombre||"");}}>{equipos.map(eq=><option key={eq.id} value={eq.id}>{eq.icono} {eq.nombre}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.torre} onChange={ev=>setFld("torre",ev.target.value)}><option value="">Sin torre</option>{actT.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Ubicación</label><input style={inp} value={f.ubicacion} onChange={ev=>setFld("ubicacion",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Fecha certificación *</label><input type="date" style={inp} value={f.fecha} onChange={ev=>setFld("fecha",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Fecha vencimiento *</label><input type="date" style={inp} value={f.vencimiento} onChange={ev=>setFld("vencimiento",ev.target.value)}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Empresa responsable</label><input style={inp} value={f.empresa} onChange={ev=>setFld("empresa",ev.target.value)}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Notas</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.notas} onChange={ev=>setFld("notas",ev.target.value)}/></div>
       </div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={()=>{if(!f.equipoId||!f.fecha||!f.vencimiento)return;onSave(f);}}>Guardar</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={()=>{if(!f.equipoId||!f.fecha||!f.vencimiento)return;onSave(f);}}>Guardar</button></div>
     </div></div>
   );
 }
@@ -1846,32 +1756,32 @@ function CertForm({cert,equipos,towers,onSave,onClose}){
 function MantForm({item,onSave,onClose,respList}){
   const defCat=MANT_CATS[0];
   const [f,setF]=useState({asset:"",category:defCat,subcategory:MANT_SUBCATS[defCat][0],location:"",tipo:MANT_TIPOS[0],responsible:(respList&&respList[0])||"",provider:"",lastDate:"",nextDate:"",costEstimated:"",costReal:"",description:"",...(item||{})});
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
   const subs=MANT_SUBCATS[f.category]||[];
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:600,padding:"20px",marginTop:16,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>{item?"Editar":"Nueva"} mantención</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
+    <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:600,padding:"20px",marginTop:16,marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>{item?"Editar":"Nueva"} mantención</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Activo *</label><input style={inp} value={f.asset} onChange={e=>set("asset",e.target.value)} placeholder="ej: Ascensor Torre A"/></div>
-        <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={e=>{const nc=e.target.value;const ns=MANT_SUBCATS[nc]||[];set("category",nc);if(!ns.includes(f.subcategory))set("subcategory",ns[0]||"");}}>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={e=>set("subcategory",e.target.value)}>{subs.map(s=><option key={s}>{s}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Ubicación</label><input style={inp} value={f.location} onChange={e=>set("location",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Tipo</label><select style={sel} value={f.tipo} onChange={e=>set("tipo",e.target.value)}>{MANT_TIPOS.map(t=><option key={t}>{t}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={e=>set("responsible",e.target.value)}>{(respList||[]).map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Proveedor</label><input style={inp} value={f.provider} onChange={e=>set("provider",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Última mantención</label><input type="date" style={inp} value={f.lastDate} onChange={e=>set("lastDate",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Próx. vencimiento</label><input type="date" style={inp} value={f.nextDate} onChange={e=>set("nextDate",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Costo estimado</label><input type="number" min="0" style={inp} value={f.costEstimated} onChange={e=>set("costEstimated",e.target.value)}/></div>
-        <div style={fg}><label style={lbl}>Costo real</label><input type="number" min="0" style={inp} value={f.costReal} onChange={e=>set("costReal",e.target.value)}/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:70,resize:"vertical"}} value={f.description} onChange={e=>set("description",e.target.value)}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Activo *</label><input style={inp} value={f.asset} onChange={ev=>setFld("asset",ev.target.value)} placeholder="ej: Ascensor Torre A"/></div>
+        <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const nc=ev.target.value;const ns=MANT_SUBCATS[nc]||[];setFld("category",nc);if(!ns.includes(f.subcategory))setFld("subcategory",ns[0]||"");}}>{MANT_CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{subs.map(s=><option key={s}>{s}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Ubicación</label><input style={inp} value={f.location} onChange={ev=>setFld("location",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Tipo</label><select style={sel} value={f.tipo} onChange={ev=>setFld("tipo",ev.target.value)}>{MANT_TIPOS.map(t=><option key={t}>{t}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setFld("responsible",ev.target.value)}>{(respList||[]).map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Proveedor</label><input style={inp} value={f.provider} onChange={ev=>setFld("provider",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Última mantención</label><input type="date" style={inp} value={f.lastDate} onChange={ev=>setFld("lastDate",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Próx. vencimiento</label><input type="date" style={inp} value={f.nextDate} onChange={ev=>setFld("nextDate",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Costo estimado</label><input type="number" min="0" style={inp} value={f.costEstimated} onChange={ev=>setFld("costEstimated",ev.target.value)}/></div>
+        <div style={fg}><label style={lbl}>Costo real</label><input type="number" min="0" style={inp} value={f.costReal} onChange={ev=>setFld("costReal",ev.target.value)}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:70,resize:"vertical"}} value={f.description} onChange={ev=>setFld("description",ev.target.value)}/></div>
       </div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={()=>{if(!f.asset.trim())return;onSave(f);}}>Guardar</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={()=>{if(!f.asset.trim())return;onSave(f);}}>Guardar</button></div>
     </div></div>
   );
 }
 
 function MantDetail({item,mant,setMant,role,showToast,mob,readOnly,onBack,respList}){
-  const m=normalizeMant(mant.find(x=>x.id===item.id)||item);
+  const m=normMant(mant.find(x=>x.id===item.id)||item);
   const st=getMantStatus(m);
   const [tab,setTab]=useState("info");
   const [cmt,setCmt]=useState("");
@@ -1886,7 +1796,7 @@ function MantDetail({item,mant,setMant,role,showToast,mob,readOnly,onBack,respLi
   return(
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
-        <button style={btnSecondary(true)} onClick={onBack}>← Volver</button>
+        <button style={BS(true)} onClick={onBack}>← Volver</button>
         <div style={{flex:1}}>
           <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?15:18}}>{m.asset}</span><MBadge m={m}/></div>
           <div style={{fontSize:11,color:"#64748b"}}>{m.code} - {m.category}</div>
@@ -1896,9 +1806,9 @@ function MantDetail({item,mant,setMant,role,showToast,mob,readOnly,onBack,respLi
       {!readOnly&&(
         <div style={{...card,padding:12,marginBottom:12}}>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <select style={{...sel,width:160}} value={m.status} onChange={e=>upd({status:e.target.value})}>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>
-            <button style={btnSuccess(true)} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>
-            <button style={btnSecondary(true)} onClick={()=>setShowDF(true)}>+ Documento</button>
+            <select style={{...sel,width:160}} value={m.status} onChange={ev=>upd({status:ev.target.value})}>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>
+            <button style={BSu(true)} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>
+            <button style={BS(true)} onClick={()=>setShowDF(true)}>+ Documento</button>
           </div>
         </div>
       )}
@@ -1912,7 +1822,7 @@ function MantDetail({item,mant,setMant,role,showToast,mob,readOnly,onBack,respLi
       )}
       {tab==="history"&&(
         <div>
-          {!readOnly&&!showHF&&<button style={{...btnSuccess(true),marginBottom:12}} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>}
+          {!readOnly&&!showHF&&<button style={{...BSu(true),marginBottom:12}} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>}
           {showHF&&<HistForm onSave={addHist} onClose={()=>setShowHF(false)} respList={respList}/>}
           {m.history.length===0&&!showHF?<Empty msg="Sin historial"/>:(
             <div>{[...m.history].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(h=>(
@@ -1928,7 +1838,7 @@ function MantDetail({item,mant,setMant,role,showToast,mob,readOnly,onBack,respLi
       )}
       {tab==="docs"&&(
         <div>
-          {!readOnly&&!showDF&&<button style={{...btnSecondary(true),marginBottom:12}} onClick={()=>setShowDF(true)}>+ Agregar documento</button>}
+          {!readOnly&&!showDF&&<button style={{...BS(true),marginBottom:12}} onClick={()=>setShowDF(true)}>+ Agregar documento</button>}
           {showDF&&<DocForm onSave={addDoc} onClose={()=>setShowDF(false)}/>}
           {m.documents.length===0&&!showDF?<Empty msg="Sin documentos"/>:m.documents.map(d=>(
             <div key={d.id} style={{...card,display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
@@ -1942,15 +1852,14 @@ function MantDetail({item,mant,setMant,role,showToast,mob,readOnly,onBack,respLi
         <div style={card}>
           {m.comments.map((c,i)=>(
             <div key={i} style={{borderLeft:"3px solid #e2e8f0",paddingLeft:10,marginBottom:10}}>
-              <strong style={{fontSize:12}}>{c.user}</strong>
-              <span style={{fontSize:10,color:"#94a3b8",marginLeft:8}}>{fmt(c.date)}</span>
+              <strong style={{fontSize:12}}>{c.user}</strong><span style={{fontSize:10,color:"#94a3b8",marginLeft:8}}>{fmt(c.date)}</span>
               <p style={{margin:"4px 0 0",fontSize:13}}>{c.text}</p>
             </div>
           ))}
           {!readOnly&&(
             <div style={{marginTop:10,display:"flex",gap:8}}>
-              <input style={{...inp,flex:1}} placeholder="Comentario..." value={cmt} onChange={e=>setCmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCmt()}/>
-              <button style={btnPrimary(true)} onClick={addCmt}>Enviar</button>
+              <input style={{...inp,flex:1}} placeholder="Comentario..." value={cmt} onChange={ev=>setCmt(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&addCmt()}/>
+              <button style={BP(true)} onClick={addCmt}>Enviar</button>
             </div>
           )}
         </div>
@@ -1963,16 +1872,16 @@ function HistForm({onSave,onClose,respList}){
   const [f,setF]=useState({date:new Date().toISOString().slice(0,10),tipo:MANT_TIPOS[0],responsible:(respList&&respList[0])||"",notes:"",costReal:0,marcarVigente:false});
   return(
     <div style={{...card,border:"2px solid #6366f1",marginBottom:12}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Registrar ejecución</div><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Registrar ejecución</div><button style={BG(true)} onClick={onClose}>✕</button></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={fg}><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.date} onChange={e=>setF(p=>({...p,date:e.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Tipo</label><select style={sel} value={f.tipo} onChange={e=>setF(p=>({...p,tipo:e.target.value}))}>{MANT_TIPOS.map(t=><option key={t}>{t}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={e=>setF(p=>({...p,responsible:e.target.value}))}>{(respList||[]).map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Costo real</label><input type="number" min="0" style={inp} value={f.costReal} onChange={e=>setF(p=>({...p,costReal:Math.max(0,+e.target.value)}))}/></div>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Notas</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.notes} onChange={e=>setF(p=>({...p,notes:e.target.value}))}/></div>
-        <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="mv" checked={f.marcarVigente} onChange={e=>setF(p=>({...p,marcarVigente:e.target.checked}))}/><label htmlFor="mv" style={{fontSize:12,cursor:"pointer"}}>Marcar como Vigente</label></div>
+        <div style={fg}><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.date} onChange={ev=>setF(p=>({...p,date:ev.target.value}))}/></div>
+        <div style={fg}><label style={lbl}>Tipo</label><select style={sel} value={f.tipo} onChange={ev=>setF(p=>({...p,tipo:ev.target.value}))}>{MANT_TIPOS.map(t=><option key={t}>{t}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respList||[]).map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Costo real</label><input type="number" min="0" style={inp} value={f.costReal} onChange={ev=>setF(p=>({...p,costReal:Math.max(0,+ev.target.value)}))}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Notas</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.notes} onChange={ev=>setF(p=>({...p,notes:ev.target.value}))}/></div>
+        <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="mv" checked={f.marcarVigente} onChange={ev=>setF(p=>({...p,marcarVigente:ev.target.checked}))}/><label htmlFor="mv" style={{fontSize:12,cursor:"pointer"}}>Marcar como Vigente</label></div>
       </div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnSuccess(true)} onClick={()=>{if(!f.date)return;onSave(f);}}>Registrar</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BSu(true)} onClick={()=>{if(!f.date)return;onSave(f);}}>Registrar</button></div>
     </div>
   );
 }
@@ -1981,46 +1890,33 @@ function DocForm({onSave,onClose}){
   const [f,setF]=useState({name:"",notes:""});
   return(
     <div style={{...card,border:"2px solid #e2e8f0",marginBottom:12}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Agregar documento</div><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
-      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))}/></div>
-      <div style={fg}><label style={lbl}>Notas</label><input style={inp} value={f.notes} onChange={e=>setF(p=>({...p,notes:e.target.value}))}/></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={()=>{if(!f.name.trim())return;onSave(f);}}>Agregar</button></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Agregar documento</div><button style={BG(true)} onClick={onClose}>✕</button></div>
+      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={f.name} onChange={ev=>setF(p=>({...p,name:ev.target.value}))}/></div>
+      <div style={fg}><label style={lbl}>Notas</label><input style={inp} value={f.notes} onChange={ev=>setF(p=>({...p,notes:ev.target.value}))}/></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={()=>{if(!f.name.trim())return;onSave(f);}}>Agregar</button></div>
     </div>
   );
 }
 
+// ── ConfigView ─────────────────────────────────────────────────────────────
 function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,session,setUsuarios}){
-  const [editCat,setEditCat]=useState(null);const [showCF,setShowCF]=useState(false);
-  const [editTow,setEditTow]=useState(null);const [showTF,setShowTF]=useState(false);
+  const [editCat,setEditCat]=useState(null); const [showCF,setShowCF]=useState(false);
+  const [editTow,setEditTow]=useState(null); const [showTF,setShowTF]=useState(false);
   const [tab,setTab]=useState("cats");
-  const [usuariosLocal,setUsuariosLocal]=useState([]);const [showUF,setShowUF]=useState(false);const [editUser,setEditUser]=useState(null);
+  const [usuariosLocal,setUsuariosLocal]=useState([]); const [showUF,setShowUF]=useState(false); const [editUser,setEditUser]=useState(null);
   useEffect(()=>{if(tab==="usuarios")loadUsuarios();},[tab]);
   const loadUsuarios=async()=>{
-    try{
-      const res=await fetch(SUPA_URL+"/rest/v1/usuarios?order=created_at.asc&select=*",{headers:hdr(session.token)});
-      const data=await res.json();const list=Array.isArray(data)?data:[];
-      setUsuariosLocal(list);setUsuarios(list);
-    }catch(e){console.error(e);}
+    try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?order=created_at.asc&select=*",{headers:hdr(session.token)});const data=await res.json();const list=Array.isArray(data)?data:[];setUsuariosLocal(list);setUsuarios(list);}catch(ex){console.error(ex);}
   };
-  const saveUsuario=async(u)=>{
+  const saveUsuario=async u=>{
     try{
-      if(u.isNew){
-        await fetch(SUPA_URL+"/rest/v1/usuarios",{method:"POST",headers:{...hdr(session.token),"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});
-        showToast("Usuario creado");
-      }else{
-        await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"PATCH",headers:hdr(session.token),body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active??true})});
-        showToast("Actualizado");
-      }
+      if(u.isNew){await fetch(SUPA_URL+"/rest/v1/usuarios",{method:"POST",headers:{...hdr(session.token),"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});showToast("Usuario creado");}
+      else{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"PATCH",headers:hdr(session.token),body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active??true})});showToast("Actualizado");}
       loadUsuarios();setShowUF(false);setEditUser(null);
-    }catch(e){showToast("Error: "+e.message,"error");}
+    }catch(ex){showToast("Error: "+ex.message,"error");}
   };
-  const toggleUser=async(u)=>{
-    try{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"PATCH",headers:hdr(session.token),body:JSON.stringify({active:!u.active})});loadUsuarios();}catch(e){showToast("Error","error");}
-  };
-  const deleteUser=async(u)=>{
-    if(!window.confirm("¿Eliminar "+u.nombre+"?"))return;
-    try{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"DELETE",headers:hdr(session.token)});loadUsuarios();showToast("Eliminado");}catch(e){showToast("Error","error");}
-  };
+  const toggleUser=async u=>{try{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"PATCH",headers:hdr(session.token),body:JSON.stringify({active:!u.active})});loadUsuarios();}catch(_){showToast("Error","error");}};
+  const deleteUser=async u=>{if(!window.confirm("¿Eliminar "+u.nombre+"?"))return;try{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"DELETE",headers:hdr(session.token)});loadUsuarios();showToast("Eliminado");}catch(_){showToast("Error","error");}};
   const toggleCat=id=>setCats(p=>p.map(c=>c.id===id?{...c,active:!c.active}:c));
   const saveCat=cat=>{if(editCat){setCats(p=>p.map(c=>c.id===cat.id?cat:c));}else{setCats(p=>[...p,{...cat,id:"cat"+uid(),order:p.length}]);}showToast("Guardada");setShowCF(false);setEditCat(null);};
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});
@@ -2033,19 +1929,12 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
       <Tabs tabs={cfgTabs} active={tab} onChange={setTab}/>
       {tab==="cats"&&(
         <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{cats.filter(c=>c.active).length} activas</div><button style={btnPrimary(true)} onClick={()=>{setEditCat(null);setShowCF(true);}}>+ Nueva</button></div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{cats.filter(c=>c.active).length} activas</div><button style={BP(true)} onClick={()=>{setEditCat(null);setShowCF(true);}}>+ Nueva</button></div>
           <div style={card}>{cats.map((cat,idx)=>(
             <div key={cat.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:cat.active?1:.5,flexWrap:"wrap"}}>
-              <div style={{display:"flex",flexDirection:"column"}}>
-                <button style={{...btnGhost(true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,-1)}>▲</button>
-                <button style={{...btnGhost(true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,1)}>▼</button>
-              </div>
+              <div style={{display:"flex",flexDirection:"column"}}><button style={{...BG(true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,-1)}>▲</button><button style={{...BG(true),padding:"1px 4px",fontSize:10}} onClick={()=>mvCat(idx,1)}>▼</button></div>
               <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{cat.name}</div><div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat.subs.join(", ")}</div></div>
-              <div style={{display:"flex",gap:4}}>
-                <button style={btnSecondary(true)} onClick={()=>{setEditCat(cat);setShowCF(true);}}>Editar</button>
-                <button style={cat.active?btnWarning(true):btnSuccess(true)} onClick={()=>toggleCat(cat.id)}>{cat.active?"Desact.":"Activar"}</button>
-                <button style={btnDanger(true)} onClick={()=>setCats(p=>p.filter(c=>c.id!==cat.id))}>X</button>
-              </div>
+              <div style={{display:"flex",gap:4}}><button style={BS(true)} onClick={()=>{setEditCat(cat);setShowCF(true);}}>Editar</button><button style={cat.active?BW(true):BSu(true)} onClick={()=>toggleCat(cat.id)}>{cat.active?"Desact.":"Activar"}</button><button style={BD(true)} onClick={()=>setCats(p=>p.filter(c=>c.id!==cat.id))}>X</button></div>
             </div>
           ))}</div>
           {showCF&&<CatForm cat={editCat} onSave={saveCat} onClose={()=>{setShowCF(false);setEditCat(null);}}/>}
@@ -2053,16 +1942,12 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
       )}
       {tab==="towers"&&(
         <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{towers.filter(t=>t.active).length} activas</div><button style={btnPrimary(true)} onClick={()=>{setEditTow(null);setShowTF(true);}}>+ Nueva torre</button></div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{towers.filter(t=>t.active).length} activas</div><button style={BP(true)} onClick={()=>{setEditTow(null);setShowTF(true);}}>+ Nueva torre</button></div>
           <div style={card}>{towers.map(t=>(
             <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:t.active?1:.5,flexWrap:"wrap"}}>
               <div style={{width:34,height:34,borderRadius:8,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"#3b82f6"}}>{t.name}</div>
               <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{t.label}</div></div>
-              <div style={{display:"flex",gap:4}}>
-                <button style={btnSecondary(true)} onClick={()=>{setEditTow(t);setShowTF(true);}}>Editar</button>
-                <button style={t.active?btnWarning(true):btnSuccess(true)} onClick={()=>toggleTow(t.id)}>{t.active?"Desact.":"Activar"}</button>
-                <button style={btnDanger(true)} onClick={()=>setTowers(p=>p.filter(x=>x.id!==t.id))}>X</button>
-              </div>
+              <div style={{display:"flex",gap:4}}><button style={BS(true)} onClick={()=>{setEditTow(t);setShowTF(true);}}>Editar</button><button style={t.active?BW(true):BSu(true)} onClick={()=>toggleTow(t.id)}>{t.active?"Desact.":"Activar"}</button><button style={BD(true)} onClick={()=>setTowers(p=>p.filter(x=>x.id!==t.id))}>X</button></div>
             </div>
           ))}</div>
           {showTF&&<TowerForm tower={editTow} onSave={saveTow} onClose={()=>{setShowTF(false);setEditTow(null);}}/>}
@@ -2071,32 +1956,19 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
       {tab==="equipos"&&(
         <div>
           <div style={{...alrt("info"),marginBottom:12}}>Activa los equipos que existen en tu edificio.</div>
-          <div style={card}>{EQUIP_TIPOS.map(et=>{
-            const eq=(equipos||[]).find(e=>e.id===et.id)||{...et,active:false};
-            return(
-              <div key={et.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:eq.active?1:.5}}>
-                <div style={{fontSize:24}}>{et.icono}</div>
-                <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{et.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{et.frecuencia}</div></div>
-                <button style={eq.active?btnWarning(true):btnSuccess(true)} onClick={()=>setEquipos(p=>p.map(e=>e.id===et.id?{...e,active:!e.active}:e))}>{eq.active?"Desactivar":"Activar"}</button>
-              </div>
-            );
-          })}</div>
-          <div style={{fontSize:12,color:"#64748b",marginTop:8}}>{(equipos||[]).filter(e=>e.active).length} equipos activos</div>
+          <div style={card}>{EQUIP_TIPOS.map(et=>{const eq=(equipos||[]).find(x=>x.id===et.id)||{...et,active:false};return(<div key={et.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:eq.active?1:.5}}><div style={{fontSize:24}}>{et.icono}</div><div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{et.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{et.frecuencia}</div></div><button style={eq.active?BW(true):BSu(true)} onClick={()=>setEquipos(p=>p.map(x=>x.id===et.id?{...x,active:!x.active}:x))}>{eq.active?"Desactivar":"Activar"}</button></div>);})}</div>
+          <div style={{fontSize:12,color:"#64748b",marginTop:8}}>{(equipos||[]).filter(x=>x.active).length} equipos activos</div>
         </div>
       )}
       {tab==="usuarios"&&(
         <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuariosLocal.filter(u=>u.active).length} activos</div><button style={btnPrimary(true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuariosLocal.filter(u=>u.active).length} activos</div><button style={BP(true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
           {showUF&&<UserForm user={editUser} onSave={saveUsuario} onClose={()=>{setShowUF(false);setEditUser(null);}}/>}
           <div>{usuariosLocal.map(u=>(
             <div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
                 <div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{u.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                  <button style={btnSecondary(true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button>
-                  <button style={u.active?btnWarning(true):btnSuccess(true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button>
-                  <button style={btnDanger(true)} onClick={()=>deleteUser(u)}>Eliminar</button>
-                </div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button style={BS(true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={u.active?BW(true):BSu(true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button><button style={BD(true)} onClick={()=>deleteUser(u)}>Eliminar</button></div>
               </div>
             </div>
           ))}</div>
@@ -2118,13 +1990,13 @@ function UserForm({user,onSave,onClose}){
   const [f,setF]=useState(user?{...user,isNew:false}:{nombre:"",email:"",rol:"Residente",active:true,isNew:true});
   const [rol,setRol]=useState(user?.rol||"Residente");
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
-      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={f.nombre} onChange={e=>setF(p=>({...p,nombre:e.target.value}))}/></div>
-      <div style={fg}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>setF(p=>({...p,email:e.target.value}))} disabled={!!user}/></div>
-      <div style={fg}><label style={lbl}>Rol</label><select style={sel} value={rol} onChange={e=>{setRol(e.target.value);setF(p=>({...p,rol:e.target.value}));}}>{ROLES.map(r=><option key={r} value={r}>{r}</option>)}</select></div>
+    <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
+      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={f.nombre} onChange={ev=>setF(p=>({...p,nombre:ev.target.value}))}/></div>
+      <div style={fg}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={ev=>setF(p=>({...p,email:ev.target.value}))} disabled={!!user}/></div>
+      <div style={fg}><label style={lbl}>Rol</label><select style={sel} value={rol} onChange={ev=>{setRol(ev.target.value);setF(p=>({...p,rol:ev.target.value}));}}>{ROLES.map(r=><option key={r} value={r}>{r}</option>)}</select></div>
       {!user&&<div style={{...alrt("info"),marginTop:8,fontSize:12}}>Recuerde crear el usuario en Supabase Authentication.</div>}
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave({...f,rol});}}>Guardar</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave({...f,rol});}}>Guardar</button></div>
     </div></div>
   );
 }
@@ -2134,11 +2006,11 @@ function CatForm({cat,onSave,onClose}){
   const [subs,setSubs]=useState(cat?cat.subs.join("\n"):"");
   const save=()=>{if(!name.trim())return;const s=subs.split("\n").map(x=>x.trim()).filter(Boolean);if(!s.length)return;onSave({...(cat||{}),name:name.trim(),subs:s,active:cat?cat.active:true});};
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{cat?"Editar":"Nueva"} categoría</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
-      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={name} onChange={e=>setName(e.target.value)}/></div>
-      <div style={fg}><label style={lbl}>Subcategorías (una por línea)</label><textarea style={{...inp,height:120,resize:"vertical"}} value={subs} onChange={e=>setSubs(e.target.value)}/></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={save}>Guardar</button></div>
+    <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{cat?"Editar":"Nueva"} categoría</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
+      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={name} onChange={ev=>setName(ev.target.value)}/></div>
+      <div style={fg}><label style={lbl}>Subcategorías (una por línea)</label><textarea style={{...inp,height:120,resize:"vertical"}} value={subs} onChange={ev=>setSubs(ev.target.value)}/></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={save}>Guardar</button></div>
     </div></div>
   );
 }
@@ -2147,11 +2019,11 @@ function TowerForm({tower,onSave,onClose}){
   const [name,setName]=useState(tower?tower.name:"");
   const [label,setLabel]=useState(tower?tower.label:"");
   return(
-    <div style={modalSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{tower?"Editar":"Nueva"} torre</h3><button style={btnGhost(true)} onClick={onClose}>✕</button></div>
-      <div style={fg}><label style={lbl}>Código *</label><input style={inp} value={name} onChange={e=>setName(e.target.value)} placeholder="ej: A"/></div>
-      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={label} onChange={e=>setLabel(e.target.value)} placeholder="ej: Torre A"/></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={btnSecondary(true)} onClick={onClose}>Cancelar</button><button style={btnPrimary(true)} onClick={()=>{if(!name.trim()||!label.trim())return;onSave({...(tower||{}),name:name.trim(),label:label.trim(),active:tower?tower.active:true});}}>Guardar</button></div>
+    <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"20px",marginTop:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{tower?"Editar":"Nueva"} torre</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
+      <div style={fg}><label style={lbl}>Código *</label><input style={inp} value={name} onChange={ev=>setName(ev.target.value)} placeholder="ej: A"/></div>
+      <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={label} onChange={ev=>setLabel(ev.target.value)} placeholder="ej: Torre A"/></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={()=>{if(!name.trim()||!label.trim())return;onSave({...(tower||{}),name:name.trim(),label:label.trim(),active:tower?tower.active:true});}}>Guardar</button></div>
     </div></div>
   );
 }

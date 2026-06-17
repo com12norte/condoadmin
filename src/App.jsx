@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const SUPA_URL = "https://ijefrrtdtjshfquuytic.supabase.co";
 const SUPA_KEY = "sb_publishable_sZTDO3ROm8IEnzbWuEUK-w_DeOz65XG";
@@ -403,7 +403,15 @@ export default function App(){
             {!mob&&<div onClick={()=>go(er==="Proveedor"?"provider":"dashboard")} style={{padding:"18px 14px 14px",borderBottom:"1px solid #1e293b",cursor:"pointer"}}><div style={{color:"#fff",fontWeight:700,fontSize:15}}>CondoAdmin</div><div style={{color:"#64748b",fontSize:11,marginTop:2}}>Sistema de Gestion</div></div>}
             <nav style={{padding:"6px 0",flex:1}}>
               {navItems.map(n=>(
-                <div key={n.id} onClick={()=>go(n.id)} style={{padding:"10px 14px",cursor:"pointer",userSelect:"none",fontSize:13,color:isAct(n.id)?"#fff":"#94a3b8",background:isAct(n.id)?"#1e3a5f":"transparent",borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",fontWeight:isAct(n.id)?600:400}}>
+                <div
+                  key={n.id}
+                  onPointerDown={e=>{e.stopPropagation();go(n.id);}}
+                  style={{padding:"10px 14px",cursor:"pointer",userSelect:"none",fontSize:13,
+                    color:isAct(n.id)?"#fff":"#94a3b8",
+                    background:isAct(n.id)?"#1e3a5f":"transparent",
+                    borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",
+                    fontWeight:isAct(n.id)?600:400}}
+                >
                   {n.label}
                 </div>
               ))}

@@ -431,7 +431,13 @@ export default function App(){
 
   const reqsDB=mkDBDel(setReqs,"solicitudes");
   const tasksDB=mkDBDel(setTasks,"tareas");
-  const setReqsDB=reqsDB.set; const deleteReq=reqsDB.del;
+  const setReqsDB=reqsDB.set;
+  const deleteReq=async(id)=>{
+    // Eliminar solicitud y sus órdenes relacionadas
+    reqsDB.del(id);
+    const related=tasks.filter(t=>t.requestId===id);
+    for(const t of related){ await tasksDB.del(t.id); }
+  };
   const setTasksDB=tasksDB.set; const deleteTask=tasksDB.del;
   const setInvDB=mkDB(setInv,"inventario");
   const setMantDB=mkDB(setMant,"mantenciones");
@@ -496,10 +502,10 @@ export default function App(){
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
-            {view==="dashboard"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
+            {view==="dashboard"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios}/>}
-            {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} showToast={showToast} mob={mob} respAssign={respAssign}/>}
+            {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
             {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
             {view==="inspections"&&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} showToast={showToast} role={er} mob={mob} towers={towers}/>}
             {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
@@ -517,12 +523,72 @@ export default function App(){
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
-function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
+function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq}){
   const emerg=reqs.filter(r=>r.priority==="Emergencia"&&!["Cerrada","Rechazada"].includes(r.status));
   const recent=[...reqs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,5);
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,6);
   const mv=mant.filter(m=>getMantStatus(m)==="Vencida").length;
   const mp=mant.filter(m=>getMantStatus(m)==="Por vencer").length;
+  const isAnalyst=role==="Administrador"||role==="Administrador Edificio"||role==="Comite";
+
+  // ── Cálculos para análisis ──
+  const cerradas=reqs.filter(r=>r.status==="Cerrada");
+  const avgResolucion=cerradas.length?Math.round(cerradas.reduce((s,r)=>{
+    const hist=r.history||[];
+    const cierre=hist.find(h=>h.to==="Cerrada");
+    if(!cierre||!r.createdAt) return s;
+    return s+(new Date(cierre.date)-new Date(r.createdAt))/86400000;
+  },0)/cerradas.length):null;
+
+  const avgAsignacion=reqs.filter(r=>r.assignedTo!=="Sin asignar").length?Math.round(reqs.filter(r=>{
+    const h=r.history||[];
+    return h.some(x=>x.to==="Asignada");
+  }).reduce((s,r)=>{
+    const h=(r.history||[]).find(x=>x.to==="Asignada");
+    if(!h||!r.createdAt) return s;
+    return s+(new Date(h.date)-new Date(r.createdAt))/3600000;
+  },0)/Math.max(reqs.filter(r=>{const h=r.history||[];return h.some(x=>x.to==="Asignada");}).length,1)):null;
+
+  const hoy=new Date(); hoy.setHours(0,0,0,0);
+  const tareasVencidas=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<0);
+  const tareasPorVencer=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)>=0&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<=3);
+
+  // Por responsable
+  const respStats={};
+  tasks.forEach(t=>{
+    const r=t.responsible||"Sin asignar";
+    if(!respStats[r]) respStats[r]={total:0,completadas:0,dias:[]};
+    respStats[r].total++;
+    if(t.status==="Completada"){
+      respStats[r].completadas++;
+      if(t.dueDate&&t.createdAt){const d=(new Date(t.dueDate)-new Date(t.createdAt))/86400000;if(d>=0)respStats[r].dias.push(d);}
+    }
+  });
+  const respArr=Object.entries(respStats).sort((a,b)=>b[1].total-a[1].total).slice(0,5);
+
+  // Tendencia mensual (últimos 6 meses)
+  const meses=[];
+  for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);meses.push({key:d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"),label:d.toLocaleString("es-CL",{month:"short",year:"2-digit"})});}
+  const tendencia=meses.map(m=>({
+    label:m.label,
+    creadas:reqs.filter(r=>r.createdAt&&r.createdAt.startsWith(m.key)).length,
+    cerradas:reqs.filter(r=>{const h=(r.history||[]).find(x=>x.to==="Cerrada");return h&&h.date&&h.date.startsWith(m.key);}).length,
+  }));
+  const maxTend=Math.max(...tendencia.map(m=>Math.max(m.creadas,m.cerradas)),1);
+
+  // Por categoría con tiempo promedio
+  const catStats=Object.keys(DEF_CATS).map(c=>{
+    const rCat=reqs.filter(r=>r.category===c);
+    const rCerradas=rCat.filter(r=>r.status==="Cerrada");
+    const avgDias=rCerradas.length?Math.round(rCerradas.reduce((s,r)=>{
+      const h=(r.history||[]).find(x=>x.to==="Cerrada");
+      if(!h||!r.createdAt) return s;
+      return s+(new Date(h.date)-new Date(r.createdAt))/86400000;
+    },0)/rCerradas.length):null;
+    return {c,total:rCat.length,cerradas:rCerradas.length,avgDias};
+  }).filter(x=>x.total>0).sort((a,b)=>b.total-a.total).slice(0,8);
+  const maxCatTotal=Math.max(...catStats.map(x=>x.total),1);
+
   return(
     <div>
       {emerg.map(em=>(
@@ -532,51 +598,209 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob}){
         </div>
       ))}
       {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
+
+      {/* KPIs Solicitudes */}
+      <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>📋 Solicitudes</div>
       <Grid cols={5} mob={mob}>
         <Kpi value={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Abiertas" color="#3b82f6" mob={mob}/>
         <Kpi value={reqs.filter(r=>r.priority==="Emergencia").length} label="Emergencias" color="#ef4444" mob={mob}/>
         <Kpi value={reqs.filter(r=>r.status==="En proceso").length} label="En proceso" color="#8b5cf6" mob={mob}/>
-        <Kpi value={reqs.filter(r=>r.status==="Cerrada").length} label="Cerradas" color="#10b981" mob={mob}/>
-        <Kpi value={mv+mp} label="Mant. urgentes" color="#f97316" mob={mob}/>
+        <Kpi value={cerradas.length} label="Cerradas" color="#10b981" mob={mob}/>
+        <Kpi value={avgResolucion!==null?avgResolucion+" días":"---"} label="Promedio resolución" color="#f97316" mob={mob}/>
       </Grid>
-      <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"2fr 1fr",gap:14}}>
-        <div style={card}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontWeight:600,fontSize:13}}>Solicitudes recientes</div>
-            {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
+
+      {/* KPIs Órdenes */}
+      <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8,marginTop:4}}>⚙️ Órdenes de Trabajo</div>
+      <Grid cols={5} mob={mob}>
+        <Kpi value={tasks.length} label="Total órdenes" color="#6366f1" mob={mob}/>
+        <Kpi value={tasks.filter(t=>t.status==="Completada").length} label="Completadas" color="#10b981" mob={mob}/>
+        <Kpi value={tasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada").length} label="Pendientes" color="#f59e0b" mob={mob}/>
+        <Kpi value={tareasVencidas.length} label="Vencidas sin informe" color="#ef4444" mob={mob}/>
+        <Kpi value={avgAsignacion!==null?Math.round(avgAsignacion)+" hrs":"---"} label="1ª asignación (prom.)" color="#3b82f6" mob={mob}/>
+      </Grid>
+
+      {/* Alertas órdenes vencidas */}
+      {tareasVencidas.length>0&&(
+        <div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",marginBottom:12}}>
+          <div style={{fontWeight:700,color:"#dc2626",fontSize:13,marginBottom:8}}>⚠ Órdenes vencidas sin informe ({tareasVencidas.length})</div>
+          {tareasVencidas.slice(0,5).map(t=>{
+            const req=reqs.find(r=>r.id===t.requestId);
+            const dias=Math.abs(Math.ceil((new Date(t.dueDate)-hoy)/86400000));
+            return(
+              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fca5a5",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600,color:"#991b1b"}}>{t.title}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{req?.code||"—"} · 👤 {t.responsible}</div>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={bdg("#ef4444","#fef2f2")}>{dias} día(s) vencida</span>
+                  {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden?"))deleteTask(t.id);}}>🗑</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Próximas a vencer */}
+      {tareasPorVencer.length>0&&(
+        <div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",marginBottom:12}}>
+          <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⏰ Órdenes por vencer (3 días) ({tareasPorVencer.length})</div>
+          {tareasPorVencer.map(t=>{
+            const req=reqs.find(r=>r.id===t.requestId);
+            const dias=Math.ceil((new Date(t.dueDate)-hoy)/86400000);
+            return(
+              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fde68a",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600}}>{t.title}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{req?.code||"—"} · 👤 {t.responsible}</div>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={bdg("#92400e","#fffbeb")}>{dias===0?"Hoy":dias+" día(s)"}</span>
+                  {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden?"))deleteTask(t.id);}}>🗑</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {isAnalyst&&(
+        <>
+          {/* Tendencia mensual */}
+          <div style={card}>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📈 Tendencia mensual (últimos 6 meses)</div>
+            <div style={{display:"flex",gap:4,alignItems:"flex-end",height:100}}>
+              {tendencia.map(m=>(
+                <div key={m.label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:80}}>
+                    <div title={"Creadas: "+m.creadas} style={{flex:1,background:"#3b82f6",borderRadius:"3px 3px 0 0",height:Math.round((m.creadas/maxTend)*76)+4}}/>
+                    <div title={"Cerradas: "+m.cerradas} style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",height:Math.round((m.cerradas/maxTend)*76)+4}}/>
+                  </div>
+                  <div style={{fontSize:9,color:"#94a3b8",textAlign:"center"}}>{m.label}</div>
+                  <div style={{fontSize:9,color:"#64748b"}}>{m.creadas}/{m.cerradas}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:12,marginTop:8,justifyContent:"center"}}>
+              <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#3b82f6",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Creadas</span></div>
+              <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#10b981",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Cerradas</span></div>
+            </div>
           </div>
-          {recent.length===0?<Empty msg="Sin solicitudes"/>:mob?(
-            <div>{recent.map(r=>(
+
+          <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
+            {/* Por categoría con tiempo */}
+            <div style={card}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>📂 Solicitudes por categoría</div>
+              {catStats.length===0?<Empty msg="Sin datos"/>:catStats.map(x=>(
+                <div key={x.c} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130,fontWeight:500}}>{x.c}</span>
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <span style={{fontWeight:700}}>{x.total}</span>
+                      {x.avgDias!==null&&<span style={bdg("#64748b","#f1f5f9")}>{x.avgDias}d prom.</span>}
+                    </div>
+                  </div>
+                  <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                    <div style={{height:6,background:"#6366f1",borderRadius:99,width:(x.total/maxCatTotal*100)+"%"}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Por responsable */}
+            <div style={card}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>👤 Carga por responsable</div>
+              {respArr.length===0?<Empty msg="Sin datos"/>:respArr.map(([resp,st])=>{
+                const pct=st.total>0?Math.round(st.completadas/st.total*100):0;
+                const avgDias=st.dias.length?Math.round(st.dias.reduce((s,d)=>s+d,0)/st.dias.length):null;
+                return(
+                  <div key={resp} style={{marginBottom:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                      <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{resp}</span>
+                      <div style={{display:"flex",gap:4,flexShrink:0}}>
+                        <span style={bdg("#10b981","#f0fdf4")}>{st.completadas}/{st.total}</span>
+                        {avgDias!==null&&<span style={bdg("#64748b","#f1f5f9")}>{avgDias}d prom.</span>}
+                      </div>
+                    </div>
+                    <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                      <div style={{height:6,background:pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444",borderRadius:99,width:pct+"%"}}/>
+                    </div>
+                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{pct}% completadas</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Por prioridad */}
+            <div style={card}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>🚨 Solicitudes por prioridad</div>
+              {PRIORITIES.map(p=>{
+                const n=reqs.filter(r=>r.priority===p).length;
+                const pct=reqs.length?Math.round(n/reqs.length*100):0;
+                return(
+                  <div key={p} style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <PBadge p={p}/>
+                    <div style={{flex:1}}>
+                      <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                        <div style={{height:6,background:PC[p],borderRadius:99,width:pct+"%"}}/>
+                      </div>
+                    </div>
+                    <span style={{fontWeight:700,fontSize:12,minWidth:20,textAlign:"right"}}>{n}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Solicitudes recientes */}
+            <div style={card}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontWeight:700,fontSize:13}}>🕐 Solicitudes recientes</div>
+                {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
+              </div>
+              {recent.length===0?<Empty msg="Sin solicitudes"/>:recent.map(r=>(
+                <div key={r.id} style={{padding:"7px 0",borderBottom:"1px solid #f1f5f9",cursor:"pointer",display:"flex",justifyContent:"space-between",gap:8}} onClick={()=>onOpen(r)}>
+                  <div style={{minWidth:0}}>
+                    <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span>
+                    <div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.category}</div>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end",flexShrink:0}}>
+                    <PBadge p={r.priority}/>
+                    <SBadge s={r.status}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Dashboard básico para otros roles */}
+      {!isAnalyst&&(
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"2fr 1fr",gap:14}}>
+          <div style={card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontWeight:600,fontSize:13}}>Solicitudes recientes</div>
+              {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
+            </div>
+            {recent.length===0?<Empty msg="Sin solicitudes"/>:recent.map(r=>(
               <div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid #f1f5f9",cursor:"pointer",display:"flex",justifyContent:"space-between"}} onClick={()=>onOpen(r)}>
                 <div><span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span><div style={{fontSize:11,color:"#64748b"}}>{r.category}</div></div>
                 <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end"}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
               </div>
-            ))}</div>
-          ):(
-            <table style={tbl}>
-              <thead><tr>{["ID","Categoria","Prioridad","Estado","Fecha"].map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
-              <tbody>{recent.map(r=>(
-                <tr key={r.id} style={{cursor:"pointer"}} onClick={()=>onOpen(r)}>
-                  <td style={tdS}><span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span></td>
-                  <td style={tdS}>{r.category}</td>
-                  <td style={tdS}><PBadge p={r.priority}/></td>
-                  <td style={tdS}><SBadge s={r.status}/></td>
-                  <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
-                </tr>
-              ))}</tbody>
-            </table>
-          )}
+            ))}
+          </div>
+          <div style={card}>
+            <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoria</div>
+            {byCat.length===0?<Empty msg="Sin datos"/>:byCat.map(x=>(
+              <div key={x.c} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div>
+                <div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#3b82f6",borderRadius:99,width:(x.n/Math.max(reqs.length,1)*100)+"%"}}/></div>
+              </div>
+            ))}
+          </div>
         </div>
-        <div style={card}>
-          <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoria</div>
-          {byCat.length===0?<Empty msg="Sin datos"/>:byCat.map(x=>(
-            <div key={x.c} style={{marginBottom:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div>
-              <div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#3b82f6",borderRadius:99,width:(x.n/Math.max(reqs.length,1)*100)+"%"}}/></div>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1240,7 +1464,14 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
 // ── TasksView ──────────────────────────────────────────────────────────────
 function TasksView({tasks,reqs,role,setTasks,showToast,mob,respAssign}){
   const [fi,setFi]=useState({status:"",responsible:"",q:""});
-  const visible=tasks.filter(t=>(!fi.status||t.status===fi.status)&&(!fi.responsible||t.responsible===fi.responsible)&&(!fi.q||(t.title+" "+(t.responsible||"")).toLowerCase().includes(fi.q.toLowerCase())));
+  // Solo mostrar órdenes cuya solicitud aún existe
+  const validReqIds=new Set(reqs.map(r=>r.id));
+  const visible=tasks.filter(t=>
+    validReqIds.has(t.requestId)&&
+    (!fi.status||t.status===fi.status)&&
+    (!fi.responsible||t.responsible===fi.responsible)&&
+    (!fi.q||(t.title+" "+(t.responsible||"")).toLowerCase().includes(fi.q.toLowerCase()))
+  );
   return(
     <div>
       <div style={{...card,padding:12,marginBottom:12}}>

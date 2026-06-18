@@ -1043,7 +1043,29 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
         </div>
       )}
       {tab==="informe"&&(
-        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=><InformeInline key={t.id} task={t} setTasks={setTasks} showToast={showToast}/>)
+        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=>{
+          const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+          return(
+            <div key={t.id}>
+              {["avance","cierre"].map(type=>{
+                const myAtt=allAtts.filter(a=>a.type===type);
+                return(
+                  <div key={type} style={card}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                      {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                    </div>
+                    {myAtt.length===0
+                      ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
+                      :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
+                    }
+                  </div>
+                );
+              })}
+              <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+            </div>
+          );
+        })
       )}
       {!isProv&&tab==="emails"&&(
         <div style={card}>
@@ -1462,9 +1484,8 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
 }
 
 // ── TasksView ──────────────────────────────────────────────────────────────
-function TasksView({tasks,reqs,role,setTasks,showToast,mob,respAssign}){
+function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign}){
   const [fi,setFi]=useState({status:"",responsible:"",q:""});
-  // Solo mostrar órdenes cuya solicitud aún existe
   const validReqIds=new Set(reqs.map(r=>r.id));
   const visible=tasks.filter(t=>
     validReqIds.has(t.requestId)&&
@@ -1490,8 +1511,14 @@ function TasksView({tasks,reqs,role,setTasks,showToast,mob,respAssign}){
                 <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
                 {req&&<div style={{fontSize:10,color:"#3b82f6"}}>{req.code}</div>}
                 <div style={{fontSize:11,color:"#64748b"}}>👤 {t.responsible}{t.ejecutor&&" · 🔧 "+t.ejecutor}</div>
+                {t.dueDate&&<div style={{fontSize:11,color:"#94a3b8"}}>📅 {fmtD(t.dueDate)}</div>}
               </div>
-              <div style={{display:"flex",gap:6}}><PBadge p={t.priority}/><SBadge s={t.status}/></div>
+              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}>
+                <div style={{display:"flex",gap:4}}><PBadge p={t.priority}/><SBadge s={t.status}/></div>
+                {can(role,"manageConfig")&&deleteTask&&(
+                  <button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden \""+t.title+"\"?"))deleteTask(t.id);}}>🗑 Eliminar</button>
+                )}
+              </div>
             </div>
           </div>
         );

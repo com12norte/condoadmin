@@ -429,16 +429,29 @@ export default function App(){
     return {set,del};
   };
 
+  const mkDBDel=(setter,table)=>{
+    const set=mkDB(setter,table);
+    const del=async id=>{
+      setter(prev=>prev.filter(x=>x.id!==id));
+      try{await dbDelete(table,"id=eq."+id);}catch(_){}
+    };
+    const delMany=async ids=>{
+      setter(prev=>prev.filter(x=>!ids.includes(x.id)));
+      for(const id of ids){try{await dbDelete(table,"id=eq."+id);}catch(_){}}
+    };
+    return {set,del,delMany};
+  };
+
   const reqsDB=mkDBDel(setReqs,"solicitudes");
   const tasksDB=mkDBDel(setTasks,"tareas");
   const setReqsDB=reqsDB.set;
   const deleteReq=async(id)=>{
-    // Eliminar solicitud y sus órdenes relacionadas
-    reqsDB.del(id);
-    const related=tasks.filter(t=>t.requestId===id);
-    for(const t of related){ await tasksDB.del(t.id); }
+    const related=tasks.filter(t=>t.requestId===id).map(t=>t.id);
+    await reqsDB.del(id);
+    if(related.length) await tasksDB.delMany(related);
   };
-  const setTasksDB=tasksDB.set; const deleteTask=tasksDB.del;
+  const setTasksDB=tasksDB.set;
+  const deleteTask=tasksDB.del;
   const setInvDB=mkDB(setInv,"inventario");
   const setMantDB=mkDB(setMant,"mantenciones");
   const setInspDB=mkDB(setInsp,"inspecciones");

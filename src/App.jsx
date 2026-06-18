@@ -429,26 +429,15 @@ export default function App(){
     return {set,del};
   };
 
-  const mkDBDel=(setter,table)=>{
-    const set=mkDB(setter,table);
-    const del=async id=>{
-      setter(prev=>prev.filter(x=>x.id!==id));
-      try{await dbDelete(table,"id=eq."+id);}catch(_){}
-    };
-    const delMany=async ids=>{
-      setter(prev=>prev.filter(x=>!ids.includes(x.id)));
-      for(const id of ids){try{await dbDelete(table,"id=eq."+id);}catch(_){}}
-    };
-    return {set,del,delMany};
-  };
-
   const reqsDB=mkDBDel(setReqs,"solicitudes");
   const tasksDB=mkDBDel(setTasks,"tareas");
   const setReqsDB=reqsDB.set;
   const deleteReq=async(id)=>{
     const related=tasks.filter(t=>t.requestId===id).map(t=>t.id);
-    await reqsDB.del(id);
-    if(related.length) await tasksDB.delMany(related);
+    setReqs(prev=>prev.filter(x=>x.id!==id));
+    try{await dbDelete("solicitudes","id=eq."+id);}catch(_){}
+    setTasks(prev=>prev.filter(x=>!related.includes(x.id)));
+    for(const tid of related){try{await dbDelete("tareas","id=eq."+tid);}catch(_){}}
   };
   const setTasksDB=tasksDB.set;
   const deleteTask=tasksDB.del;
@@ -489,7 +478,20 @@ export default function App(){
     return true;
   });
 
-  useEffect(()=>{if(er==="Proveedor"&&view==="dashboard")setView("provider");},[er]);
+  // Interceptar botón atrás del navegador
+  useEffect(()=>{
+    if(!session) return;
+    const onPop=ev=>{
+      ev.preventDefault();
+      if(view==="detail"){ setView("requests"); setSelReq(null); }
+      else if(view!=="dashboard"){ setView("dashboard"); }
+      // Siempre empujar estado para evitar salir
+      window.history.pushState(null,"",window.location.href);
+    };
+    window.history.pushState(null,"",window.location.href);
+    window.addEventListener("popstate",onPop);
+    return()=>window.removeEventListener("popstate",onPop);
+  },[session,view]);
 
   if(loading) return <Loader/>;
   if(!session) return <LoginScreen onLogin={handleLogin}/>;

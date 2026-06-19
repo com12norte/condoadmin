@@ -24,15 +24,36 @@ const uploadImg = async (file,path) => {
   if(!res.ok) throw new Error("Storage error");
   return SUPA_URL+"/storage/v1/object/public/imagenes/"+path;
 };
-const sendMail = async (to,subject,body) => {
+const sendMail = async (to, subject, body) => {
   if(!to||!to.includes("@")) return;
   try {
-    await fetch("https://api.emailjs.com/api/v1.0/email/send",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({service_id:EMAILJS_SID,template_id:EMAILJS_TID,user_id:EMAILJS_KEY,
-        template_params:{to_email:to,subject,message:body,name:"CondoAdmin",email:"no-reply@condoadmin.cl"}})
+    const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "origin":"http://localhost"
+      },
+      body:JSON.stringify({
+        service_id: EMAILJS_SID,
+        template_id: EMAILJS_TID,
+        user_id: EMAILJS_KEY,
+        accessToken: EMAILJS_KEY,
+        template_params: {
+          to_email: to,
+          subject: subject,
+          message: body,
+          name: "CondoAdmin",
+          email: "no-reply@condoadmin.cl"
+        }
+      })
     });
-  } catch(_){}
+    if(!res.ok){
+      const txt=await res.text();
+      console.warn("EmailJS",res.status,txt);
+    }
+  } catch(ex) {
+    console.warn("sendMail error", ex);
+  }
 };
 
 const ROLES = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
@@ -453,7 +474,8 @@ export default function App(){
     const item={id:"e"+uid(),...log};
     setEmails(p=>[item,...p]);
     try{await dbPost("correos",{id:item.id,request_id:item.requestId||"",data:item});}catch(_){}
-    await sendMail(log.to,log.subject,log.body);
+    // Enviar mail en background sin bloquear
+    sendMail(log.to, log.subject, log.body).catch(ex=>console.warn("addEmail sendMail",ex));
   };
 
   const openReq=r=>{setSelReq(r);setView("detail");setNavOpen(false);};
@@ -463,7 +485,7 @@ export default function App(){
 
   const navItems=[
     {id:"dashboard",label:"Dashboard"},{id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
-    {id:"provider",label:"Mis Trabajos"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
+    {id:"misolicitudes",label:"Mis Solicitudes"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
     {id:"mantencion",label:"Mantención"},{id:"emails",label:"Correos"},{id:"reports",label:"Reportes"},{id:"config",label:"Config"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
@@ -997,7 +1019,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       <Tabs tabs={tabs} active={tab} onChange={setTab}/>
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
-          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Telefono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/></div>
+          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Telefono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/>{r.affectedTowers&&<IR l="Torres afectadas" v={r.affectedTowers}/>}</div>
           <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Creacion" v={fmt(r.createdAt)}/></div>
           <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripcion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{r.description||"Sin descripcion."}</p></div>
           <div style={{...card,gridColumn:"1/-1"}}>
@@ -1358,7 +1380,9 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const adminCatList=Object.keys(ADMIN_CATS);
   const [adminCat,setAdminCat]=useState(adminCatList[0]);
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
-  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false});
+  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
+
+  const isAreaComun=f.tower==="Comun";
   const [errs,setErrs]=useState({});
   const [prevs,setPrevs]=useState([]);
   const [rawFiles,setRawFiles]=useState([]);
@@ -1396,13 +1420,25 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
       return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:f.requesterName,preview:url,comment:""};
     }));
-    const nr=normReq({id:code,code,createdAt:now,...f,category:tipo==="Administrativo"?adminCat:f.category,subcategory:tipo==="Administrativo"?adminSub:f.subcategory,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
+    const nr=normReq({id:code,code,createdAt:now,...f,
+      category:tipo==="Administrativo"?adminCat:f.category,
+      subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
+      affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
+      status:"Ingresada",assignedTo:"Sin asignar",
+      history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
+      attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+"."});
+    // Mail al solicitante
+    if(f.requesterEmail&&f.requesterEmail.includes("@")){
+      console.log("Enviando mail a solicitante:", f.requesterEmail);
+      addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
+    }
+    // Mail a administradores
     try{
-      const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email);
-      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva: "+code+" · "+f.requesterName+" · "+(tipo==="Administrativo"?adminCat:f.category)+" · "+f.priority}));
-    }catch(_){}
+      const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
+      console.log("Admins a notificar:", admins.map(u=>u.email));
+      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+f.requesterName+"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)+"\nPrioridad: "+f.priority+"\n\nIngrese al sistema para gestionar."}));
+    }catch(ex){console.warn("Error notificando admins",ex);}
     setDone(nr); showToast("Solicitud "+code+" creada"); setSaving(false);
   };
 
@@ -1441,7 +1477,35 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
               {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,lb,tp])=>(
                 <div key={k} style={fg}><label style={lbl}>{lb}</label><input type={tp} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={ev=>setFld(k,ev.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
               ))}
-              <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>setFld("tower",ev.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>{setFld("tower",ev.target.value);setFld("affectedTowers",[]);}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+
+              {/* Si es Area Común: selector de torres afectadas */}
+              {isAreaComun&&(
+                <div style={{...fg,gridColumn:"1/-1"}}>
+                  <label style={lbl}>Torres afectadas</label>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+                    <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer",padding:"6px 12px",borderRadius:8,border:"2px solid "+(f.affectedTowers.length===0?"#3b82f6":"#e2e8f0"),background:f.affectedTowers.length===0?"#eff6ff":"#f9fafb",color:f.affectedTowers.length===0?"#1d4ed8":"#374151",fontWeight:f.affectedTowers.length===0?700:400}}>
+                      <input type="radio" name="affTowers" style={{display:"none"}} checked={f.affectedTowers.length===0} onChange={()=>setFld("affectedTowers",[])}/>
+                      Todas las torres
+                    </label>
+                    {actTowers.filter(t=>t.name!=="Comun").map(t=>{
+                      const sel2=f.affectedTowers.includes(t.name);
+                      return(
+                        <label key={t.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer",padding:"6px 12px",borderRadius:8,border:"2px solid "+(sel2?"#6366f1":"#e2e8f0"),background:sel2?"#eef2ff":"#f9fafb",color:sel2?"#4338ca":"#374151",fontWeight:sel2?700:400}}>
+                          <input type="checkbox" style={{display:"none"}} checked={sel2} onChange={()=>{
+                            const cur=f.affectedTowers;
+                            setFld("affectedTowers",sel2?cur.filter(x=>x!==t.name):[...cur,t.name]);
+                          }}/>
+                          {t.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>
+                    {f.affectedTowers.length===0?"Afecta a todas las torres":("Afecta a: "+f.affectedTowers.join(", "))}
+                  </div>
+                </div>
+              )}
               <div style={fg}><label style={lbl}>Unidad *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
               <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
               <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>

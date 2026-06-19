@@ -542,7 +542,7 @@ export default function App(){
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
             {view==="dashboard"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}
-            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios}/>}
+            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
             {view==="misolicitudes"&&<MisSolicitudes tasks={tasks} reqs={reqs} session={session} role={er} onOpen={openReq} mob={mob}/>}
             {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
@@ -929,7 +929,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
 }
 
 // ── ReqDetail ──────────────────────────────────────────────────────────────
-function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,setAtts,addEmail,showToast,onBack,setSelReq,mob,respList,respAssign,usuarios}){
+function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,setAtts,addEmail,showToast,onBack,setSelReq,mob,respList,respAssign,usuarios,session}){
   const r=reqs.find(x=>x.id===req.id)||req;
   const safeHistory=r.history||[];
   const safeComments=r.comments||[];
@@ -1084,8 +1084,40 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       {tab==="informe"&&(
         myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=>{
           const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+          // Mostrar solo la orden correspondiente si soy ejecutor
+          const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
+          if(isEjecutor&&!miOrden) return null;
           return(
             <div key={t.id}>
+              {/* Resumen de la orden siempre visible en modo ejecutor */}
+              {isEjecutor&&(
+                <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
+                  <div style={{fontWeight:700,fontSize:14,color:"#4338ca",marginBottom:6}}>📋 Mi Orden de Trabajo</div>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
+                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>👤 Responsable: {t.responsible}</div>
+                      <div style={{fontSize:12,color:"#6366f1"}}>🔧 Ejecutor: {t.ejecutor}</div>
+                      {t.desc&&<div style={{fontSize:12,color:"#374151",marginTop:4}}>{t.desc}</div>}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                      <PBadge p={t.priority}/>
+                      <SBadge s={t.status}/>
+                      {t.dueDate&&<span style={{fontSize:11,color:"#64748b"}}>📅 {fmtD(t.dueDate)}</span>}
+                    </div>
+                  </div>
+                  {/* Info solicitud */}
+                  <div style={{marginTop:10,padding:"8px 10px",background:"#fff",borderRadius:8,border:"1px solid #c7d2fe"}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
+                      <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
+                      <SBadge s={r.status}/>
+                    </div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
+                  </div>
+                </div>
+              )}
               {["avance","cierre"].map(type=>{
                 const myAtt=allAtts.filter(a=>a.type===type);
                 return(

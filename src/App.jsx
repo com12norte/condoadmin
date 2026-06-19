@@ -484,7 +484,8 @@ export default function App(){
   const respAssign=usuarios.length?usuarios.filter(u=>u.active&&u.rol!=="Residente").map(u=>u.nombre):[];
 
   const navItems=[
-    {id:"dashboard",label:"Dashboard"},{id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
+    {id:"dashboard",label:"Dashboard"},
+    {id:"misolicitudes",label:"Mis Solicitudes"},{id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
     {id:"misolicitudes",label:"Mis Solicitudes"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
     {id:"mantencion",label:"Mantención"},{id:"emails",label:"Correos"},{id:"reports",label:"Reportes"},{id:"config",label:"Config"},
   ].filter(n=>{
@@ -494,7 +495,7 @@ export default function App(){
     if(n.id==="inspections"&&!can(er,"inspection")&&!can(er,"inspectionRead")) return false;
     if(n.id==="inventory"&&!can(er,"inventory")&&!can(er,"inventoryRead")) return false;
     if(n.id==="mantencion"&&!can(er,"mantencion")&&!can(er,"mantRead")) return false;
-    if(n.id==="provider"&&!can(er,"providerDash")&&er!=="Administrador"&&er!=="Conserjeria") return false;
+    if(n.id==="misolicitudes"&&er==="Residente") return false;
     if(n.id==="tasks"&&er==="Proveedor") return false;
     if(n.id==="dashboard"&&er==="Proveedor") return false;
     return true;
@@ -543,6 +544,7 @@ export default function App(){
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
+            {view==="misolicitudes"&&<MisSolicitudes tasks={tasks} reqs={reqs} session={session} role={er} onOpen={openReq} mob={mob}/>}
             {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
             {view==="inspections"&&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} showToast={showToast} role={er} mob={mob} towers={towers}/>}
             {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
@@ -1602,6 +1604,147 @@ function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── MisSolicitudes ─────────────────────────────────────────────────────────
+function MisSolicitudes({tasks,reqs,session,role,onOpen,mob}){
+  const nombre=session?.nombre||"";
+  const email=session?.email||"";
+  const [tabMS,setTabMS]=useState("ejecutor");
+  const [selIds,setSelIds]=useState([]);
+  const [filterSt,setFilterSt]=useState("");
+  const [q,setQ]=useState("");
+
+  const matchMe = (val) => val&&(val===nombre||val===email);
+
+  // Tareas donde soy ejecutor
+  const tareasEjecutor=tasks.filter(t=>matchMe(t.ejecutor));
+  // Tareas donde soy responsable (aunque también sea ejecutor — se muestran en ambas)
+  const tareasResponsable=tasks.filter(t=>matchMe(t.responsible));
+
+  // Solicitudes únicas por grupo
+  const reqIdsEjecutor=[...new Set(tareasEjecutor.map(t=>t.requestId))];
+  const reqIdsResponsable=[...new Set(tareasResponsable.map(t=>t.requestId))];
+
+  // Si no hay tareas, buscar también solicitudes asignadas directamente
+  const reqsAsignadas=reqs.filter(r=>matchMe(r.assignedTo));
+  const reqIdsAsignadas=reqsAsignadas.map(r=>r.id);
+  const allReqIdsResponsable=[...new Set([...reqIdsResponsable,...reqIdsAsignadas])];
+
+  const activeIds=tabMS==="ejecutor"?reqIdsEjecutor:allReqIdsResponsable;
+  const activeTareas=tabMS==="ejecutor"?tareasEjecutor:tareasResponsable;
+
+  const visibleReqs=reqs.filter(r=>
+    activeIds.includes(r.id)&&
+    (!filterSt||r.status===filterSt)&&
+    (!q||(r.code+" "+r.category+" "+(r.description||"")).toLowerCase().includes(q.toLowerCase()))
+  );
+
+  const toggleSel=id=>setSelIds(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const toggleAll=()=>setSelIds(selIds.length===visibleReqs.length?[]:visibleReqs.map(r=>r.id));
+
+  const tabs=[
+    {id:"ejecutor",label:"Como Ejecutor ("+reqIdsEjecutor.length+")"},
+    {id:"responsable",label:"Como Responsable ("+reqIdsResponsable.length+")"},
+  ];
+
+  return(
+    <div>
+      <Tabs tabs={tabs} active={tabMS} onChange={t=>{setTabMS(t);setSelIds([]);}} accent="#6366f1"/>
+
+      {/* Resumen del rol */}
+      <div style={{...card,background:tabMS==="ejecutor"?"#eef2ff":"#f0fdf4",border:"1px solid "+(tabMS==="ejecutor"?"#c7d2fe":"#86efac"),marginBottom:12}}>
+        <div style={{fontWeight:600,fontSize:13,color:tabMS==="ejecutor"?"#4338ca":"#16a34a",marginBottom:4}}>
+          {tabMS==="ejecutor"?"🔧 Eres el ejecutor de estas solicitudes":"👤 Eres el responsable de estas solicitudes"}
+        </div>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          <span style={bdg("#6366f1","#eef2ff")}>{activeTareas.filter(t=>{const r=reqs.find(x=>x.id===t.requestId);return r&&!["Cerrada","Rechazada"].includes(r.status);}).length} activas</span>
+          <span style={bdg("#10b981","#f0fdf4")}>{activeTareas.filter(t=>t.status==="Completada").length} órdenes completadas</span>
+          <span style={bdg("#ef4444","#fef2f2")}>{activeTareas.filter(t=>t.informe?.trim()).length} con informe</span>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div style={{...card,padding:12,marginBottom:12}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={q} onChange={ev=>setQ(ev.target.value)}/>
+          <select style={{...sel,flex:1}} value={filterSt} onChange={ev=>setFilterSt(ev.target.value)}>
+            <option value="">Todos los estados</option>
+            {STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select>
+          <span style={{fontSize:11,color:"#64748b",flexShrink:0}}>{visibleReqs.length} solicitudes</span>
+        </div>
+        {visibleReqs.length>0&&(
+          <div style={{marginTop:8,display:"flex",gap:6,alignItems:"center"}}>
+            <button style={BS(true)} onClick={toggleAll}>
+              {selIds.length===visibleReqs.length?"Deseleccionar todo":"Seleccionar todo"}
+            </button>
+            {selIds.length>0&&(
+              <span style={bdg("#6366f1","#eef2ff")}>{selIds.length} seleccionada(s)</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Lista */}
+      {visibleReqs.length===0?<Empty msg="Sin solicitudes en esta categoría"/>:(
+        <div>{visibleReqs.map(r=>{
+          const misOTs=activeTareas.filter(t=>t.requestId===r.id);
+          const isSel=selIds.includes(r.id);
+          return(
+            <div key={r.id} style={{...card,borderLeft:"4px solid "+(isSel?"#6366f1":PC[r.priority]||"#e2e8f0"),marginBottom:8,background:isSel?"#eef2ff":"#fff",transition:"background .15s"}}>
+              <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                {/* Checkbox */}
+                <div style={{paddingTop:2,flexShrink:0}}>
+                  <input type="checkbox" checked={isSel} onChange={()=>toggleSel(r.id)} style={{width:16,height:16,cursor:"pointer",accentColor:"#6366f1"}}/>
+                </div>
+                {/* Info */}
+                <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>onOpen(r)}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:4}}>
+                    <span style={{fontWeight:700,color:"#6366f1",fontSize:13}}>{r.code}</span>
+                    <PBadge p={r.priority}/>
+                    <SBadge s={r.status}/>
+                  </div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#1e293b",marginBottom:2}}>{r.category} — {r.subcategory}</div>
+                  <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>{r.description?.slice(0,80)}{r.description?.length>80?"...":""}</div>
+                  {/* Mis órdenes en esta solicitud */}
+                  {misOTs.map(t=>(
+                    <div key={t.id} style={{background:"#f8fafc",borderRadius:6,padding:"6px 10px",marginBottom:4,border:"1px solid #e2e8f0"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <div>
+                          <span style={{fontSize:12,fontWeight:600}}>{t.title}</span>
+                          <div style={{fontSize:10,color:"#64748b",marginTop:1}}>
+                            {tabMS==="ejecutor"?"🔧 Ejecutor":"👤 Responsable"} · {t.dueDate?("📅 "+fmtD(t.dueDate)):"Sin fecha"}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:4,alignItems:"center",flexShrink:0}}>
+                          <SBadge s={t.status}/>
+                          {t.informe?.trim()&&<span style={bdg("#10b981","#f0fdf4")}>✓ Informe</span>}
+                          {!t.informe?.trim()&&t.status!=="Completada"&&t.dueDate&&Math.ceil((new Date(t.dueDate)-new Date())/86400000)<=3&&(
+                            <span style={bdg("#ef4444","#fef2f2")}>⚠ Vence pronto</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>Torre {r.tower}{r.unit?" / Unidad "+r.unit:""} · {fmtD(r.createdAt)}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}</div>
+      )}
+
+      {/* Acciones con seleccionados */}
+      {selIds.length>0&&(
+        <div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"#1e293b",borderRadius:12,padding:"12px 20px",display:"flex",gap:12,alignItems:"center",zIndex:500,boxShadow:"0 8px 24px rgba(0,0,0,.3)"}}>
+          <span style={{color:"#fff",fontSize:13,fontWeight:600}}>{selIds.length} seleccionada(s)</span>
+          <button style={BS(true)} onClick={()=>setSelIds([])}>Limpiar</button>
+          <button style={BP(true)} onClick={()=>{const r=reqs.find(x=>x.id===selIds[0]);if(r)onOpen(r);}}>Ver detalle</button>
+        </div>
+      )}
     </div>
   );
 }

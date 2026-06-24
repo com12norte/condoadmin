@@ -853,14 +853,21 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
 
 // ── ReqList ────────────────────────────────────────────────────────────────
 function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towers,respList,session}){
-  const [fi,setFi]=useState({status:"",priority:"",tower:"",q:""});
+  const [fi,setFi]=useState({status:"",priority:"",tower:"",responsible:"",proveedor:"",q:""});
   const [sort,setSort]=useState("date");
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
   const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):reqs;
+
+  // Listas únicas para filtros
+  const respOptions=[...new Set(base.map(r=>r.assignedTo).filter(x=>x&&x!=="Sin asignar"))].sort();
+  const provOptions=[...new Set(base.map(r=>r.proveedor).filter(Boolean))].sort();
+
   const visible=base.filter(r=>{
     if(fi.status&&r.status!==fi.status) return false;
     if(fi.priority&&r.priority!==fi.priority) return false;
     if(fi.tower&&r.tower!==fi.tower) return false;
+    if(fi.responsible&&r.assignedTo!==fi.responsible) return false;
+    if(fi.proveedor&&r.proveedor!==fi.proveedor) return false;
     if(fi.q&&!(r.code+" "+r.requesterName+" "+r.category).toLowerCase().includes(fi.q.toLowerCase())) return false;
     return true;
   }).sort((a,b)=>sort==="priority"?PRIORITIES.indexOf(a.priority)-PRIORITIES.indexOf(b.priority):new Date(b.createdAt)-new Date(a.createdAt));
@@ -883,6 +890,14 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
               {opts.map(o=><option key={o}>{o}</option>)}
             </select>
           ))}
+          <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
+            <option value="">...Responsable</option>
+            {respOptions.map(o=><option key={o}>{o}</option>)}
+          </select>
+          <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
+            <option value="">...Proveedor</option>
+            {provOptions.map(o=><option key={o}>{o}</option>)}
+          </select>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button style={sort==="date"?BP(true):BS(true)} onClick={()=>setSort("date")}>Fecha</button>

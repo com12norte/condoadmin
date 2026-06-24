@@ -1,13 +1,23 @@
-import nodemailer from 'nodemailer'
+const nodemailer = require('nodemailer')
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
+  // CORS
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  if(req.method === 'OPTIONS') return res.status(200).end()
+
   if(req.method !== 'POST') return res.status(405).json({error:'Method not allowed'})
-  
-  const { to, subject, body } = req.body
+
+  const { to, subject, body } = req.body || {}
   if(!to || !subject || !body) return res.status(400).json({error:'Faltan datos'})
 
+  console.log('Enviando mail a:', to, '| Asunto:', subject)
+
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: {
       user: process.env.GMAIL_USER,
       pass: process.env.GMAIL_APP_PASS
@@ -15,7 +25,7 @@ export default async function handler(req, res) {
   })
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: `"CondoAdmin" <${process.env.GMAIL_USER}>`,
       to,
       subject,
@@ -32,9 +42,10 @@ export default async function handler(req, res) {
         </div>
       `
     })
-    res.json({ ok: true })
+    console.log('Mail enviado:', info.messageId)
+    return res.status(200).json({ ok: true, messageId: info.messageId })
   } catch(ex) {
-    console.error('Mail error:', ex)
-    res.status(500).json({ error: ex.message })
+    console.error('Mail error:', ex.message)
+    return res.status(500).json({ error: ex.message })
   }
 }

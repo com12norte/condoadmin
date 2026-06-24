@@ -265,6 +265,7 @@ function LoginScreen({onLogin}){
 
   const doLogin=async()=>{
     if(!email||!pass){setErr("Ingrese correo y contraseña");return;}
+    if(load) return; // evitar doble click
     setLoad(true);setErr("");
     try{
       const auth=await signIn(email,pass);
@@ -272,7 +273,13 @@ function LoginScreen({onLogin}){
       const users=await res.json();
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
       onLogin({...users[0],token:auth.access_token});
-    }catch(ex){setErr(ex.message||"Credenciales incorrectas");}
+    }catch(ex){
+      if(ex.message?.includes("rate limit")||ex.message?.includes("429")){
+        setErr("Demasiados intentos. Espera unos segundos.");
+      } else {
+        setErr(ex.message||"Credenciales incorrectas");
+      }
+    }
     setLoad(false);
   };
 

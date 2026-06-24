@@ -906,6 +906,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}><PBadge p={r.priority}/></td>
                 <td style={tdS}><SBadge s={r.status}/></td>
                 <td style={tdS}>{r.assignedTo}</td>
+                <td style={tdS}>{r.proveedor||"—"}</td>
                 <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
@@ -1012,6 +1013,17 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                 <button style={BS(true)} onClick={applyAsgn}>Asignar</button>
               </div></div>
             )}
+            {can(role,"assign")&&(
+              <div><label style={lbl}>Proveedor</label>
+              <div style={{display:"flex",gap:6}}>
+                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
+                <button style={BS(true)} onClick={()=>{
+                  const val=document.getElementById("prov-input").value.trim();
+                  upd({proveedor:val||null});
+                  showToast("Proveedor actualizado");
+                }}>OK</button>
+              </div></div>
+            )}
             {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
             {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>Cerrar</button>}
             <button style={BS(true)} onClick={()=>setShowEv("avance")}>Evidencia</button>
@@ -1022,7 +1034,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
           <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Telefono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/>{r.affectedTowers&&<IR l="Torres afectadas" v={r.affectedTowers}/>}</div>
-          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Creacion" v={fmt(r.createdAt)}/></div>
+          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/></div>
           <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripcion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{r.description||"Sin descripcion."}</p></div>
           <div style={{...card,gridColumn:"1/-1"}}>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Comentarios ({safeComments.length})</div>

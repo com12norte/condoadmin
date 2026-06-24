@@ -627,16 +627,18 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
 
 // ── ReqList ────────────────────────────────────────────────────────────────
 function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towers,respList,session}){
-  const [fi,setFi]=useState({status:"",priority:"",tower:"",responsible:"",q:""});
+  const [fi,setFi]=useState({status:"",priority:"",tower:"",responsible:"",proveedor:"",q:""});
   const [sort,setSort]=useState("date");
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
   const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):reqs;
   const respOptions=[...new Set(base.map(r=>r.assignedTo).filter(x=>x&&x!=="Sin asignar"))].sort();
+  const provOptions=[...new Set(base.map(r=>r.proveedor).filter(Boolean))].sort();
   const visible=base.filter(r=>{
     if(fi.status&&r.status!==fi.status) return false;
     if(fi.priority&&r.priority!==fi.priority) return false;
     if(fi.tower&&r.tower!==fi.tower) return false;
     if(fi.responsible&&r.assignedTo!==fi.responsible) return false;
+    if(fi.proveedor&&r.proveedor!==fi.proveedor) return false;
     if(fi.q&&!(r.code+" "+r.requesterName+" "+r.category).toLowerCase().includes(fi.q.toLowerCase())) return false;
     return true;
   }).sort((a,b)=>sort==="priority"?PRIORITIES.indexOf(a.priority)-PRIORITIES.indexOf(b.priority):new Date(b.createdAt)-new Date(a.createdAt));
@@ -659,6 +661,9 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
           <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
             <option value="">...Responsable</option>{respOptions.map(o=><option key={o}>{o}</option>)}
           </select>
+          <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
+            <option value="">...Proveedor</option>{provOptions.map(o=><option key={o}>{o}</option>)}
+          </select>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button style={sort==="date"?BP(true):BS(true)} onClick={()=>setSort("date")}>Fecha</button>
@@ -678,7 +683,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       ):(
         <div style={card}>
           <table style={tbl}>
-            <thead><tr>{["","ID","Solicitante","Categoría","Torre","Prioridad","Estado","Responsable","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+            <thead><tr>{["","ID","Solicitante","Categoría","Torre","Prioridad","Estado","Responsable","Proveedor","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
             <tbody>{visible.map(r=>(
               <tr key={r.id} style={{background:r.priority==="Emergencia"?"#fef2f2":"",cursor:"pointer"}} onClick={()=>onOpen(r)}>
                 <td style={tdS}>{r.priority==="Emergencia"?"⚠":""}</td>
@@ -689,6 +694,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}><PBadge p={r.priority}/></td>
                 <td style={tdS}><SBadge s={r.status}/></td>
                 <td style={tdS}>{r.assignedTo}</td>
+                <td style={tdS}>{r.proveedor||<span style={{color:"#94a3b8"}}>—</span>}</td>
                 <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>

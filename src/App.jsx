@@ -1574,7 +1574,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
                   </div>
                 </div>
               )}
-              <div style={fg}><label style={lbl}>Unidad *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
+              <div style={fg}><label style={lbl}>Unidad / Piso *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401, Piso 4, Bodega 2"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
               <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
               <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
             </>

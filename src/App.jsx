@@ -28,7 +28,7 @@ const uploadImg = async (file,path) => {
 const sendMail = async (to, subject, body) => {
   if(!to||!to.includes("@")) return;
   try {
-    await fetch("https://condoadmin-rouge.vercel.app/api/sen-email", {
+    await fetch("https://condoadmin-rouge.vercel.app/api/send-email", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({to, subject, body})

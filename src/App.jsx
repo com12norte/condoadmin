@@ -1,4 +1,3 @@
-// ── CondoAdmin completo ────────────────────────────────────────────────────
 import { useState, useEffect, useRef } from "react";
 
 const SUPA_URL = "https://ijefrrtdtjshfquuytic.supabase.co";
@@ -28,12 +27,33 @@ const uploadImg = async (file,path) => {
 const sendMail = async (to, subject, body) => {
   if(!to||!to.includes("@")) return;
   try {
-    await fetch("https://condoadmin-rouge.vercel.app/api/send-email", {
+    const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({to, subject, body})
+      headers:{
+        "Content-Type":"application/json",
+        "origin":"http://localhost"
+      },
+      body:JSON.stringify({
+        service_id: EMAILJS_SID,
+        template_id: EMAILJS_TID,
+        user_id: EMAILJS_KEY,
+        accessToken: EMAILJS_KEY,
+        template_params: {
+          to_email: to,
+          subject: subject,
+          message: body,
+          name: "CondoAdmin",
+          email: "no-reply@condoadmin.cl"
+        }
+      })
     });
-  } catch(ex) { console.warn("sendMail error", ex); }
+    if(!res.ok){
+      const txt=await res.text();
+      console.warn("EmailJS",res.status,txt);
+    }
+  } catch(ex) {
+    console.warn("sendMail error", ex);
+  }
 };
 
 const ROLES = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
@@ -91,13 +111,20 @@ const CL_SECTIONS = [
   {id:"s9",label:"Aseo",items:["Limpieza areas comunes","Basura","Escombros","Graffitis","Olores"]}
 ];
 const EQUIP_TIPOS = [
-  {id:"e1",nombre:"Extintores",icono:"🧯",frecuencia:"Anual"},{id:"e2",nombre:"Red húmeda/seca",icono:"🚒",frecuencia:"Anual"},
-  {id:"e3",nombre:"Tableros eléctricos",icono:"⚡",frecuencia:"Anual"},{id:"e4",nombre:"Ascensores",icono:"🛗",frecuencia:"Semestral"},
-  {id:"e5",nombre:"Calderas/Calefactores",icono:"🔥",frecuencia:"Anual"},{id:"e6",nombre:"Estanques de agua",icono:"💧",frecuencia:"Semestral"},
-  {id:"e7",nombre:"Cámaras CCTV",icono:"🎥",frecuencia:"Anual"},{id:"e8",nombre:"Puertas cortafuego",icono:"🚪",frecuencia:"Anual"},
-  {id:"e9",nombre:"Piscina",icono:"🏊",frecuencia:"Mensual"},{id:"e10",nombre:"Ventilación",icono:"🌬️",frecuencia:"Semestral"},
-  {id:"e11",nombre:"Generador",icono:"⚙️",frecuencia:"Anual"},{id:"e12",nombre:"Bomba de agua",icono:"🔧",frecuencia:"Anual"},
-  {id:"e13",nombre:"Motor portón",icono:"🚗",frecuencia:"Anual"},{id:"e14",nombre:"Citófonos",icono:"📞",frecuencia:"Anual"},
+  {id:"e1",nombre:"Extintores",icono:"🧯",frecuencia:"Anual"},
+  {id:"e2",nombre:"Red húmeda/seca",icono:"🚒",frecuencia:"Anual"},
+  {id:"e3",nombre:"Tableros eléctricos",icono:"⚡",frecuencia:"Anual"},
+  {id:"e4",nombre:"Ascensores",icono:"🛗",frecuencia:"Semestral"},
+  {id:"e5",nombre:"Calderas/Calefactores",icono:"🔥",frecuencia:"Anual"},
+  {id:"e6",nombre:"Estanques de agua",icono:"💧",frecuencia:"Semestral"},
+  {id:"e7",nombre:"Cámaras CCTV",icono:"🎥",frecuencia:"Anual"},
+  {id:"e8",nombre:"Puertas cortafuego",icono:"🚪",frecuencia:"Anual"},
+  {id:"e9",nombre:"Piscina",icono:"🏊",frecuencia:"Mensual"},
+  {id:"e10",nombre:"Ventilación",icono:"🌬️",frecuencia:"Semestral"},
+  {id:"e11",nombre:"Generador",icono:"⚙️",frecuencia:"Anual"},
+  {id:"e12",nombre:"Bomba de agua",icono:"🔧",frecuencia:"Anual"},
+  {id:"e13",nombre:"Motor portón",icono:"🚗",frecuencia:"Anual"},
+  {id:"e14",nombre:"Citófonos",icono:"📞",frecuencia:"Anual"},
   {id:"e15",nombre:"Alarmas",icono:"🔔",frecuencia:"Anual"}
 ];
 const PERMS = {
@@ -161,6 +188,7 @@ const alrt = t => ({padding:"8px 12px",borderRadius:6,fontSize:12,marginBottom:1
 const MSt={position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"8px",overflowY:"auto"};
 const thumb={width:64,height:48,objectFit:"cover",borderRadius:6,border:"1px solid #e2e8f0"};
 
+// ── Helpers ────────────────────────────────────────────────────────────────
 function useMob(){
   const [m,setM]=useState(window.innerWidth<768);
   useEffect(()=>{const h=()=>setM(window.innerWidth<768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
@@ -187,6 +215,7 @@ function Tabs({tabs,active,onChange,accent}){
 }
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando...</div><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
 
+// ── Sidebar ────────────────────────────────────────────────────────────────
 function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,er,mob}){
   const navTo = id => { setView(id); setNavOpen(false); };
   const isAct = id => view===id||(view==="detail"&&id==="requests");
@@ -227,6 +256,7 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
   );
 }
 
+// ── Login ──────────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
   const [mode,setMode]=useState(null);
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
@@ -235,7 +265,7 @@ function LoginScreen({onLogin}){
 
   const doLogin=async()=>{
     if(!email||!pass){setErr("Ingrese correo y contraseña");return;}
-    if(load) return;
+    if(load) return; // evitar doble click
     setLoad(true);setErr("");
     try{
       const auth=await signIn(email,pass);
@@ -244,7 +274,11 @@ function LoginScreen({onLogin}){
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
       onLogin({...users[0],token:auth.access_token});
     }catch(ex){
-      setErr(ex.message?.includes("rate limit")||ex.message?.includes("429")?"Demasiados intentos. Espera unos segundos.":ex.message||"Credenciales incorrectas");
+      if(ex.message?.includes("rate limit")||ex.message?.includes("429")){
+        setErr("Demasiados intentos. Espera unos segundos.");
+      } else {
+        setErr(ex.message||"Credenciales incorrectas");
+      }
     }
     setLoad(false);
   };
@@ -310,6 +344,7 @@ function LoginScreen({onLogin}){
   );
 }
 
+// ── App ────────────────────────────────────────────────────────────────────
 export default function App(){
   const mob=useMob();
   const [session,setSession]=useState(null);
@@ -377,14 +412,17 @@ export default function App(){
     })();
   },[session]);
 
+  // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
   useEffect(()=>{
     if(!session||!tasks.length) return;
     const run=async()=>{
       const hoy=new Date(); hoy.setHours(0,0,0,0);
       const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
+      // Si ya se ejecutó hoy en esta sesión, no hacer nada
       if(window._remDate===fechaKey) return;
       window._remDate=fechaKey;
       if(!window._remSent) window._remSent={};
+      // Limpiar enviados de días anteriores
       window._remSent={};
       const sent=window._remSent;
       for(const t of tasks){
@@ -398,6 +436,7 @@ export default function App(){
         const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
         const cuerpo="Hola"+(t.responsible?" "+t.responsible:"")+",\n\nLa orden \""+t.title+"\" "+diasTxt+" ("+fmtD(t.dueDate)+") y aún no tiene informe.\n\n— CondoAdmin";
         try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.responsible||"")+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
+        if(t.ejecutor&&t.ejecutor!==t.responsible){try{const r2=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.ejecutor)+"&active=eq.true",{headers:hdr()});const u2s=await r2.json();const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
       }
     };
     const timer=setTimeout(()=>run().catch(()=>{}),3000);
@@ -442,7 +481,8 @@ export default function App(){
     const item={id:"e"+uid(),...log};
     setEmails(p=>[item,...p]);
     try{await dbPost("correos",{id:item.id,request_id:item.requestId||"",data:item});}catch(_){}
-    sendMail(log.to, log.subject, log.body).catch(()=>{});
+    // Enviar mail en background sin bloquear
+    sendMail(log.to, log.subject, log.body).catch(ex=>console.warn("addEmail sendMail",ex));
   };
 
   const openReq=r=>{setSelReq(r);setView("detail");setNavOpen(false);};
@@ -452,15 +492,9 @@ export default function App(){
 
   const navItems=[
     {id:"dashboard",label:"Dashboard"},
-    {id:"requests",label:"Solicitudes"},
-    {id:"tasks",label:"Órdenes"},
-    {id:"misolicitudes",label:"Mis Solicitudes"},
-    {id:"inspections",label:"Novedades"},
-    {id:"inventory",label:"Inventario"},
-    {id:"mantencion",label:"Mantención"},
-    {id:"emails",label:"Correos"},
-    {id:"reports",label:"Reportes"},
-    {id:"config",label:"Config"},
+    {id:"misolicitudes",label:"Mis Solicitudes"},{id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
+    {id:"misolicitudes",label:"Mis Solicitudes"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
+    {id:"mantencion",label:"Mantención"},{id:"emails",label:"Correos"},{id:"reports",label:"Reportes"},{id:"config",label:"Config"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
     if(n.id==="emails"&&!can(er,"viewEmails")) return false;
@@ -473,6 +507,21 @@ export default function App(){
     if(n.id==="dashboard"&&er==="Proveedor") return false;
     return true;
   });
+
+  // Interceptar botón atrás del navegador
+  useEffect(()=>{
+    if(!session) return;
+    const onPop=ev=>{
+      ev.preventDefault();
+      if(view==="detail"){ setView("requests"); setSelReq(null); }
+      else if(view!=="dashboard"){ setView("dashboard"); }
+      // Siempre empujar estado para evitar salir
+      window.history.pushState(null,"",window.location.href);
+    };
+    window.history.pushState(null,"",window.location.href);
+    window.addEventListener("popstate",onPop);
+    return()=>window.removeEventListener("popstate",onPop);
+  },[session,view]);
 
   if(loading) return <Loader/>;
   if(!session) return <LoginScreen onLogin={handleLogin}/>;
@@ -489,7 +538,7 @@ export default function App(){
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}}>
             <div style={{minWidth:0}}>
-              <div style={{fontWeight:700,fontSize:mob?15:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{view==="detail"?"Detalle":(navItems.find(n=>n.id===view)||{label:view}).label||"CondoAdmin"}</div>
+              <div style={{fontWeight:700,fontSize:mob?15:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{view==="detail"?"Detalle":(navItems.find(n=>n.id===view)||{label:view}).label}</div>
               {!mob&&<div style={{color:"#64748b",fontSize:11,marginTop:1}}>{new Date().toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>}
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
@@ -513,9 +562,8 @@ export default function App(){
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);if(er==="Residente")setView("requests");}} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);setView("requests");}} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
-
     </div>
   );
 }
@@ -528,18 +576,65 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
   const mv=mant.filter(m=>getMantStatus(m)==="Vencida").length;
   const mp=mant.filter(m=>getMantStatus(m)==="Por vencer").length;
   const isAnalyst=role==="Administrador"||role==="Administrador Edificio"||role==="Comite";
+
+  // ── Cálculos para análisis ──
   const cerradas=reqs.filter(r=>r.status==="Cerrada");
   const avgResolucion=cerradas.length?Math.round(cerradas.reduce((s,r)=>{
-    const hist=r.history||[];const cierre=hist.find(h=>h.to==="Cerrada");
-    if(!cierre||!r.createdAt) return s;return s+(new Date(cierre.date)-new Date(r.createdAt))/86400000;
+    const hist=r.history||[];
+    const cierre=hist.find(h=>h.to==="Cerrada");
+    if(!cierre||!r.createdAt) return s;
+    return s+(new Date(cierre.date)-new Date(r.createdAt))/86400000;
   },0)/cerradas.length):null;
+
+  const avgAsignacion=reqs.filter(r=>r.assignedTo!=="Sin asignar").length?Math.round(reqs.filter(r=>{
+    const h=r.history||[];
+    return h.some(x=>x.to==="Asignada");
+  }).reduce((s,r)=>{
+    const h=(r.history||[]).find(x=>x.to==="Asignada");
+    if(!h||!r.createdAt) return s;
+    return s+(new Date(h.date)-new Date(r.createdAt))/3600000;
+  },0)/Math.max(reqs.filter(r=>{const h=r.history||[];return h.some(x=>x.to==="Asignada");}).length,1)):null;
+
   const hoy=new Date(); hoy.setHours(0,0,0,0);
   const tareasVencidas=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<0);
   const tareasPorVencer=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)>=0&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<=3);
+
+  // Por responsable
+  const respStats={};
+  tasks.forEach(t=>{
+    const r=t.responsible||"Sin asignar";
+    if(!respStats[r]) respStats[r]={total:0,completadas:0,dias:[]};
+    respStats[r].total++;
+    if(t.status==="Completada"){
+      respStats[r].completadas++;
+      if(t.dueDate&&t.createdAt){const d=(new Date(t.dueDate)-new Date(t.createdAt))/86400000;if(d>=0)respStats[r].dias.push(d);}
+    }
+  });
+  const respArr=Object.entries(respStats).sort((a,b)=>b[1].total-a[1].total).slice(0,5);
+
+  // Tendencia mensual (últimos 6 meses)
   const meses=[];
   for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);meses.push({key:d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"),label:d.toLocaleString("es-CL",{month:"short",year:"2-digit"})});}
-  const tendencia=meses.map(m=>({label:m.label,creadas:reqs.filter(r=>r.createdAt&&r.createdAt.startsWith(m.key)).length,cerradas:reqs.filter(r=>{const h=(r.history||[]).find(x=>x.to==="Cerrada");return h&&h.date&&h.date.startsWith(m.key);}).length}));
+  const tendencia=meses.map(m=>({
+    label:m.label,
+    creadas:reqs.filter(r=>r.createdAt&&r.createdAt.startsWith(m.key)).length,
+    cerradas:reqs.filter(r=>{const h=(r.history||[]).find(x=>x.to==="Cerrada");return h&&h.date&&h.date.startsWith(m.key);}).length,
+  }));
   const maxTend=Math.max(...tendencia.map(m=>Math.max(m.creadas,m.cerradas)),1);
+
+  // Por categoría con tiempo promedio
+  const catStats=Object.keys(DEF_CATS).map(c=>{
+    const rCat=reqs.filter(r=>r.category===c);
+    const rCerradas=rCat.filter(r=>r.status==="Cerrada");
+    const avgDias=rCerradas.length?Math.round(rCerradas.reduce((s,r)=>{
+      const h=(r.history||[]).find(x=>x.to==="Cerrada");
+      if(!h||!r.createdAt) return s;
+      return s+(new Date(h.date)-new Date(r.createdAt))/86400000;
+    },0)/rCerradas.length):null;
+    return {c,total:rCat.length,cerradas:rCerradas.length,avgDias};
+  }).filter(x=>x.total>0).sort((a,b)=>b.total-a.total).slice(0,8);
+  const maxCatTotal=Math.max(...catStats.map(x=>x.total),1);
+
   return(
     <div>
       {emerg.map(em=>(
@@ -549,78 +644,209 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
         </div>
       ))}
       {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
+
+      {/* KPIs Solicitudes */}
       <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>📋 Solicitudes</div>
       <Grid cols={5} mob={mob}>
         <Kpi value={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Abiertas" color="#3b82f6" mob={mob}/>
         <Kpi value={reqs.filter(r=>r.priority==="Emergencia").length} label="Emergencias" color="#ef4444" mob={mob}/>
         <Kpi value={reqs.filter(r=>r.status==="En proceso").length} label="En proceso" color="#8b5cf6" mob={mob}/>
         <Kpi value={cerradas.length} label="Cerradas" color="#10b981" mob={mob}/>
-        <Kpi value={avgResolucion!==null?avgResolucion+" días":"---"} label="Prom. resolución" color="#f97316" mob={mob}/>
+        <Kpi value={avgResolucion!==null?avgResolucion+" días":"---"} label="Promedio resolución" color="#f97316" mob={mob}/>
       </Grid>
+
+      {/* KPIs Órdenes */}
       <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8,marginTop:4}}>⚙️ Órdenes de Trabajo</div>
-      <Grid cols={4} mob={mob}>
-        <Kpi value={tasks.length} label="Total" color="#6366f1" mob={mob}/>
+      <Grid cols={5} mob={mob}>
+        <Kpi value={tasks.length} label="Total órdenes" color="#6366f1" mob={mob}/>
         <Kpi value={tasks.filter(t=>t.status==="Completada").length} label="Completadas" color="#10b981" mob={mob}/>
         <Kpi value={tasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada").length} label="Pendientes" color="#f59e0b" mob={mob}/>
-        <Kpi value={tareasVencidas.length} label="Vencidas s/informe" color="#ef4444" mob={mob}/>
+        <Kpi value={tareasVencidas.length} label="Vencidas sin informe" color="#ef4444" mob={mob}/>
+        <Kpi value={avgAsignacion!==null?Math.round(avgAsignacion)+" hrs":"---"} label="1ª asignación (prom.)" color="#3b82f6" mob={mob}/>
       </Grid>
+
+      {/* Alertas órdenes vencidas */}
       {tareasVencidas.length>0&&(
         <div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",marginBottom:12}}>
           <div style={{fontWeight:700,color:"#dc2626",fontSize:13,marginBottom:8}}>⚠ Órdenes vencidas sin informe ({tareasVencidas.length})</div>
           {tareasVencidas.slice(0,5).map(t=>{
             const req=reqs.find(r=>r.id===t.requestId);
             const dias=Math.abs(Math.ceil((new Date(t.dueDate)-hoy)/86400000));
-            return(<div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fca5a5",flexWrap:"wrap",gap:8}}>
-              <div><div style={{fontSize:12,fontWeight:600,color:"#991b1b"}}>{t.title}</div><div style={{fontSize:11,color:"#64748b"}}>{req?.code||"—"} · 👤 {t.responsible}</div></div>
-              <span style={bdg("#ef4444","#fef2f2")}>{dias} día(s) vencida</span>
-            </div>);
+            return(
+              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fca5a5",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600,color:"#991b1b"}}>{t.title}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{req?.code||"—"} · 👤 {t.responsible}</div>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={bdg("#ef4444","#fef2f2")}>{dias} día(s) vencida</span>
+                  {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden?"))deleteTask(t.id);}}>🗑</button>}
+                </div>
+              </div>
+            );
           })}
         </div>
       )}
-      {isAnalyst&&(
-        <div style={card}>
-          <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📈 Tendencia mensual</div>
-          <div style={{display:"flex",gap:4,alignItems:"flex-end",height:100}}>
-            {tendencia.map(m=>(
-              <div key={m.label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:80}}>
-                  <div title={"Creadas: "+m.creadas} style={{flex:1,background:"#3b82f6",borderRadius:"3px 3px 0 0",height:Math.round((m.creadas/maxTend)*76)+4}}/>
-                  <div title={"Cerradas: "+m.cerradas} style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",height:Math.round((m.cerradas/maxTend)*76)+4}}/>
+
+      {/* Próximas a vencer */}
+      {tareasPorVencer.length>0&&(
+        <div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",marginBottom:12}}>
+          <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⏰ Órdenes por vencer (3 días) ({tareasPorVencer.length})</div>
+          {tareasPorVencer.map(t=>{
+            const req=reqs.find(r=>r.id===t.requestId);
+            const dias=Math.ceil((new Date(t.dueDate)-hoy)/86400000);
+            return(
+              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fde68a",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600}}>{t.title}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{req?.code||"—"} · 👤 {t.responsible}</div>
                 </div>
-                <div style={{fontSize:9,color:"#94a3b8",textAlign:"center"}}>{m.label}</div>
-                <div style={{fontSize:9,color:"#64748b"}}>{m.creadas}/{m.cerradas}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={bdg("#92400e","#fffbeb")}>{dias===0?"Hoy":dias+" día(s)"}</span>
+                  {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden?"))deleteTask(t.id);}}>🗑</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {isAnalyst&&(
+        <>
+          {/* Tendencia mensual */}
+          <div style={card}>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📈 Tendencia mensual (últimos 6 meses)</div>
+            <div style={{display:"flex",gap:4,alignItems:"flex-end",height:100}}>
+              {tendencia.map(m=>(
+                <div key={m.label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:80}}>
+                    <div title={"Creadas: "+m.creadas} style={{flex:1,background:"#3b82f6",borderRadius:"3px 3px 0 0",height:Math.round((m.creadas/maxTend)*76)+4}}/>
+                    <div title={"Cerradas: "+m.cerradas} style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",height:Math.round((m.cerradas/maxTend)*76)+4}}/>
+                  </div>
+                  <div style={{fontSize:9,color:"#94a3b8",textAlign:"center"}}>{m.label}</div>
+                  <div style={{fontSize:9,color:"#64748b"}}>{m.creadas}/{m.cerradas}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:12,marginTop:8,justifyContent:"center"}}>
+              <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#3b82f6",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Creadas</span></div>
+              <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#10b981",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Cerradas</span></div>
+            </div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
+            {/* Por categoría con tiempo */}
+            <div style={card}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>📂 Solicitudes por categoría</div>
+              {catStats.length===0?<Empty msg="Sin datos"/>:catStats.map(x=>(
+                <div key={x.c} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130,fontWeight:500}}>{x.c}</span>
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <span style={{fontWeight:700}}>{x.total}</span>
+                      {x.avgDias!==null&&<span style={bdg("#64748b","#f1f5f9")}>{x.avgDias}d prom.</span>}
+                    </div>
+                  </div>
+                  <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                    <div style={{height:6,background:"#6366f1",borderRadius:99,width:(x.total/maxCatTotal*100)+"%"}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Por responsable */}
+            <div style={card}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>👤 Carga por responsable</div>
+              {respArr.length===0?<Empty msg="Sin datos"/>:respArr.map(([resp,st])=>{
+                const pct=st.total>0?Math.round(st.completadas/st.total*100):0;
+                const avgDias=st.dias.length?Math.round(st.dias.reduce((s,d)=>s+d,0)/st.dias.length):null;
+                return(
+                  <div key={resp} style={{marginBottom:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                      <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{resp}</span>
+                      <div style={{display:"flex",gap:4,flexShrink:0}}>
+                        <span style={bdg("#10b981","#f0fdf4")}>{st.completadas}/{st.total}</span>
+                        {avgDias!==null&&<span style={bdg("#64748b","#f1f5f9")}>{avgDias}d prom.</span>}
+                      </div>
+                    </div>
+                    <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                      <div style={{height:6,background:pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444",borderRadius:99,width:pct+"%"}}/>
+                    </div>
+                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{pct}% completadas</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Por prioridad */}
+            <div style={card}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>🚨 Solicitudes por prioridad</div>
+              {PRIORITIES.map(p=>{
+                const n=reqs.filter(r=>r.priority===p).length;
+                const pct=reqs.length?Math.round(n/reqs.length*100):0;
+                return(
+                  <div key={p} style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <PBadge p={p}/>
+                    <div style={{flex:1}}>
+                      <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                        <div style={{height:6,background:PC[p],borderRadius:99,width:pct+"%"}}/>
+                      </div>
+                    </div>
+                    <span style={{fontWeight:700,fontSize:12,minWidth:20,textAlign:"right"}}>{n}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Solicitudes recientes */}
+            <div style={card}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontWeight:700,fontSize:13}}>🕐 Solicitudes recientes</div>
+                {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
+              </div>
+              {recent.length===0?<Empty msg="Sin solicitudes"/>:recent.map(r=>(
+                <div key={r.id} style={{padding:"7px 0",borderBottom:"1px solid #f1f5f9",cursor:"pointer",display:"flex",justifyContent:"space-between",gap:8}} onClick={()=>onOpen(r)}>
+                  <div style={{minWidth:0}}>
+                    <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span>
+                    <div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.category}</div>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end",flexShrink:0}}>
+                    <PBadge p={r.priority}/>
+                    <SBadge s={r.status}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Dashboard básico para otros roles */}
+      {!isAnalyst&&(
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"2fr 1fr",gap:14}}>
+          <div style={card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontWeight:600,fontSize:13}}>Solicitudes recientes</div>
+              {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
+            </div>
+            {recent.length===0?<Empty msg="Sin solicitudes"/>:recent.map(r=>(
+              <div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid #f1f5f9",cursor:"pointer",display:"flex",justifyContent:"space-between"}} onClick={()=>onOpen(r)}>
+                <div><span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span><div style={{fontSize:11,color:"#64748b"}}>{r.category}</div></div>
+                <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end"}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
               </div>
             ))}
           </div>
-          <div style={{display:"flex",gap:12,marginTop:8,justifyContent:"center"}}>
-            <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#3b82f6",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Creadas</span></div>
-            <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#10b981",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Cerradas</span></div>
+          <div style={card}>
+            <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoria</div>
+            {byCat.length===0?<Empty msg="Sin datos"/>:byCat.map(x=>(
+              <div key={x.c} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div>
+                <div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#3b82f6",borderRadius:99,width:(x.n/Math.max(reqs.length,1)*100)+"%"}}/></div>
+              </div>
+            ))}
           </div>
         </div>
       )}
-      <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"2fr 1fr",gap:14}}>
-        <div style={card}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontWeight:600,fontSize:13}}>Solicitudes recientes</div>
-            {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
-          </div>
-          {recent.length===0?<Empty msg="Sin solicitudes"/>:recent.map(r=>(
-            <div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid #f1f5f9",cursor:"pointer",display:"flex",justifyContent:"space-between"}} onClick={()=>onOpen(r)}>
-              <div><span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span><div style={{fontSize:11,color:"#64748b"}}>{r.category}</div></div>
-              <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end"}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
-            </div>
-          ))}
-        </div>
-        <div style={card}>
-          <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>
-          {byCat.length===0?<Empty msg="Sin datos"/>:byCat.map(x=>(
-            <div key={x.c} style={{marginBottom:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div>
-              <div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#3b82f6",borderRadius:99,width:(x.n/Math.max(reqs.length,1)*100)+"%"}}/></div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -631,8 +857,11 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
   const [sort,setSort]=useState("date");
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
   const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):reqs;
+
+  // Listas únicas para filtros
   const respOptions=[...new Set(base.map(r=>r.assignedTo).filter(x=>x&&x!=="Sin asignar"))].sort();
   const provOptions=[...new Set(base.map(r=>r.proveedor).filter(Boolean))].sort();
+
   const visible=base.filter(r=>{
     if(fi.status&&r.status!==fi.status) return false;
     if(fi.priority&&r.priority!==fi.priority) return false;
@@ -646,8 +875,10 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
   const quickSt=(r,ns)=>{
     if(!can(role,"changeStatus")){showToast("Sin permisos","error");return;}
     const upd={...r,status:ns,history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Estado cambiado",from:r.status,to:ns}]};
-    setReqs(p=>p.map(x=>x.id===r.id?upd:x));showToast("Estado actualizado");
+    setReqs(p=>p.map(x=>x.id===r.id?upd:x));
+    showToast("Estado actualizado");
   };
+
   return(
     <div>
       <div style={{...card,padding:12,marginBottom:12}}>
@@ -655,14 +886,17 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
           <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
           {[["status","Estado",STATUSES],["priority","Prioridad",PRIORITIES],["tower","Torre",actTowers]].map(([k,l,opts])=>(
             <select key={k} style={{...sel,flex:1}} value={fi[k]} onChange={ev=>setFi(p=>({...p,[k]:ev.target.value}))}>
-              <option value="">...{l}</option>{opts.map(o=><option key={o}>{o}</option>)}
+              <option value="">...{l}</option>
+              {opts.map(o=><option key={o}>{o}</option>)}
             </select>
           ))}
           <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
-            <option value="">...Responsable</option>{respOptions.map(o=><option key={o}>{o}</option>)}
+            <option value="">...Responsable</option>
+            {respOptions.map(o=><option key={o}>{o}</option>)}
           </select>
           <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
-            <option value="">...Proveedor</option>{provOptions.map(o=><option key={o}>{o}</option>)}
+            <option value="">...Proveedor</option>
+            {provOptions.map(o=><option key={o}>{o}</option>)}
           </select>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
@@ -683,7 +917,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       ):(
         <div style={card}>
           <table style={tbl}>
-            <thead><tr>{["","ID","Solicitante","Categoría","Torre","Prioridad","Estado","Responsable","Proveedor","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
             <tbody>{visible.map(r=>(
               <tr key={r.id} style={{background:r.priority==="Emergencia"?"#fef2f2":"",cursor:"pointer"}} onClick={()=>onOpen(r)}>
                 <td style={tdS}>{r.priority==="Emergencia"?"⚠":""}</td>
@@ -694,14 +928,18 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}><PBadge p={r.priority}/></td>
                 <td style={tdS}><SBadge s={r.status}/></td>
                 <td style={tdS}>{r.assignedTo}</td>
-                <td style={tdS}>{r.proveedor||<span style={{color:"#94a3b8"}}>—</span>}</td>
+                <td style={tdS}>{r.proveedor||"—"}</td>
                 <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
                     {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-                      <select style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+                      <select style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
+                        {STATUSES.map(s=><option key={s}>{s}</option>)}
+                      </select>
                     )}
-                    {can(role,"manageConfig")&&<button style={BD(true)} onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"?"))deleteReq(r.id);}}>🗑</button>}
+                    {can(role,"manageConfig")&&(
+                      <button style={BD(true)} onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"?"))deleteReq(r.id);}}>🗑</button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -761,6 +999,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     upd({status:"Cerrada"},{action:"Caso cerrado",from:"Resuelta",to:"Cerrada"});
     showToast("Solicitud cerrada"); setShowCl(false); return true;
   };
+
   const isProv=role==="Proveedor";
   const tabs=[
     ...(isProv?[]:[{id:"info",label:"Info"}]),
@@ -769,6 +1008,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     {id:"informe",label:"Informe OT"},
     ...(isProv?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
   ];
+
   return(
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
@@ -799,7 +1039,11 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               <div><label style={lbl}>Proveedor</label>
               <div style={{display:"flex",gap:6}}>
                 <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
-                <button style={BS(true)} onClick={()=>{const val=document.getElementById("prov-input").value.trim();upd({proveedor:val||null});showToast("Proveedor actualizado");}}>OK</button>
+                <button style={BS(true)} onClick={()=>{
+                  const val=document.getElementById("prov-input").value.trim();
+                  upd({proveedor:val||null});
+                  showToast("Proveedor actualizado");
+                }}>OK</button>
               </div></div>
             )}
             {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
@@ -811,9 +1055,9 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       <Tabs tabs={tabs} active={tab} onChange={setTab}/>
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
-          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Teléfono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/></div>
-          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoría" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creación" v={fmt(r.createdAt)}/></div>
-          <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripción</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{r.description||"Sin descripción."}</p></div>
+          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Telefono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/>{r.affectedTowers&&<IR l="Torres afectadas" v={r.affectedTowers}/>}</div>
+          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/></div>
+          <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripcion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{r.description||"Sin descripcion."}</p></div>
           <div style={{...card,gridColumn:"1/-1"}}>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Comentarios ({safeComments.length})</div>
             {safeComments.map((c,i)=>(
@@ -846,20 +1090,87 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       )}
       {tab==="tasks"&&(
         <div>
+          {!isProv&&(()=>{
+            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+            return ["inicial","avance","cierre"].map(type=>{
+              const myAtt=allAtts.filter(a=>a.type===type);
+              return(
+                <div key={type} style={card}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                  </div>
+                  {myAtt.length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>}
+                </div>
+              );
+            });
+          })()}
           {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
           {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
           {myTasks.length>0&&(
             <div style={{marginTop:8}}>
-              <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>Órdenes ({myTasks.length})</div>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
               {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
             </div>
           )}
         </div>
       )}
       {tab==="informe"&&(
-        myTasks.length===0
-          ?<Empty msg="No hay órdenes de trabajo para reportar."/>
-          :<div>{myTasks.map(t=><InformeInline key={t.id} task={t} setTasks={setTasks} showToast={showToast}/>)}</div>
+        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=>{
+          const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+          // Mostrar solo la orden correspondiente si soy ejecutor
+          const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
+          if(isEjecutor&&!miOrden) return null;
+          return(
+            <div key={t.id}>
+              {/* Resumen de la orden siempre visible en modo ejecutor */}
+              {isEjecutor&&(
+                <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
+                  <div style={{fontWeight:700,fontSize:14,color:"#4338ca",marginBottom:6}}>📋 Mi Orden de Trabajo</div>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
+                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>👤 Responsable: {t.responsible}</div>
+                      <div style={{fontSize:12,color:"#6366f1"}}>🔧 Ejecutor: {t.ejecutor}</div>
+                      {t.desc&&<div style={{fontSize:12,color:"#374151",marginTop:4}}>{t.desc}</div>}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                      <PBadge p={t.priority}/>
+                      <SBadge s={t.status}/>
+                      {t.dueDate&&<span style={{fontSize:11,color:"#64748b"}}>📅 {fmtD(t.dueDate)}</span>}
+                    </div>
+                  </div>
+                  {/* Info solicitud */}
+                  <div style={{marginTop:10,padding:"8px 10px",background:"#fff",borderRadius:8,border:"1px solid #c7d2fe"}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
+                      <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
+                      <SBadge s={r.status}/>
+                    </div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
+                  </div>
+                </div>
+              )}
+              {["avance","cierre"].map(type=>{
+                const myAtt=allAtts.filter(a=>a.type===type);
+                return(
+                  <div key={type} style={card}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                      {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                    </div>
+                    {myAtt.length===0
+                      ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
+                      :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
+                    }
+                  </div>
+                );
+              })}
+              <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+            </div>
+          );
+        })
       )}
       {!isProv&&tab==="emails"&&(
         <div style={card}>
@@ -879,6 +1190,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   );
 }
 
+// ── TaskForm ───────────────────────────────────────────────────────────────
 function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
@@ -889,6 +1201,13 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
     const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
     setTasks(p=>[...p,newTask]); showToast("Orden creada");
     if(inline) setF(initF()); else onClose();
+    if(f.ejecutor){
+      try{
+        const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(f.ejecutor)+"&active=eq.true",{headers:hdr()});
+        const users=await res.json(); const u=users&&users[0];
+        if(u?.email) await sendMail(u.email,"[CondoAdmin] Nueva orden asignada","Hola "+u.nombre+", orden: "+f.title+(req?"\nSolicitud: "+req.code:""));
+      }catch(_){}
+    }
   };
   return(
     <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
@@ -906,6 +1225,7 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
   );
 }
 
+// ── TaskCard ───────────────────────────────────────────────────────────────
 function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
   const [cmt,setCmt]=useState("");
   const [showEv,setShowEv]=useState(false);
@@ -936,20 +1256,40 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
         <button style={BS(true)} onClick={addC}>Enviar</button>
         <button style={BS(true)} onClick={()=>setShowEv(true)}>📷</button>
         {task.status!=="Completada"&&(can(role,"resolveTask")||can(role,"changeStatus"))&&<button style={BSu(true)} onClick={resolve}>✓ Completar</button>}
-        {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar?"))deleteTask(task.id);}}>🗑</button>}
+        {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar esta orden?"))deleteTask(task.id);}}>🗑 Eliminar</button>}
       </div>
       {showEv&&<EvidModal type="cierre" requestId={task.requestId} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)} taskId={task.id} setTasks={setTasks}/>}
     </div>
   );
 }
 
+// ── InformeInline ──────────────────────────────────────────────────────────
 function InformeInline({task,setTasks,showToast}){
-  const [f,setF]=useState({texto:task.informe||"",fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),horaInicio:task.horaInicio||"",horaTermino:task.horaTermino||"",herramientas:task.herramientas||"",estadoFinal:task.estadoFinal||"Resuelto",requiereSeguimiento:task.requiereSeguimiento||false,observaciones:task.observaciones||"",nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",vistoBueno:task.vistoBueno||false});
+  const [f,setF]=useState({
+    texto:task.informe||"",
+    fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),
+    horaInicio:task.horaInicio||"",horaTermino:task.horaTermino||"",
+    herramientas:task.herramientas||"",estadoFinal:task.estadoFinal||"Resuelto",
+    requiereSeguimiento:task.requiereSeguimiento||false,observaciones:task.observaciones||"",
+    nombreEjecutor:task.nombreEjecutor||task.ejecutor||"",vistoBueno:task.vistoBueno||false
+  });
   const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
+  const [esc,setEsc]=useState(false);
+  const recRef=useRef(null);
+  const iniciarVoz=()=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){alert("Usa Chrome");return;}
+    const rec=new SR(); rec.lang="es-CL"; rec.continuous=true; rec.interimResults=false;
+    rec.onresult=ev=>{const t=Array.from(ev.results).map(x=>x[0].transcript).join(" ");setFld("texto",(f.texto?f.texto+" ":"")+t);};
+    rec.onerror=()=>setEsc(false); rec.onend=()=>setEsc(false);
+    recRef.current=rec; rec.start(); setEsc(true);
+  };
+  const detenerVoz=()=>{if(recRef.current)recRef.current.stop();setEsc(false);};
   const guardar=()=>{
     if(!f.texto.trim()){showToast("Ingrese la descripción","error");return;}
     if(!f.vistoBueno){showToast("Debe confirmar el trabajo realizado","error");return;}
-    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto}:t));showToast("Informe guardado");
+    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto}:t));
+    showToast("Informe guardado");
   };
   return(
     <div style={{...card,marginBottom:16}}>
@@ -961,10 +1301,16 @@ function InformeInline({task,setTasks,showToast}){
         <div style={fg}><label style={lbl}>Hora término</label><input type="time" style={inp} value={f.horaTermino} onChange={ev=>setFld("horaTermino",ev.target.value)}/></div>
       </div>
       <div style={fg}><label style={lbl}>Descripción *</label><textarea style={{...inp,height:100,resize:"vertical"}} placeholder="Describe lo que se realizó..." value={f.texto} onChange={ev=>setFld("texto",ev.target.value)}/></div>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        {esc?<button style={{...BD(false),flex:1,justifyContent:"center"}} onClick={detenerVoz}>⏹ Detener</button>:<button style={{...BPu(false),flex:1,justifyContent:"center"}} onClick={iniciarVoz}>🎤 Dictar por voz</button>}
+        {esc&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#ef4444"}}>⏺ Escuchando...</div>}
+      </div>
       <div style={fg}><label style={lbl}>Herramientas</label><input style={inp} placeholder="ej: Taladro, Multímetro..." value={f.herramientas} onChange={ev=>setFld("herramientas",ev.target.value)}/></div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
         {ESTADOS_INFORME.map(est=>{
-          const isSel=f.estadoFinal===est;const color=est==="Resuelto"?"#10b981":est==="Resuelto parcialmente"?"#f59e0b":"#ef4444";const bg=est==="Resuelto"?"#f0fdf4":est==="Resuelto parcialmente"?"#fffbeb":"#fef2f2";
+          const isSel=f.estadoFinal===est;
+          const color=est==="Resuelto"?"#10b981":est==="Resuelto parcialmente"?"#f59e0b":"#ef4444";
+          const bg=est==="Resuelto"?"#f0fdf4":est==="Resuelto parcialmente"?"#fffbeb":"#fef2f2";
           return <button key={est} onClick={()=>setFld("estadoFinal",est)} style={{padding:"6px 12px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"2px solid "+(isSel?color:"#e2e8f0"),background:isSel?bg:"#f9fafb",color:isSel?color:"#6b7280"}}>{est==="Resuelto"?"✅":est==="Resuelto parcialmente"?"⚠️":"🔄"} {est}</button>;
         })}
       </div>
@@ -977,6 +1323,7 @@ function InformeInline({task,setTasks,showToast}){
   );
 }
 
+// ── MatPanel ───────────────────────────────────────────────────────────────
 function MatPanel({materials,setMaterials,readOnly}){
   const [showAdd,setShowAdd]=useState(false);
   const [nm,setNm]=useState({name:"",qty:1,unit:INV_UNITS[0],cost:0,status:"Por adquirir"});
@@ -1017,6 +1364,7 @@ function MatPanel({materials,setMaterials,readOnly}){
   );
 }
 
+// ── EvidModal ──────────────────────────────────────────────────────────────
 function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,setTasks}){
   const [previews,setPrev]=useState([]);
   const [rawFiles,setRawFiles]=useState([]);
@@ -1050,7 +1398,16 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:14}}>📷 Evidencia - {type}</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
         <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
         <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:20,textAlign:"center",cursor:"pointer",marginBottom:12,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:32,marginBottom:6}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para seleccionar imágenes</div></div>
-        {previews.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>{previews.map((pv,i)=><div key={i} style={{position:"relative"}}><img src={pv.url} alt={pv.name} style={{...thumb,width:80,height:64}}/><button onClick={()=>{setPrev(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9}}>✕</button></div>)}</div>}
+        {previews.length>0&&(
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+            {previews.map((pv,i)=>(
+              <div key={i} style={{position:"relative"}}>
+                <img src={pv.url} alt={pv.name} style={{...thumb,width:80,height:64}}/>
+                <button onClick={()=>{setPrev(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9}}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
         <div style={fg}><label style={lbl}>Comentario</label><input style={inp} value={comment} onChange={ev=>setCmt(ev.target.value)} placeholder="Descripción..."/></div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={save} disabled={uploading}>{uploading?"Subiendo...":"Guardar"}</button></div>
       </div>
@@ -1058,6 +1415,7 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
   );
 }
 
+// ── CloseModal ─────────────────────────────────────────────────────────────
 function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
   const closure=atts.filter(a=>a.requestId===req.id&&a.type==="cierre");
   const [showEv,setShowEv]=useState(false);
@@ -1079,6 +1437,7 @@ function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
   );
 }
 
+// ── NewReqModal ────────────────────────────────────────────────────────────
 function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
   const actCats=cats.filter(c=>c.active);
   const actTowers=towers.filter(t=>t.active);
@@ -1090,6 +1449,8 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const [adminCat,setAdminCat]=useState(adminCatList[0]);
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
   const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
+
+  const isAreaComun=f.tower==="Comun";
   const [errs,setErrs]=useState({});
   const [prevs,setPrevs]=useState([]);
   const [rawFiles,setRawFiles]=useState([]);
@@ -1097,14 +1458,27 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const [saving,setSaving]=useState(false);
   const fileRef=useRef();
   const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
+
   const validate=()=>{
     const err={};
-    if(tipo==="Incidencia"){if(!f.requesterName) err.requesterName="Requerido";if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail)) err.requesterEmail="Email inválido";if(!f.unit) err.unit="Requerido";}
+    if(tipo==="Incidencia"){
+      if(!f.requesterName) err.requesterName="Requerido";
+      if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail)) err.requesterEmail="Email inválido";
+      if(!f.unit) err.unit="Requerido";
+    }
     if(!f.description||f.description.length<10) err.description="Min. 10 caracteres";
     if(!f.confirm) err.confirm="Debe confirmar";
-    setErrs(err);return !Object.keys(err).length;
+    setErrs(err);
+    return !Object.keys(err).length;
   };
-  const handleFiles=ev=>Array.from(ev.target.files).forEach(fi=>{const rd=new FileReader();rd.onload=e2=>setPrevs(p=>[...p,{name:fi.name,url:e2.target.result}]);rd.readAsDataURL(fi);setRawFiles(p=>[...p,fi]);});
+
+  const handleFiles=ev=>Array.from(ev.target.files).forEach(fi=>{
+    const rd=new FileReader();
+    rd.onload=e2=>setPrevs(p=>[...p,{name:fi.name,url:e2.target.result}]);
+    rd.readAsDataURL(fi);
+    setRawFiles(p=>[...p,fi]);
+  });
+
   const submit=async()=>{
     if(!validate()) return;
     setSaving(true);
@@ -1117,18 +1491,27 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     const nr=normReq({id:code,code,createdAt:now,...f,
       category:tipo==="Administrativo"?adminCat:f.category,
       subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
+      affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
       status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
       attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    if(f.requesterEmail?.includes("@")) addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
+    // Mail al solicitante
+    if(f.requesterEmail&&f.requesterEmail.includes("@")){
+      console.log("Enviando mail a solicitante:", f.requesterEmail);
+      addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
+    }
+    // Mail a administradores
     try{
-      const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email?.includes("@"));
-      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud:\n\nCódigo: "+code+"\nSolicitante: "+f.requesterName+"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)+"\nPrioridad: "+f.priority}));
-    }catch(_){}
+      const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
+      console.log("Admins a notificar:", admins.map(u=>u.email));
+      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+f.requesterName+"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)+"\nPrioridad: "+f.priority+"\n\nIngrese al sistema para gestionar."}));
+    }catch(ex){console.warn("Error notificando admins",ex);}
     setDone(nr); showToast("Solicitud "+code+" creada"); setSaving(false);
   };
+
   const curCat=actCats.find(c=>c.name===f.category);
+
   if(done) return(
     <div style={MSt}>
       <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"24px",marginTop:16,textAlign:"center"}}>
@@ -1142,6 +1525,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       </div>
     </div>
   );
+
   return(
     <div style={MSt}>
       <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:680,padding:"20px",marginTop:16,marginBottom:16}}>
@@ -1149,46 +1533,113 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
         {isAdmin&&(
           <div style={{display:"flex",gap:10,marginBottom:16}}>
             {["Administrativo","Incidencia"].map(tp=>{
-              const isActive=tipo===tp;const color=tp==="Administrativo"?"#6366f1":"#ef4444";
+              const isActive=tipo===tp;
+              const color=tp==="Administrativo"?"#6366f1":"#ef4444";
               return <button key={tp} onClick={()=>setTipo(tp)} style={{flex:1,padding:"12px",borderRadius:10,border:"2px solid "+(isActive?color:"#e2e8f0"),background:isActive?(tp==="Administrativo"?"#eef2ff":"#fef2f2"):"#f9fafb",color:isActive?color:"#6b7280",fontWeight:isActive?700:400,cursor:"pointer",fontSize:14}}>{tp==="Administrativo"?"📋 Administrativo":"🚨 Incidencia"}</button>;
             })}
           </div>
         )}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          {tipo==="Incidencia"&&(<>
-            {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,lb,tp])=>(
-              <div key={k} style={fg}><label style={lbl}>{lb}</label><input type={tp} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={ev=>setFld(k,ev.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
-            ))}
-            <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>setFld("tower",ev.target.value)}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
-            <div style={fg}><label style={lbl}>Unidad / Piso *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
-            <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
-            <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
-          </>)}
-          {isAdmin&&tipo==="Administrativo"&&(<>
-            <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={adminCat} onChange={ev=>{setAdminCat(ev.target.value);setAdminSub(ADMIN_CATS[ev.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
-            <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={adminSub} onChange={ev=>setAdminSub(ev.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
-          </>)}
-          <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción *</label><textarea style={{...inp,height:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={ev=>setFld("description",ev.target.value)} placeholder="Describa el problema o solicitud..."/>{errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}</div>
+          {tipo==="Incidencia"&&(
+            <>
+              {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,lb,tp])=>(
+                <div key={k} style={fg}><label style={lbl}>{lb}</label><input type={tp} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={ev=>setFld(k,ev.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
+              ))}
+              <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>{setFld("tower",ev.target.value);setFld("affectedTowers",[]);}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+
+              {/* Si es Area Común: selector de torres afectadas */}
+              {isAreaComun&&(
+                <div style={{...fg,gridColumn:"1/-1"}}>
+                  <label style={lbl}>Torres afectadas</label>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+                    <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer",padding:"6px 12px",borderRadius:8,border:"2px solid "+(f.affectedTowers.length===0?"#3b82f6":"#e2e8f0"),background:f.affectedTowers.length===0?"#eff6ff":"#f9fafb",color:f.affectedTowers.length===0?"#1d4ed8":"#374151",fontWeight:f.affectedTowers.length===0?700:400}}>
+                      <input type="radio" name="affTowers" style={{display:"none"}} checked={f.affectedTowers.length===0} onChange={()=>setFld("affectedTowers",[])}/>
+                      Todas las torres
+                    </label>
+                    {actTowers.filter(t=>t.name!=="Comun").map(t=>{
+                      const sel2=f.affectedTowers.includes(t.name);
+                      return(
+                        <label key={t.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer",padding:"6px 12px",borderRadius:8,border:"2px solid "+(sel2?"#6366f1":"#e2e8f0"),background:sel2?"#eef2ff":"#f9fafb",color:sel2?"#4338ca":"#374151",fontWeight:sel2?700:400}}>
+                          <input type="checkbox" style={{display:"none"}} checked={sel2} onChange={()=>{
+                            const cur=f.affectedTowers;
+                            setFld("affectedTowers",sel2?cur.filter(x=>x!==t.name):[...cur,t.name]);
+                          }}/>
+                          {t.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>
+                    {f.affectedTowers.length===0?"Afecta a todas las torres":("Afecta a: "+f.affectedTowers.join(", "))}
+                  </div>
+                </div>
+              )}
+              <div style={fg}><label style={lbl}>Unidad / Piso *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401, Piso 4, Bodega 2"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
+              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
+            </>
+          )}
+          {isAdmin&&tipo==="Administrativo"&&(
+            <>
+              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={adminCat} onChange={ev=>{setAdminCat(ev.target.value);setAdminSub(ADMIN_CATS[ev.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={adminSub} onChange={ev=>setAdminSub(ev.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
+            </>
+          )}
+          <div style={{...fg,gridColumn:"1/-1"}}>
+            <label style={lbl}>Descripción *</label>
+            <textarea style={{...inp,height:tipo==="Administrativo"?120:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={ev=>setFld("description",ev.target.value)} placeholder={tipo==="Administrativo"?"Detalle administrativo...":"Describa el problema..."}/>
+            {errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}
+          </div>
           <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={ev=>setFld("priority",ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
-          {tipo==="Incidencia"&&<>
-            <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Imágenes (opcional)</label><input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/><div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:24,marginBottom:4}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div></div>{prevs.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prevs.map((pv,i)=><div key={i} style={{position:"relative"}}><img src={pv.url} alt={pv.name} style={{...thumb,width:72,height:56}}/><button onClick={()=>{setPrevs(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10}}>✕</button></div>)}</div>}</div>
-            <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={ev=>setFld("accessPermission",ev.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
-          </>}
-          <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="conf" checked={f.confirm} onChange={ev=>setFld("confirm",ev.target.checked)}/><label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la información es correcta *</label>{errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}</div>
+          {tipo==="Incidencia"&&(
+            <>
+              <div style={{...fg,gridColumn:"1/-1"}}>
+                <label style={lbl}>Imágenes (opcional)</label>
+                <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
+                <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:24,marginBottom:4}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div></div>
+                {prevs.length>0&&(
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {prevs.map((pv,i)=>(
+                      <div key={i} style={{position:"relative"}}>
+                        <img src={pv.url} alt={pv.name} style={{...thumb,width:72,height:56}}/>
+                        <button onClick={()=>{setPrevs(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={ev=>setFld("accessPermission",ev.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
+            </>
+          )}
+          <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}>
+            <input type="checkbox" id="conf" checked={f.confirm} onChange={ev=>setFld("confirm",ev.target.checked)}/>
+            <label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la información es correcta *</label>
+            {errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}
+          </div>
         </div>
+        {tipo==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA</strong></div>}
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
           <button style={BS(true)} onClick={onClose}>Cancelar</button>
-          <button style={tipo==="Administrativo"?BPu(true):BP(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
+          {tipo==="Administrativo"
+            ?<button style={BPu(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
+            :<button style={BP(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
+          }
         </div>
       </div>
     </div>
   );
 }
 
+// ── TasksView ──────────────────────────────────────────────────────────────
 function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign}){
   const [fi,setFi]=useState({status:"",responsible:"",q:""});
   const validReqIds=new Set(reqs.map(r=>r.id));
-  const visible=tasks.filter(t=>validReqIds.has(t.requestId)&&(!fi.status||t.status===fi.status)&&(!fi.responsible||t.responsible===fi.responsible)&&(!fi.q||(t.title+" "+(t.responsible||"")).toLowerCase().includes(fi.q.toLowerCase())));
+  const visible=tasks.filter(t=>
+    validReqIds.has(t.requestId)&&
+    (!fi.status||t.status===fi.status)&&
+    (!fi.responsible||t.responsible===fi.responsible)&&
+    (!fi.q||(t.title+" "+(t.responsible||"")).toLowerCase().includes(fi.q.toLowerCase()))
+  );
   return(
     <div>
       <div style={{...card,padding:12,marginBottom:12}}>
@@ -1200,89 +1651,189 @@ function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign
       </div>
       {visible.length===0?<Empty msg="Sin órdenes"/>:visible.map(t=>{
         const req=reqs.find(r=>r.id===t.requestId);
-        return(<div key={t.id} style={{...card,borderLeft:"4px solid "+(PC[t.priority]||"#e2e8f0"),marginBottom:8,padding:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-            <div style={{minWidth:0}}>
-              <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
-              {req&&<div style={{fontSize:10,color:"#3b82f6"}}>{req.code}</div>}
-              <div style={{fontSize:11,color:"#64748b"}}>👤 {t.responsible}{t.ejecutor&&" · 🔧 "+t.ejecutor}</div>
-              {t.dueDate&&<div style={{fontSize:11,color:"#94a3b8"}}>📅 {fmtD(t.dueDate)}</div>}
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}>
-              <div style={{display:"flex",gap:4}}><PBadge p={t.priority}/><SBadge s={t.status}/></div>
-              {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar?"))deleteTask(t.id);}}>🗑</button>}
+        return(
+          <div key={t.id} style={{...card,borderLeft:"4px solid "+(PC[t.priority]||"#e2e8f0"),marginBottom:8,padding:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
+                {req&&<div style={{fontSize:10,color:"#3b82f6"}}>{req.code}</div>}
+                <div style={{fontSize:11,color:"#64748b"}}>👤 {t.responsible}{t.ejecutor&&" · 🔧 "+t.ejecutor}</div>
+                {t.dueDate&&<div style={{fontSize:11,color:"#94a3b8"}}>📅 {fmtD(t.dueDate)}</div>}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}>
+                <div style={{display:"flex",gap:4}}><PBadge p={t.priority}/><SBadge s={t.status}/></div>
+                {can(role,"manageConfig")&&deleteTask&&(
+                  <button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden \""+t.title+"\"?"))deleteTask(t.id);}}>🗑 Eliminar</button>
+                )}
+              </div>
             </div>
           </div>
-        </div>);
+        );
       })}
     </div>
   );
 }
 
+// ── MisSolicitudes ─────────────────────────────────────────────────────────
 function MisSolicitudes({tasks,reqs,session,role,onOpen,mob}){
-  const nombre=session?.nombre||""; const email=session?.email||"";
+  const nombre=session?.nombre||"";
+  const email=session?.email||"";
   const [tabMS,setTabMS]=useState("ejecutor");
-  const [filterSt,setFilterSt]=useState(""); const [q,setQ]=useState("");
-  const matchMe=val=>val&&(val===nombre||val===email);
+  const [selIds,setSelIds]=useState([]);
+  const [filterSt,setFilterSt]=useState("");
+  const [q,setQ]=useState("");
+
+  const matchMe = (val) => val&&(val===nombre||val===email);
+
+  // Tareas donde soy ejecutor
   const tareasEjecutor=tasks.filter(t=>matchMe(t.ejecutor));
+  // Tareas donde soy responsable (aunque también sea ejecutor — se muestran en ambas)
   const tareasResponsable=tasks.filter(t=>matchMe(t.responsible));
+
+  // Solicitudes únicas por grupo
   const reqIdsEjecutor=[...new Set(tareasEjecutor.map(t=>t.requestId))];
   const reqIdsResponsable=[...new Set(tareasResponsable.map(t=>t.requestId))];
+
+  // Si no hay tareas, buscar también solicitudes asignadas directamente
   const reqsAsignadas=reqs.filter(r=>matchMe(r.assignedTo));
-  const allReqIdsResp=[...new Set([...reqIdsResponsable,...reqsAsignadas.map(r=>r.id)])];
-  const activeIds=tabMS==="ejecutor"?reqIdsEjecutor:allReqIdsResp;
+  const reqIdsAsignadas=reqsAsignadas.map(r=>r.id);
+  const allReqIdsResponsable=[...new Set([...reqIdsResponsable,...reqIdsAsignadas])];
+
+  const activeIds=tabMS==="ejecutor"?reqIdsEjecutor:allReqIdsResponsable;
   const activeTareas=tabMS==="ejecutor"?tareasEjecutor:tareasResponsable;
-  const visibleReqs=reqs.filter(r=>activeIds.includes(r.id)&&(!filterSt||r.status===filterSt)&&(!q||(r.code+" "+r.category).toLowerCase().includes(q.toLowerCase())));
-  const tabs=[{id:"ejecutor",label:"Como Ejecutor ("+reqIdsEjecutor.length+")"},{id:"responsable",label:"Como Responsable ("+reqIdsResponsable.length+")"}];
+
+  const visibleReqs=reqs.filter(r=>
+    activeIds.includes(r.id)&&
+    (!filterSt||r.status===filterSt)&&
+    (!q||(r.code+" "+r.category+" "+(r.description||"")).toLowerCase().includes(q.toLowerCase()))
+  );
+
+  const toggleSel=id=>setSelIds(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const toggleAll=()=>setSelIds(selIds.length===visibleReqs.length?[]:visibleReqs.map(r=>r.id));
+
+  const tabs=[
+    {id:"ejecutor",label:"Como Ejecutor ("+reqIdsEjecutor.length+")"},
+    {id:"responsable",label:"Como Responsable ("+reqIdsResponsable.length+")"},
+  ];
+
   return(
     <div>
-      <Tabs tabs={tabs} active={tabMS} onChange={t=>setTabMS(t)} accent="#6366f1"/>
+      <Tabs tabs={tabs} active={tabMS} onChange={t=>{setTabMS(t);setSelIds([]);}} accent="#6366f1"/>
+
+      {/* Resumen del rol */}
       <div style={{...card,background:tabMS==="ejecutor"?"#eef2ff":"#f0fdf4",border:"1px solid "+(tabMS==="ejecutor"?"#c7d2fe":"#86efac"),marginBottom:12}}>
-        <div style={{fontWeight:600,fontSize:13,color:tabMS==="ejecutor"?"#4338ca":"#16a34a",marginBottom:4}}>{tabMS==="ejecutor"?"🔧 Eres el ejecutor de estas solicitudes":"👤 Eres el responsable de estas solicitudes"}</div>
+        <div style={{fontWeight:600,fontSize:13,color:tabMS==="ejecutor"?"#4338ca":"#16a34a",marginBottom:4}}>
+          {tabMS==="ejecutor"?"🔧 Eres el ejecutor de estas solicitudes":"👤 Eres el responsable de estas solicitudes"}
+        </div>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
           <span style={bdg("#6366f1","#eef2ff")}>{activeTareas.filter(t=>{const r=reqs.find(x=>x.id===t.requestId);return r&&!["Cerrada","Rechazada"].includes(r.status);}).length} activas</span>
-          <span style={bdg("#10b981","#f0fdf4")}>{activeTareas.filter(t=>t.status==="Completada").length} completadas</span>
+          <span style={bdg("#10b981","#f0fdf4")}>{activeTareas.filter(t=>t.status==="Completada").length} órdenes completadas</span>
+          <span style={bdg("#ef4444","#fef2f2")}>{activeTareas.filter(t=>t.informe?.trim()).length} con informe</span>
         </div>
       </div>
+
+      {/* Filtros */}
       <div style={{...card,padding:12,marginBottom:12}}>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={q} onChange={ev=>setQ(ev.target.value)}/>
-          <select style={{...sel,flex:1}} value={filterSt} onChange={ev=>setFilterSt(ev.target.value)}><option value="">Todos los estados</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
-          <span style={{fontSize:11,color:"#64748b",flexShrink:0,alignSelf:"center"}}>{visibleReqs.length} solicitudes</span>
+          <select style={{...sel,flex:1}} value={filterSt} onChange={ev=>setFilterSt(ev.target.value)}>
+            <option value="">Todos los estados</option>
+            {STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select>
+          <span style={{fontSize:11,color:"#64748b",flexShrink:0}}>{visibleReqs.length} solicitudes</span>
         </div>
+        {visibleReqs.length>0&&(
+          <div style={{marginTop:8,display:"flex",gap:6,alignItems:"center"}}>
+            <button style={BS(true)} onClick={toggleAll}>
+              {selIds.length===visibleReqs.length?"Deseleccionar todo":"Seleccionar todo"}
+            </button>
+            {selIds.length>0&&(
+              <span style={bdg("#6366f1","#eef2ff")}>{selIds.length} seleccionada(s)</span>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Lista */}
       {visibleReqs.length===0?<Empty msg="Sin solicitudes en esta categoría"/>:(
         <div>{visibleReqs.map(r=>{
           const misOTs=activeTareas.filter(t=>t.requestId===r.id);
-          return(<div key={r.id} style={{...card,borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0"),marginBottom:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
-            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:4}}>
-              <span style={{fontWeight:700,color:"#6366f1",fontSize:13}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/>
-            </div>
-            <div style={{fontSize:13,fontWeight:600,marginBottom:2}}>{r.category} — {r.subcategory}</div>
-            <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>{r.description?.slice(0,80)}{r.description?.length>80?"...":""}</div>
-            {misOTs.map(t=>(
-              <div key={t.id} style={{background:"#f8fafc",borderRadius:6,padding:"6px 10px",marginBottom:4,border:"1px solid #e2e8f0"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                  <span style={{fontSize:12,fontWeight:600}}>{t.title}</span>
-                  <div style={{display:"flex",gap:4}}><SBadge s={t.status}/>{t.informe?.trim()&&<span style={bdg("#10b981","#f0fdf4")}>✓ Informe</span>}</div>
+          const isSel=selIds.includes(r.id);
+          return(
+            <div key={r.id} style={{...card,borderLeft:"4px solid "+(isSel?"#6366f1":PC[r.priority]||"#e2e8f0"),marginBottom:8,background:isSel?"#eef2ff":"#fff",transition:"background .15s"}}>
+              <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                {/* Checkbox */}
+                <div style={{paddingTop:2,flexShrink:0}}>
+                  <input type="checkbox" checked={isSel} onChange={()=>toggleSel(r.id)} style={{width:16,height:16,cursor:"pointer",accentColor:"#6366f1"}}/>
+                </div>
+                {/* Info */}
+                <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>onOpen(r)}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:4}}>
+                    <span style={{fontWeight:700,color:"#6366f1",fontSize:13}}>{r.code}</span>
+                    <PBadge p={r.priority}/>
+                    <SBadge s={r.status}/>
+                  </div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#1e293b",marginBottom:2}}>{r.category} — {r.subcategory}</div>
+                  <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>{r.description?.slice(0,80)}{r.description?.length>80?"...":""}</div>
+                  {/* Mis órdenes en esta solicitud */}
+                  {misOTs.map(t=>(
+                    <div key={t.id} style={{background:"#f8fafc",borderRadius:6,padding:"6px 10px",marginBottom:4,border:"1px solid #e2e8f0"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <div>
+                          <span style={{fontSize:12,fontWeight:600}}>{t.title}</span>
+                          <div style={{fontSize:10,color:"#64748b",marginTop:1}}>
+                            {tabMS==="ejecutor"?"🔧 Ejecutor":"👤 Responsable"} · {t.dueDate?("📅 "+fmtD(t.dueDate)):"Sin fecha"}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:4,alignItems:"center",flexShrink:0}}>
+                          <SBadge s={t.status}/>
+                          {t.informe?.trim()&&<span style={bdg("#10b981","#f0fdf4")}>✓ Informe</span>}
+                          {!t.informe?.trim()&&t.status!=="Completada"&&t.dueDate&&Math.ceil((new Date(t.dueDate)-new Date())/86400000)<=3&&(
+                            <span style={bdg("#ef4444","#fef2f2")}>⚠ Vence pronto</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>Torre {r.tower}{r.unit?" / Unidad "+r.unit:""} · {fmtD(r.createdAt)}</div>
                 </div>
               </div>
-            ))}
-          </div>);
+            </div>
+          );
         })}</div>
+      )}
+
+      {/* Acciones con seleccionados */}
+      {selIds.length>0&&(
+        <div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"#1e293b",borderRadius:12,padding:"12px 20px",display:"flex",gap:12,alignItems:"center",zIndex:500,boxShadow:"0 8px 24px rgba(0,0,0,.3)"}}>
+          <span style={{color:"#fff",fontSize:13,fontWeight:600}}>{selIds.length} seleccionada(s)</span>
+          <button style={BS(true)} onClick={()=>setSelIds([])}>Limpiar</button>
+          <button style={BP(true)} onClick={()=>{const r=reqs.find(x=>x.id===selIds[0]);if(r)onOpen(r);}}>Ver detalle</button>
+        </div>
       )}
     </div>
   );
 }
 
+// ── ProviderDash ───────────────────────────────────────────────────────────
 function ProviderDash({role,mob,reqs,session}){
   const myReqs=reqs.filter(r=>r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email));
   return(
     <div>
       <div style={{...card,background:"#1e3a5f",marginBottom:16}}><div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Mis Trabajos Asignados</div><div style={{color:"#94a3b8",fontSize:12}}>Asignados a {session?.nombre||"ti"}</div></div>
-      <Grid cols={3} mob={mob}><Kpi value={myReqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Activas" color="#3b82f6" mob={mob}/><Kpi value={myReqs.filter(r=>r.status==="Resuelta").length} label="Resueltas" color="#10b981" mob={mob}/><Kpi value={myReqs.filter(r=>r.status==="Cerrada").length} label="Cerradas" color="#6b7280" mob={mob}/></Grid>
+      <Grid cols={3} mob={mob}>
+        <Kpi value={myReqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Activas" color="#3b82f6" mob={mob}/>
+        <Kpi value={myReqs.filter(r=>r.status==="Resuelta").length} label="Resueltas" color="#10b981" mob={mob}/>
+        <Kpi value={myReqs.filter(r=>r.status==="Cerrada").length} label="Cerradas" color="#6b7280" mob={mob}/>
+      </Grid>
       {myReqs.length===0?<Empty msg="No tienes solicitudes asignadas"/>:(
-        <div>{myReqs.map(r=>(<div key={r.id} style={{...card,borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0"),marginBottom:10,padding:14}}><div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}><span style={{fontWeight:700,color:"#3b82f6"}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div><div style={{fontWeight:600,fontSize:14,marginBottom:3}}>{r.category}</div><div style={{fontSize:12,color:"#374151",marginTop:4}}>{r.description}</div></div>))}</div>
+        <div>{myReqs.map(r=>(
+          <div key={r.id} style={{...card,borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0"),marginBottom:10,padding:14}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}><span style={{fontWeight:700,color:"#3b82f6"}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
+            <div style={{fontWeight:600,fontSize:14,marginBottom:3}}>{r.category}</div>
+            <div style={{fontSize:12,color:"#374151",marginTop:4}}>{r.description}</div>
+          </div>
+        ))}</div>
       )}
     </div>
   );
@@ -1310,15 +1861,17 @@ function Inspections({inspections,setInsp,reqs,setReqs,showToast,role,mob,towers
         <div>{[...inspections].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(ins=>{
           const mal=Object.values(ins.items||{}).filter(v=>v.state==="Malo").length;
           const reg=Object.values(ins.items||{}).filter(v=>v.state==="Regular").length;
-          return(<div key={ins.id} style={{...card,padding:12,marginBottom:8,cursor:"pointer",borderLeft:"4px solid "+(ins.status==="Finalizada"?"#10b981":"#f59e0b")}} onClick={()=>{setSelIns(ins);setSub("detail");}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-              <div><span style={{fontWeight:700,color:"#6366f1"}}>{ins.id}</span><div style={{fontSize:12,color:"#64748b"}}>{ins.sector} - {fmtD(ins.date)}</div></div>
-              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
-                <span style={bdg(ins.status==="Finalizada"?"#10b981":"#f59e0b",ins.status==="Finalizada"?"#f0fdf4":"#fffbeb")}>{ins.status}</span>
-                <div style={{display:"flex",gap:4}}>{mal>0&&<span style={bdg("#ef4444","#fef2f2")}>{mal} malos</span>}{reg>0&&<span style={bdg("#f59e0b","#fffbeb")}>{reg} reg.</span>}</div>
+          return(
+            <div key={ins.id} style={{...card,padding:12,marginBottom:8,cursor:"pointer",borderLeft:"4px solid "+(ins.status==="Finalizada"?"#10b981":"#f59e0b")}} onClick={()=>{setSelIns(ins);setSub("detail");}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <div><span style={{fontWeight:700,color:"#6366f1"}}>{ins.id}</span><div style={{fontSize:12,color:"#64748b"}}>{ins.sector} - {fmtD(ins.date)}</div></div>
+                <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                  <span style={bdg(ins.status==="Finalizada"?"#10b981":"#f59e0b",ins.status==="Finalizada"?"#f0fdf4":"#fffbeb")}>{ins.status}</span>
+                  <div style={{display:"flex",gap:4}}>{mal>0&&<span style={bdg("#ef4444","#fef2f2")}>{mal} malos</span>}{reg>0&&<span style={bdg("#f59e0b","#fffbeb")}>{reg} reg.</span>}</div>
+                </div>
               </div>
             </div>
-          </div>);
+          );
         })}</div>
       )}
     </div>
@@ -1338,28 +1891,13 @@ function InspForm({inspections,setInsp,reqs,setReqs,showToast,role,onBack,mob,to
   const getItem=(sid,name)=>items[sid+"_"+name]||{state:"",obs:"",urgency:"",images:[],reqId:null};
   const all=Object.values(items); const answered=all.filter(v=>v.state).length; const pct=Math.round((answered/all.length)*100);
   const handleImg=ev=>{if(!pendImg)return;const fi=ev.target.files[0];if(!fi)return;const rd=new FileReader();rd.onload=e2=>{const{sid,name}=pendImg;setItem(sid,name,"images",[...(getItem(sid,name).images||[]),e2.target.result]);};rd.readAsDataURL(fi);ev.target.value="";};
-  const createReq=(sid,name)=>{
-    const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
-    const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";
-    const nr=normReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});
-    setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");
-  };
-  const save=st=>{
-    if(!meta.sector||!meta.inspector){showToast("Complete sector e inspector","error");return;}
-    if(st==="Finalizada"&&!meta.conclusion.trim()){showToast("Ingrese conclusión","error");return;}
-    const code=genCode(inspections,"INS-");
-    setInsp(p=>[{id:code,date:meta.date,inspector:meta.inspector,sector:meta.sector,status:st,conclusion:meta.conclusion,items},...p]);
-    showToast(st==="Finalizada"?"Inspección finalizada":"Borrador guardado");onBack();
-  };
+  const createReq=(sid,name)=>{const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");};
+  const save=st=>{if(!meta.sector||!meta.inspector){showToast("Complete sector e inspector","error");return;}if(st==="Finalizada"&&!meta.conclusion.trim()){showToast("Ingrese conclusión","error");return;}const code=genCode(inspections,"INS-");setInsp(p=>[{id:code,date:meta.date,inspector:meta.inspector,sector:meta.sector,status:st,conclusion:meta.conclusion,items},...p]);showToast(st==="Finalizada"?"Inspección finalizada":"Borrador guardado");onBack();};
   const secIdx=CL_SECTIONS.findIndex(s=>s.id===actSec); const sec=CL_SECTIONS[secIdx];
   return(
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}><button style={BS(true)} onClick={onBack}>← Volver</button><div style={{fontWeight:700,fontSize:mob?15:18}}>Nueva Inspección</div></div>
-      <div style={card}><div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr 1fr",gap:10}}>
-        <div style={fg}><label style={lbl}>Fecha</label><input type="datetime-local" style={inp} value={meta.date} onChange={ev=>setMeta(p=>({...p,date:ev.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Inspector</label><input style={inp} value={meta.inspector} onChange={ev=>setMeta(p=>({...p,inspector:ev.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Sector</label><select style={sel} value={meta.sector} onChange={ev=>setMeta(p=>({...p,sector:ev.target.value}))}>{allSectors.map(s=><option key={s}>{s}</option>)}</select></div>
-      </div></div>
+      <div style={card}><div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr 1fr",gap:10}}><div style={fg}><label style={lbl}>Fecha</label><input type="datetime-local" style={inp} value={meta.date} onChange={ev=>setMeta(p=>({...p,date:ev.target.value}))}/></div><div style={fg}><label style={lbl}>Inspector</label><input style={inp} value={meta.inspector} onChange={ev=>setMeta(p=>({...p,inspector:ev.target.value}))}/></div><div style={fg}><label style={lbl}>Sector</label><select style={sel} value={meta.sector} onChange={ev=>setMeta(p=>({...p,sector:ev.target.value}))}>{allSectors.map(s=><option key={s}>{s}</option>)}</select></div></div></div>
       <div style={{...card,padding:14,marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div style={{fontWeight:600,fontSize:12}}>Progreso: {answered}/{all.length}</div><div style={{display:"flex",gap:6}}><span style={bdg("#10b981","#f0fdf4")}>{all.filter(v=>v.state==="Bueno").length} ok</span><span style={bdg("#f59e0b","#fffbeb")}>{all.filter(v=>v.state==="Regular").length} reg.</span><span style={bdg("#ef4444","#fef2f2")}>{all.filter(v=>v.state==="Malo").length} malos</span></div></div>
         <div style={{height:7,background:"#f1f5f9",borderRadius:99}}><div style={{height:7,background:pct===100?"#10b981":"#3b82f6",borderRadius:99,width:pct+"%",transition:"width .3s"}}/></div>
@@ -1373,24 +1911,28 @@ function InspForm({inspections,setInsp,reqs,setReqs,showToast,role,onBack,mob,to
           <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>{sec.label}</div>
           {sec.items.map(name=>{
             const it=getItem(sec.id,name); const isMalo=it.state==="Malo";
-            return(<div key={name} style={{borderBottom:"1px solid #f1f5f9",paddingBottom:12,marginBottom:12}}>
-              <div style={{fontWeight:600,fontSize:12,marginBottom:6}}>{name}</div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>{ITEM_STATES.map(s=><button key={s} onClick={()=>setItem(sec.id,name,"state",s)} style={{padding:"3px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"2px solid "+(it.state===s?ITEM_COLOR[s]:"#e2e8f0"),background:it.state===s?ITEM_COLOR[s]+"22":"#f9fafb",color:it.state===s?ITEM_COLOR[s]:"#6b7280"}}>{s}</button>)}</div>
-              {it.state&&it.state!=="No aplica"&&(
-                <div style={{display:"flex",gap:8,marginBottom:6}}>
-                  <input style={{...inp,flex:1,fontSize:12}} placeholder="Observación..." value={it.obs} onChange={ev=>setItem(sec.id,name,"obs",ev.target.value)}/>
-                  {isMalo&&<select style={{...sel,width:110,fontSize:12}} value={it.urgency} onChange={ev=>setItem(sec.id,name,"urgency",ev.target.value)}><option value="">Urgencia...</option>{URGENCY_LEVELS.map(u=><option key={u}>{u}</option>)}</select>}
+            return(
+              <div key={name} style={{borderBottom:"1px solid #f1f5f9",paddingBottom:12,marginBottom:12}}>
+                <div style={{fontWeight:600,fontSize:12,marginBottom:6}}>{name}</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+                  {ITEM_STATES.map(s=><button key={s} onClick={()=>setItem(sec.id,name,"state",s)} style={{padding:"3px 10px",borderRadius:99,fontSize:11,fontWeight:600,cursor:"pointer",border:"2px solid "+(it.state===s?ITEM_COLOR[s]:"#e2e8f0"),background:it.state===s?ITEM_COLOR[s]+"22":"#f9fafb",color:it.state===s?ITEM_COLOR[s]:"#6b7280"}}>{s}</button>)}
                 </div>
-              )}
-              {(it.state==="Malo"||it.state==="Regular")&&(
-                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                  <button style={BS(true)} onClick={()=>{setPendImg({sid:sec.id,name});fileRef.current.click();}}>Foto</button>
-                  {(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:50,height:40}}/>)}
-                  {isMalo&&!it.reqId&&<button style={BD(true)} onClick={()=>createReq(sec.id,name)}>+ Solicitud</button>}
-                  {isMalo&&it.reqId&&<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>}
-                </div>
-              )}
-            </div>);
+                {it.state&&it.state!=="No aplica"&&(
+                  <div style={{display:"flex",gap:8,marginBottom:6}}>
+                    <input style={{...inp,flex:1,fontSize:12}} placeholder="Observación..." value={it.obs} onChange={ev=>setItem(sec.id,name,"obs",ev.target.value)}/>
+                    {isMalo&&<select style={{...sel,width:110,fontSize:12}} value={it.urgency} onChange={ev=>setItem(sec.id,name,"urgency",ev.target.value)}><option value="">Urgencia...</option>{URGENCY_LEVELS.map(u=><option key={u}>{u}</option>)}</select>}
+                  </div>
+                )}
+                {(it.state==="Malo"||it.state==="Regular")&&(
+                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                    <button style={BS(true)} onClick={()=>{setPendImg({sid:sec.id,name});fileRef.current.click();}}>Foto</button>
+                    {(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:50,height:40}}/>)}
+                    {isMalo&&!it.reqId&&<button style={BD(true)} onClick={()=>createReq(sec.id,name)}>+ Solicitud</button>}
+                    {isMalo&&it.reqId&&<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>}
+                  </div>
+                )}
+              </div>
+            );
           })}
           <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
             {secIdx>0&&<button style={BS(true)} onClick={()=>setActSec(CL_SECTIONS[secIdx-1].id)}>← Anterior</button>}
@@ -1417,14 +1959,7 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
   const malos=allEntries.filter(en=>en[1].state==="Malo");
   const regs=allEntries.filter(en=>en[1].state==="Regular");
   const bues=allEntries.filter(en=>en[1].state==="Bueno");
-  const createReq=(key,it)=>{
-    if(it.reqId){showToast("Ya existe","error");return;}
-    const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);
-    const code=genCode(reqs,"SOL-");const now=new Date().toISOString();
-    const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";
-    const nr=normReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});
-    setReqs(p=>[nr,...p]);setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));showToast("Solicitud "+code+" creada");
-  };
+  const createReq=(key,it)=>{if(it.reqId){showToast("Ya existe","error");return;}const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));showToast("Solicitud "+code+" creada");};
   const tabs=[{id:"resumen",label:"Resumen"},{id:"hallazgos",label:"Hallazgos ("+(malos.length+regs.length)+")"},{id:"checklist",label:"Checklist"}];
   return(
     <div>
@@ -1437,11 +1972,21 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
       {tab==="hallazgos"&&(
         <div>
           {malos.length+regs.length===0?<Empty msg="Sin hallazgos"/>:[...malos,...regs].map(entry=>{
-            const key=entry[0]; const it=entry[1];const parts=key.split("_");const name=parts.slice(1).join("_");const isMalo=it.state==="Malo";
-            return(<div key={key} style={{...card,borderLeft:"4px solid "+(isMalo?"#ef4444":"#f59e0b"),padding:12,marginBottom:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",gap:8}}><div><div style={{fontWeight:600,fontSize:13}}>{name}</div>{it.obs&&<p style={{fontSize:12,margin:"4px 0 0"}}>{it.obs}</p>}</div><span style={bdg(ITEM_COLOR[it.state],ITEM_COLOR[it.state]+"22")}>{it.state}</span></div>
-              <div style={{display:"flex",gap:6,marginTop:8}}>{(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:54,height:42}}/>)}{it.reqId?<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>:(isMalo&&!readOnly&&<button style={BD(true)} onClick={()=>createReq(key,it)}>+ Solicitud</button>)}</div>
-            </div>);
+            const key=entry[0]; const it=entry[1];
+            const parts=key.split("_"); const name=parts.slice(1).join("_");
+            const isMalo=it.state==="Malo";
+            return(
+              <div key={key} style={{...card,borderLeft:"4px solid "+(isMalo?"#ef4444":"#f59e0b"),padding:12,marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                  <div><div style={{fontWeight:600,fontSize:13}}>{name}</div>{it.obs&&<p style={{fontSize:12,margin:"4px 0 0"}}>{it.obs}</p>}</div>
+                  <span style={bdg(ITEM_COLOR[it.state],ITEM_COLOR[it.state]+"22")}>{it.state}</span>
+                </div>
+                <div style={{display:"flex",gap:6,marginTop:8}}>
+                  {(it.images||[]).map((img,i)=><img key={i} src={img} alt="" style={{...thumb,width:54,height:42}}/>)}
+                  {it.reqId?<span style={bdg("#10b981","#f0fdf4")}>✓ {it.reqId}</span>:(isMalo&&!readOnly&&<button style={BD(true)} onClick={()=>createReq(key,it)}>+ Solicitud</button>)}
+                </div>
+              </div>
+            );
           })}
         </div>
       )}
@@ -1483,25 +2028,28 @@ function InvView({inventory,setInv,reqs,role,showToast,mob}){
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <input style={{...inp,flex:2,minWidth:120}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
           <select style={{...sel,flex:1}} value={fi.cat} onChange={ev=>setFi(p=>({...p,cat:ev.target.value}))}><option value="">Todas las categorías</option>{INV_CATS.map(c=><option key={c}>{c}</option>)}</select>
-          {fi.low&&<button style={BS(true)} onClick={()=>setFi(p=>({...p,low:false}))}>✕ Críticos</button>}
           {!readOnly&&<button style={BP(true)} onClick={()=>{setEditItem(null);setShowForm(true);}}>+ Agregar</button>}
         </div>
       </div>
       {visible.length===0?<Empty msg="Sin insumos"/>:(
         <div>{visible.map(item=>{
           const low=item.stock<item.minStock;
-          return(<div key={item.id} style={{...card,borderLeft:"4px solid "+(low?"#ef4444":"#10b981"),padding:12,marginBottom:8}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-              <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{item.name}</div><div style={{fontSize:11,color:"#64748b"}}>{item.category} - {item.location}</div></div>
-              <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:16,color:low?"#ef4444":"#1e293b"}}>{item.stock} <span style={{fontSize:11,fontWeight:400}}>{item.unit}</span></div><div style={{fontSize:10,color:"#94a3b8"}}>min: {item.minStock}</div></div>
+          return(
+            <div key={item.id} style={{...card,borderLeft:"4px solid "+(low?"#ef4444":"#10b981"),padding:12,marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{item.name}</div><div style={{fontSize:11,color:"#64748b"}}>{item.category} - {item.location}</div></div>
+                <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:16,color:low?"#ef4444":"#1e293b"}}>{item.stock} <span style={{fontSize:11,fontWeight:400}}>{item.unit}</span></div><div style={{fontSize:10,color:"#94a3b8"}}>min: {item.minStock}</div></div>
+              </div>
+              {!readOnly&&(
+                <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                  <button style={BS(true)} onClick={()=>setMov({item,dir:1})}>+ Stock</button>
+                  <button style={BS(true)} onClick={()=>setMov({item,dir:-1})}>- Stock</button>
+                  <button style={BG(true)} onClick={()=>{setEditItem(item);setShowForm(true);}}>Editar</button>
+                  <button style={BG(true)} onClick={()=>setInv(p=>p.filter(i=>i.id!==item.id))}>Eliminar</button>
+                </div>
+              )}
             </div>
-            {!readOnly&&(<div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
-              <button style={BS(true)} onClick={()=>setMov({item,dir:1})}>+ Stock</button>
-              <button style={BS(true)} onClick={()=>setMov({item,dir:-1})}>- Stock</button>
-              <button style={BG(true)} onClick={()=>{setEditItem(item);setShowForm(true);}}>Editar</button>
-              <button style={BG(true)} onClick={()=>setInv(p=>p.filter(i=>i.id!==item.id))}>Eliminar</button>
-            </div>)}
-          </div>);
+          );
         })}</div>
       )}
       {showForm&&<InvForm item={editItem} onSave={saveItem} onClose={()=>{setShowForm(false);setEditItem(null);}}/>}
@@ -1538,11 +2086,18 @@ function StockModal({data,onConfirm,onClose}){
       <div style={{...alrt(isIn?"success":"error"),marginBottom:12}}>Stock actual: <strong>{data.item.stock} {data.item.unit}</strong></div>
       <div style={fg}><label style={lbl}>Cantidad</label><input type="number" min="1" max={max} style={inp} value={qty} onChange={ev=>setQty(Math.max(1,+ev.target.value))}/></div>
       <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Resultante: <strong>{data.item.stock+(isIn?safeQty:-safeQty)} {data.item.unit}</strong></div>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button style={BS(true)} onClick={onClose}>Cancelar</button>{isIn?<button style={BSu(true)} onClick={()=>onConfirm(data.item.id,safeQty)}>Confirmar ingreso</button>:<button style={BD(true)} disabled={qty>data.item.stock} onClick={()=>onConfirm(data.item.id,-safeQty)}>Confirmar egreso</button>}</div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <button style={BS(true)} onClick={onClose}>Cancelar</button>
+        {isIn
+          ?<button style={BSu(true)} onClick={()=>onConfirm(data.item.id,safeQty)}>Confirmar ingreso</button>
+          :<button style={BD(true)} disabled={qty>data.item.stock} onClick={()=>onConfirm(data.item.id,-safeQty)}>Confirmar egreso</button>
+        }
+      </div>
     </div></div>
   );
 }
 
+// ── EmailsView ─────────────────────────────────────────────────────────────
 function EmailsView({logs,setEmails,role}){
   const [q,setQ]=useState("");
   const visible=[...logs].sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(lg=>!q||((lg.to||"")+(lg.subject||"")).toLowerCase().includes(q.toLowerCase()));
@@ -1550,13 +2105,22 @@ function EmailsView({logs,setEmails,role}){
     <div>
       <div style={{...card,padding:12,marginBottom:12,display:"flex",gap:8}}>
         <input style={{...inp,flex:1}} placeholder="Buscar..." value={q} onChange={ev=>setQ(ev.target.value)}/>
-        {can(role,"manageConfig")&&logs.length>0&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar todos?"))setEmails([]);}}>🗑 Limpiar</button>}
+        {can(role,"manageConfig")&&logs.length>0&&(
+          <button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar todos?"))setEmails([]);}}>🗑 Limpiar</button>
+        )}
       </div>
       <div style={card}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Bandeja</div><span style={bdg("#10b981","#f0fdf4")}>{logs.length} enviados</span></div>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+          <div style={{fontWeight:600,fontSize:13}}>Bandeja</div>
+          <span style={bdg("#10b981","#f0fdf4")}>{logs.length} enviados</span>
+        </div>
         {visible.length===0?<Empty msg="Sin correos"/>:visible.map((lg,i)=>(
           <div key={lg.id||i} style={{borderBottom:"1px solid #f1f5f9",padding:"10px 0"}}>
-            <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lg.subject}</span><span style={bdg("#6366f1","#eef2ff")}>{lg.type}</span></div>
+            <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
+              <span style={{fontWeight:600,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lg.subject}</span>
+              <span style={bdg("#6366f1","#eef2ff")}>{lg.type}</span>
+              {can(role,"manageConfig")&&<button style={{...BG(true),padding:"2px 6px",fontSize:11,color:"#ef4444"}} onClick={()=>setEmails(p=>p.filter(x=>x.id!==lg.id))}>🗑</button>}
+            </div>
             <div style={{fontSize:10,color:"#64748b"}}>{lg.to} - {fmt(lg.date)}</div>
             <div style={{fontSize:11,background:"#f8fafc",padding:"4px 8px",borderRadius:4,marginTop:4}}>{lg.body}</div>
           </div>
@@ -1566,6 +2130,7 @@ function EmailsView({logs,setEmails,role}){
   );
 }
 
+// ── Reports ────────────────────────────────────────────────────────────────
 function Reports({reqs,tasks,inventory,mob}){
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
   const maxCat=Math.max(...byCat.map(x=>x.n),1);
@@ -1575,7 +2140,7 @@ function Reports({reqs,tasks,inventory,mob}){
       <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por estado</div>{STATUSES.map(s=>{const c=reqs.filter(r=>r.status===s).length;return c?<div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><SBadge s={s}/><span style={{fontWeight:600}}>{c}</span></div>:null;})}</div>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>{byCat.map(x=><div key={x.c} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div><div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div></div>)}</div>
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen general</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Activas" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Cerradas" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Órdenes totales" v={tasks.length}/><IR l="Stock crítico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
+        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Activas" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Cerradas" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Órdenes totales" v={tasks.length}/><IR l="Stock crítico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
       </div>
     </div>
   );
@@ -1604,6 +2169,7 @@ function MantView({mant,setMant,role,showToast,mob,respList,towers,equipos,setEq
     if(fi.q&&!((m.asset||"")+" "+(m.provider||"")).toLowerCase().includes(fi.q.toLowerCase())) return false;
     return true;
   }).sort((a,b)=>{const ord={Vencida:0,"Por vencer":1,"En ejecucion":2,Vigente:3,Completada:4};return(ord[a.computedStatus]??9)-(ord[b.computedStatus]??9);});
+
   const saveMant=item=>{
     const ts=new Date().toISOString();
     if(editItem){setMant(p=>p.map(m=>m.id===item.id?item:m));showToast("Actualizado");}
@@ -1615,15 +2181,19 @@ function MantView({mant,setMant,role,showToast,mob,respList,towers,equipos,setEq
     else{setCerts(p=>[{...item,id:"cert"+uid()},...p]);showToast("Certificación registrada");}
     setShowCertForm(false); setEditCert(null);
   };
+
   if(sub==="detail"&&sel){
     const item=normMant(mant.find(m=>m.id===sel.id)||sel);
     return <MantDetail item={item} mant={mant} setMant={setMant} role={role} showToast={showToast} mob={mob} readOnly={readOnly} onBack={()=>{setSub("list");setMantTab("mant");}} respList={respList}/>;
   }
+
   const mantTabs=[{id:"mant",label:"Mantenciones"},{id:"certs",label:"Certificaciones"+(certsVenc+certsPorV>0?" ⚠":"")}];
   return(
     <div>
       {vencidas>0&&mantTab==="mant"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626"}}>✗</span><strong style={{color:"#dc2626"}}>{vencidas} vencida(s)</strong></div>}
       {porVencer>0&&mantTab==="mant"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{porVencer} por vencer</strong></div>}
+      {certsVenc>0&&mantTab==="certs"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#dc2626"}}>✗</span><strong style={{color:"#dc2626"}}>{certsVenc} certificación(es) vencida(s)</strong></div>}
+      {certsPorV>0&&mantTab==="certs"&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10,marginBottom:12}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{certsPorV} vencen en 30 días</strong></div>}
       <Tabs tabs={mantTabs} active={mantTab} onChange={setMantTab}/>
       {mantTab==="mant"&&(
         <div>
@@ -1639,13 +2209,26 @@ function MantView({mant,setMant,role,showToast,mob,respList,towers,equipos,setEq
             <div>{visible.map(m=>{
               const dL=m.nextDate?Math.ceil((new Date(m.nextDate)-new Date())/86400000):null;
               const dC=dL===null?"#374151":dL<0?"#ef4444":dL<=30?"#f59e0b":"#374151";
-              return(<div key={m.id} style={{...card,borderLeft:"4px solid "+(MANT_SC[m.computedStatus]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>{setSel(m);setSub("detail");}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                  <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:14,marginBottom:3}}>{m.asset}</div><div style={{fontSize:11,color:"#64748b"}}>{m.subcategory} - {m.location}</div></div>
-                  <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}><MBadge m={m}/>{m.nextDate&&<div style={{fontSize:11,color:dC,fontWeight:600}}>{dL!==null&&(dL<0?Math.abs(dL)+" dias vencida":dL+" dias rest.")}</div>}</div>
+              return(
+                <div key={m.id} style={{...card,borderLeft:"4px solid "+(MANT_SC[m.computedStatus]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>{setSel(m);setSub("detail");}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:700,fontSize:14,marginBottom:3}}>{m.asset}</div>
+                      <div style={{fontSize:11,color:"#64748b"}}>{m.subcategory} - {m.location}</div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}>
+                      <MBadge m={m}/>
+                      {m.nextDate&&<div style={{fontSize:11,color:dC,fontWeight:600}}>{dL!==null&&(dL<0?Math.abs(dL)+" dias vencida":dL+" dias rest.")}</div>}
+                    </div>
+                  </div>
+                  {!readOnly&&(
+                    <div style={{display:"flex",gap:6,marginTop:10}} onClick={ev=>ev.stopPropagation()}>
+                      <button style={BS(true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button>
+                      <button style={BG(true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button>
+                    </div>
+                  )}
                 </div>
-                {!readOnly&&(<div style={{display:"flex",gap:6,marginTop:10}} onClick={ev=>ev.stopPropagation()}><button style={BS(true)} onClick={()=>{setEdit(m);setShowForm(true);}}>Editar</button><button style={BG(true)} onClick={()=>setMant(p=>p.filter(x=>x.id!==m.id))}>Eliminar</button></div>)}
-              </div>);
+              );
             })}</div>
           )}
           {showForm&&<MantForm item={editItem} onSave={saveMant} onClose={()=>{setShowForm(false);setEdit(null);}} respList={respList}/>}
@@ -1665,15 +2248,32 @@ function MantView({mant,setMant,role,showToast,mob,respList,towers,equipos,setEq
                 const dL=lastCert?.vencimiento?Math.ceil((new Date(lastCert.vencimiento)-new Date())/86400000):null;
                 const cColor=dL===null?"#6b7280":dL<0?"#ef4444":dL<=30?"#f59e0b":"#10b981";
                 const cBg=dL===null?"#f9fafb":dL<0?"#fef2f2":dL<=30?"#fffbeb":"#f0fdf4";
-                return(<div key={eq.id} style={{...card,marginBottom:10,borderLeft:"4px solid "+cColor}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:22}}>{eq.icono}</span><div><div style={{fontWeight:700,fontSize:14}}>{eq.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{eq.frecuencia}</div></div></div>
-                      {lastCert?(<div style={{background:cBg,borderRadius:8,padding:"8px 10px",marginTop:6}}><div style={{fontSize:12,fontWeight:600,color:cColor}}>{dL<0?"Vencida hace "+Math.abs(dL)+" días":dL===0?"Vence hoy":dL<=30?"Vence en "+dL+" días":"Vigente · "+dL+" días"}</div><div style={{fontSize:11,color:"#64748b",marginTop:2}}>Última: {fmtD(lastCert.fecha)} · Vence: {fmtD(lastCert.vencimiento)}</div>{lastCert.empresa&&<div style={{fontSize:11,color:"#64748b"}}>Empresa: {lastCert.empresa}</div>}</div>):<div style={{...alrt("warning"),margin:"6px 0 0"}}>Sin certificación registrada</div>}
+                return(
+                  <div key={eq.id} style={{...card,marginBottom:10,borderLeft:"4px solid "+cColor}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                          <span style={{fontSize:22}}>{eq.icono}</span>
+                          <div><div style={{fontWeight:700,fontSize:14}}>{eq.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>Frecuencia: {eq.frecuencia}</div></div>
+                        </div>
+                        {lastCert?(
+                          <div style={{background:cBg,borderRadius:8,padding:"8px 10px",marginTop:6}}>
+                            <div style={{fontSize:12,fontWeight:600,color:cColor}}>{dL<0?"Vencida hace "+Math.abs(dL)+" días":dL===0?"Vence hoy":dL<=30?"Vence en "+dL+" días":"Vigente · "+dL+" días"}</div>
+                            <div style={{fontSize:11,color:"#64748b",marginTop:2}}>Última: {fmtD(lastCert.fecha)} · Vence: {fmtD(lastCert.vencimiento)}</div>
+                            {lastCert.empresa&&<div style={{fontSize:11,color:"#64748b"}}>Empresa: {lastCert.empresa}</div>}
+                          </div>
+                        ):<div style={{...alrt("warning"),margin:"6px 0 0"}}>Sin certificación registrada</div>}
+                      </div>
+                      {!readOnly&&<button style={BS(true)} onClick={()=>{setEditCert({equipoId:eq.id,equipoNombre:eq.nombre});setShowCertForm(true);}}>+ Registrar</button>}
                     </div>
-                    {!readOnly&&<button style={BS(true)} onClick={()=>{setEditCert({equipoId:eq.id,equipoNombre:eq.nombre});setShowCertForm(true);}}>+ Registrar</button>}
+                    {equipCerts.length>1&&(
+                      <details style={{marginTop:8}}>
+                        <summary style={{fontSize:11,color:"#6366f1",cursor:"pointer"}}>Historial ({equipCerts.length})</summary>
+                        <div>{equipCerts.map(c=><div key={c.id} style={{fontSize:11,padding:"4px 0",borderBottom:"1px solid #f1f5f9",display:"flex",justifyContent:"space-between"}}><span>{fmtD(c.fecha)} → {fmtD(c.vencimiento)}</span><span style={{color:"#64748b"}}>{c.empresa}</span></div>)}</div>
+                      </details>
+                    )}
                   </div>
-                </div>);
+                );
               })}
               {showCertForm&&<CertForm cert={editCert} equipos={activeEquipos} towers={towers} onSave={saveCert} onClose={()=>{setShowCertForm(false);setEditCert(null);}}/>}
             </div>
@@ -1708,7 +2308,8 @@ function CertForm({cert,equipos,towers,onSave,onClose}){
 function MantForm({item,onSave,onClose,respList}){
   const defCat=MANT_CATS[0];
   const [f,setF]=useState({asset:"",category:defCat,subcategory:MANT_SUBCATS[defCat][0],location:"",tipo:MANT_TIPOS[0],responsible:(respList&&respList[0])||"",provider:"",lastDate:"",nextDate:"",costEstimated:"",costReal:"",description:"",...(item||{})});
-  const setFld=(k,v)=>setF(p=>({...p,[k]:v}));const subs=MANT_SUBCATS[f.category]||[];
+  const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
+  const subs=MANT_SUBCATS[f.category]||[];
   return(
     <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:600,padding:"20px",marginTop:16,marginBottom:16}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>{item?"Editar":"Nueva"} mantención</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
@@ -1748,19 +2349,73 @@ function MantDetail({item,mant,setMant,role,showToast,mob,readOnly,onBack,respLi
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
         <button style={BS(true)} onClick={onBack}>← Volver</button>
-        <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?15:18}}>{m.asset}</span><MBadge m={m}/></div><div style={{fontSize:11,color:"#64748b"}}>{m.code} - {m.category}</div></div>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?15:18}}>{m.asset}</span><MBadge m={m}/></div>
+          <div style={{fontSize:11,color:"#64748b"}}>{m.code} - {m.category}</div>
+        </div>
       </div>
       {st==="Vencida"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>✗</span><strong style={{color:"#dc2626"}}>VENCIDA hace {Math.abs(dL||0)} días</strong></div>}
-      {!readOnly&&(<div style={{...card,padding:12,marginBottom:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        <select style={{...sel,width:160}} value={m.status} onChange={ev=>upd({status:ev.target.value})}>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>
-        <button style={BSu(true)} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>
-        <button style={BS(true)} onClick={()=>setShowDF(true)}>+ Documento</button>
-      </div></div>)}
+      {!readOnly&&(
+        <div style={{...card,padding:12,marginBottom:12}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <select style={{...sel,width:160}} value={m.status} onChange={ev=>upd({status:ev.target.value})}>{MANT_ESTADOS.map(s=><option key={s}>{s}</option>)}</select>
+            <button style={BSu(true)} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>
+            <button style={BS(true)} onClick={()=>setShowDF(true)}>+ Documento</button>
+          </div>
+        </div>
+      )}
       <Tabs tabs={tabs} active={tab} onChange={setTab} accent="#6366f1"/>
-      {tab==="info"&&(<div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}><div style={card}><IR l="Categoría" v={(m.category||"")+" / "+(m.subcategory||"")}/><IR l="Ubicación" v={m.location}/><IR l="Tipo" v={m.tipo}/><IR l="Responsable" v={m.responsible}/><IR l="Proveedor" v={m.provider}/></div><div style={card}><IR l="Última mantención" v={m.lastDate?fmtD(m.lastDate):"No registrada"}/><IR l="Próximo vencimiento" v={m.nextDate?fmtD(m.nextDate):"No definida"}/><IR l="Días restantes" v={dL===null?"---":dL<0?Math.abs(dL)+" vencida":dL+" días"}/><IR l="Costo estimado" v={m.costEstimated?"$"+Number(m.costEstimated).toLocaleString("es-CL"):"---"}/><IR l="Costo real" v={m.costReal?"$"+Number(m.costReal).toLocaleString("es-CL"):"Pendiente"}/></div><div style={{...card,gridColumn:"1/-1"}}><p style={{fontSize:13,margin:0}}>{m.description||"Sin descripción."}</p></div></div>)}
-      {tab==="history"&&(<div>{!readOnly&&!showHF&&<button style={{...BSu(true),marginBottom:12}} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>}{showHF&&<HistForm onSave={addHist} onClose={()=>setShowHF(false)} respList={respList}/>}{m.history.length===0&&!showHF?<Empty msg="Sin historial"/>:<div>{[...m.history].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(h=>(<div key={h.id||h.date} style={{...card,borderLeft:"4px solid #6366f1",marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>{h.tipo} - {fmtD(h.date)}</div><div style={{fontSize:11,color:"#64748b"}}>{h.responsible}</div>{h.notes&&<p style={{fontSize:12,margin:"6px 0 0"}}>{h.notes}</p>}{h.costReal>0&&<span style={bdg("#10b981","#f0fdf4")}>${Number(h.costReal).toLocaleString("es-CL")}</span>}</div>))}</div>}</div>)}
-      {tab==="docs"&&(<div>{!readOnly&&!showDF&&<button style={{...BS(true),marginBottom:12}} onClick={()=>setShowDF(true)}>+ Agregar documento</button>}{showDF&&<DocForm onSave={addDoc} onClose={()=>setShowDF(false)}/>}{m.documents.length===0&&!showDF?<Empty msg="Sin documentos"/>:m.documents.map(d=>(<div key={d.id} style={{...card,display:"flex",alignItems:"center",gap:12,marginBottom:8}}><div style={{fontWeight:600,fontSize:13}}>{d.name}</div><div style={{fontSize:11,color:"#64748b"}}>{fmtD(d.date)}</div></div>))}</div>)}
-      {tab==="comments"&&(<div style={card}>{m.comments.map((c,i)=>(<div key={i} style={{borderLeft:"3px solid #e2e8f0",paddingLeft:10,marginBottom:10}}><strong style={{fontSize:12}}>{c.user}</strong><span style={{fontSize:10,color:"#94a3b8",marginLeft:8}}>{fmt(c.date)}</span><p style={{margin:"4px 0 0",fontSize:13}}>{c.text}</p></div>))}{!readOnly&&(<div style={{marginTop:10,display:"flex",gap:8}}><input style={{...inp,flex:1}} placeholder="Comentario..." value={cmt} onChange={ev=>setCmt(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&addCmt()}/><button style={BP(true)} onClick={addCmt}>Enviar</button></div>)}</div>)}
+      {tab==="info"&&(
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
+          <div style={card}><IR l="Categoría" v={(m.category||"")+" / "+(m.subcategory||"")}/><IR l="Ubicación" v={m.location}/><IR l="Tipo" v={m.tipo}/><IR l="Responsable" v={m.responsible}/><IR l="Proveedor" v={m.provider}/></div>
+          <div style={card}><IR l="Última mantención" v={m.lastDate?fmtD(m.lastDate):"No registrada"}/><IR l="Próximo vencimiento" v={m.nextDate?fmtD(m.nextDate):"No definida"}/><IR l="Días restantes" v={dL===null?"---":dL<0?Math.abs(dL)+" vencida":dL+" días"}/><IR l="Costo estimado" v={m.costEstimated?"$"+Number(m.costEstimated).toLocaleString("es-CL"):"---"}/><IR l="Costo real" v={m.costReal?"$"+Number(m.costReal).toLocaleString("es-CL"):"Pendiente"}/></div>
+          <div style={{...card,gridColumn:"1/-1"}}><p style={{fontSize:13,margin:0}}>{m.description||"Sin descripción."}</p></div>
+        </div>
+      )}
+      {tab==="history"&&(
+        <div>
+          {!readOnly&&!showHF&&<button style={{...BSu(true),marginBottom:12}} onClick={()=>setShowHF(true)}>+ Registrar ejecución</button>}
+          {showHF&&<HistForm onSave={addHist} onClose={()=>setShowHF(false)} respList={respList}/>}
+          {m.history.length===0&&!showHF?<Empty msg="Sin historial"/>:(
+            <div>{[...m.history].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(h=>(
+              <div key={h.id||h.date} style={{...card,borderLeft:"4px solid #6366f1",marginBottom:8}}>
+                <div style={{fontWeight:600,fontSize:13}}>{h.tipo} - {fmtD(h.date)}</div>
+                <div style={{fontSize:11,color:"#64748b"}}>{h.responsible}</div>
+                {h.notes&&<p style={{fontSize:12,margin:"6px 0 0"}}>{h.notes}</p>}
+                {h.costReal>0&&<span style={bdg("#10b981","#f0fdf4")}>${Number(h.costReal).toLocaleString("es-CL")}</span>}
+              </div>
+            ))}</div>
+          )}
+        </div>
+      )}
+      {tab==="docs"&&(
+        <div>
+          {!readOnly&&!showDF&&<button style={{...BS(true),marginBottom:12}} onClick={()=>setShowDF(true)}>+ Agregar documento</button>}
+          {showDF&&<DocForm onSave={addDoc} onClose={()=>setShowDF(false)}/>}
+          {m.documents.length===0&&!showDF?<Empty msg="Sin documentos"/>:m.documents.map(d=>(
+            <div key={d.id} style={{...card,display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
+              <div style={{fontWeight:600,fontSize:13}}>{d.name}</div>
+              <div style={{fontSize:11,color:"#64748b"}}>{fmtD(d.date)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {tab==="comments"&&(
+        <div style={card}>
+          {m.comments.map((c,i)=>(
+            <div key={i} style={{borderLeft:"3px solid #e2e8f0",paddingLeft:10,marginBottom:10}}>
+              <strong style={{fontSize:12}}>{c.user}</strong><span style={{fontSize:10,color:"#94a3b8",marginLeft:8}}>{fmt(c.date)}</span>
+              <p style={{margin:"4px 0 0",fontSize:13}}>{c.text}</p>
+            </div>
+          ))}
+          {!readOnly&&(
+            <div style={{marginTop:10,display:"flex",gap:8}}>
+              <input style={{...inp,flex:1}} placeholder="Comentario..." value={cmt} onChange={ev=>setCmt(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&addCmt()}/>
+              <button style={BP(true)} onClick={addCmt}>Enviar</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1854,6 +2509,7 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
         <div>
           <div style={{...alrt("info"),marginBottom:12}}>Activa los equipos que existen en tu edificio.</div>
           <div style={card}>{EQUIP_TIPOS.map(et=>{const eq=(equipos||[]).find(x=>x.id===et.id)||{...et,active:false};return(<div key={et.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid #f1f5f9",opacity:eq.active?1:.5}}><div style={{fontSize:24}}>{et.icono}</div><div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{et.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{et.frecuencia}</div></div><button style={eq.active?BW(true):BSu(true)} onClick={()=>setEquipos(p=>p.map(x=>x.id===et.id?{...x,active:!x.active}:x))}>{eq.active?"Desactivar":"Activar"}</button></div>);})}</div>
+          <div style={{fontSize:12,color:"#64748b",marginTop:8}}>{(equipos||[]).filter(x=>x.active).length} equipos activos</div>
         </div>
       )}
       {tab==="usuarios"&&(
@@ -1871,7 +2527,12 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
         </div>
       )}
       {tab==="sla"&&(
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>{Object.entries(sla).map(([p,t])=>(<div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>))}</div>
+        <div style={card}>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>
+          {Object.entries(sla).map(([p,t])=>(
+            <div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>
+          ))}
+        </div>
       )}
     </div>
   );

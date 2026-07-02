@@ -1,0 +1,15 @@
+name: Cron Recordatorios CondoAdmin
+
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ejecutar cron recordatorios
+        run: |
+          curl -X GET https://condoadmin-rouge.vercel.app/api/cron-recordatorios \
+            -H "Authorization: Bearer condoadmin2026"

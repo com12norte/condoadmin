@@ -138,6 +138,54 @@ const PERMS = {
 const can = (role,action) => (PERMS[role]||[]).includes(action);
 const fmt = d => { try { return new Date(d).toLocaleString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); } catch(_){ return ""; }};
 const fmtD = d => { try { return new Date(d).toLocaleDateString("es-CL"); } catch(_){ return ""; }};
+
+// ── SLA por categoría y prioridad ────────────────────────────────────────
+// Horas límite según tabla acordada (1d=24h, 5d=120h, 7d=168h, 10d=240h)
+const SLA_MATRIX = {
+  Gas:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Electricidad:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Ascensores:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Agua:{Emergencia:4,Alta:8,Media:24,Baja:72},
+  Filtraciones:{Emergencia:4,Alta:8,Media:24,Baja:72},
+  Seguridad:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Motor:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Citofonia:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  "Espacios comunes":{Emergencia:8,Alta:24,Media:72,Baja:168},
+  Jardines:{Emergencia:8,Alta:24,Media:72,Baja:168},
+  Aseo:{Emergencia:8,Alta:24,Media:72,Baja:168},
+  Perimetral:{Emergencia:4,Alta:24,Media:48,Baja:168},
+  Otros:{Emergencia:8,Alta:24,Media:72,Baja:168},
+};
+const SLA_ADMIN = {Emergencia:24,Alta:48,Media:120,Baja:240}; // Gestión administrativa
+const SLA_DEFAULT = {Emergencia:8,Alta:24,Media:72,Baja:168}; // fallback = "Otros"
+const isAdminCat = c => Object.prototype.hasOwnProperty.call(ADMIN_CATS,c);
+const slaHoursFor = (category,priority) => {
+  const tbl = isAdminCat(category) ? SLA_ADMIN : (SLA_MATRIX[category]||SLA_DEFAULT);
+  return tbl[priority] ?? SLA_DEFAULT[priority];
+};
+const fmtSlaHours = h => h==null?"—":(h%24===0?(h/24)+"d":h+"h");
+const calcSlaDueDate = (category,priority,from) => {
+  const hrs = slaHoursFor(category,priority);
+  const base = from ? new Date(from) : new Date();
+  return new Date(base.getTime()+hrs*3600000).toISOString();
+};
+// Estado de cumplimiento SLA de una solicitud
+const slaStatus = r => {
+  if(!r.dueDate) return null;
+  const due=new Date(r.dueDate);
+  if(["Resuelta","Cerrada"].includes(r.status)){
+    const h=(r.history||[]).find(x=>x.to==="Resuelta"||x.to==="Cerrada");
+    const ref=h?new Date(h.date):new Date();
+    return ref<=due?"Cumplido":"Fuera de plazo";
+  }
+  if(r.status==="Rechazada") return null;
+  const now=new Date();
+  if(now>due) return "Vencido";
+  if((due-now)<=24*3600000) return "Por vencer";
+  return "En plazo";
+};
+const SLA_COLORS = {"Cumplido":"#10b981","Fuera de plazo":"#ef4444","Vencido":"#ef4444","Por vencer":"#f59e0b","En plazo":"#3b82f6"};
+function SlaBadge({r}){const s=slaStatus(r);if(!s)return null;const c=SLA_COLORS[s]||"#64748b";return <span style={bdg(c,c+"22")}>{s}</span>;}
 const uid = () => Math.random().toString(36).slice(2,9);
 const genCode = (arr,pfx) => {
   const nums = (arr||[]).map(r => { const n = parseInt((r.id||r.code||"").replace(pfx,"").replace(/\D/g,""),10); return isNaN(n)?0:n; });
@@ -414,7 +462,7 @@ export default function App(){
 
   // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
   useEffect(()=>{
-    if(!session||!tasks.length) return;
+    if(!session||(!tasks.length&&!reqs.length)) return;
     const run=async()=>{
       const hoy=new Date(); hoy.setHours(0,0,0,0);
       const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
@@ -438,10 +486,24 @@ export default function App(){
         try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.responsible||"")+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
         if(t.ejecutor&&t.ejecutor!==t.responsible){try{const r2=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.ejecutor)+"&active=eq.true",{headers:hdr()});const u2s=await r2.json();const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
       }
+      // SLA de solicitudes: avisar al responsable desde 24h antes del vencimiento y mientras siga vencida
+      for(const r of reqs){
+        const st=slaStatus(r);
+        if(st!=="Vencido"&&st!=="Por vencer") continue;
+        const key="req_"+r.id;
+        if(sent[key]) continue;
+        sent[key]=true;
+        const esV=st==="Vencido";
+        const asunto=esV?"[CondoAdmin] ⚠ SLA VENCIDO — Solicitud "+r.code:"[CondoAdmin] SLA por vencer (24h) — Solicitud "+r.code;
+        const cuerpo="Hola"+(r.assignedTo&&r.assignedTo!=="Sin asignar"?" "+r.assignedTo:"")+",\n\nLa solicitud "+r.code+" ("+r.category+" / "+r.subcategory+", prioridad "+r.priority+") "+(esV?"venció su plazo SLA":"está por vencer su plazo SLA")+" el "+fmt(r.dueDate)+".\n\n— CondoAdmin";
+        if(r.assignedTo&&r.assignedTo!=="Sin asignar"){
+          try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(r.assignedTo)+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
+        }
+      }
     };
     const timer=setTimeout(()=>run().catch(()=>{}),3000);
     return()=>clearTimeout(timer);
-  },[tasks,session]);
+  },[tasks,reqs,session]);
 
   const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};
@@ -598,6 +660,8 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
   const hoy=new Date(); hoy.setHours(0,0,0,0);
   const tareasVencidas=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<0);
   const tareasPorVencer=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)>=0&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<=3);
+  const reqsVencidas=reqs.filter(r=>slaStatus(r)==="Vencido");
+  const reqsPorVencer=reqs.filter(r=>slaStatus(r)==="Por vencer");
 
   // Por responsable
   const respStats={};
@@ -644,6 +708,30 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
         </div>
       ))}
       {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
+
+      {/* Alertas SLA de solicitudes */}
+      {reqsVencidas.length>0&&(
+        <div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",marginBottom:12}}>
+          <div style={{fontWeight:700,color:"#dc2626",fontSize:13,marginBottom:8}}>⚠ Solicitudes con SLA vencido ({reqsVencidas.length})</div>
+          {reqsVencidas.slice(0,5).map(r=>(
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fca5a5",flexWrap:"wrap",gap:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
+              <div><div style={{fontSize:12,fontWeight:600,color:"#991b1b"}}>{r.code} · {r.category}</div><div style={{fontSize:11,color:"#64748b"}}>Límite: {fmt(r.dueDate)}</div></div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}><PBadge p={r.priority}/><SlaBadge r={r}/></div>
+            </div>
+          ))}
+        </div>
+      )}
+      {reqsPorVencer.length>0&&(
+        <div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",marginBottom:12}}>
+          <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⏰ Solicitudes por vencer SLA - 24h ({reqsPorVencer.length})</div>
+          {reqsPorVencer.map(r=>(
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fde68a",flexWrap:"wrap",gap:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
+              <div><div style={{fontSize:12,fontWeight:600}}>{r.code} · {r.category}</div><div style={{fontSize:11,color:"#64748b"}}>Límite: {fmt(r.dueDate)}</div></div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}><PBadge p={r.priority}/><SlaBadge r={r}/></div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* KPIs Solicitudes */}
       <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>📋 Solicitudes</div>
@@ -910,7 +998,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
           <div key={r.id} style={{...card,padding:12,marginBottom:8,cursor:"pointer",borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0")}} onClick={()=>onOpen(r)}>
             <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
               <div style={{minWidth:0}}><span style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{r.code}</span><div style={{fontSize:12}}>{r.requesterName}</div><div style={{fontSize:11,color:"#64748b"}}>{r.category}</div></div>
-              <div style={{display:"flex",flexDirection:"column",gap:4}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
+              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}><PBadge p={r.priority}/><SBadge s={r.status}/><SlaBadge r={r}/></div>
             </div>
           </div>
         ))}</div>
@@ -926,7 +1014,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}>{r.category}</td>
                 <td style={tdS}>{r.tower}/{r.unit}</td>
                 <td style={tdS}><PBadge p={r.priority}/></td>
-                <td style={tdS}><SBadge s={r.status}/></td>
+                <td style={tdS}><SBadge s={r.status}/><div style={{marginTop:3}}><SlaBadge r={r}/></div></td>
                 <td style={tdS}>{r.assignedTo}</td>
                 <td style={tdS}>{r.proveedor||"—"}</td>
                 <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
@@ -961,6 +1049,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [comment,setComment]=useState("");
   const [ns,setNs]=useState(r.status);
   const [asgn,setAsgn]=useState(r.assignedTo||"Sin asignar");
+  const [pr,setPr]=useState(r.priority);
   const [showTF,setShowTF]=useState(false);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
@@ -977,6 +1066,12 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     upd({status:ns},{action:"Estado cambiado",from:r.status,to:ns});
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
+  };
+  const applyPriority=()=>{
+    if(pr===r.priority) return;
+    const nuevaFecha=calcSlaDueDate(r.category,pr,r.createdAt);
+    upd({priority:pr,dueDate:nuevaFecha},{action:"Prioridad cambiada de "+r.priority+" a "+pr+" · SLA hasta "+fmt(nuevaFecha),from:r.priority,to:pr});
+    showToast("Prioridad actualizada — SLA recalculado");
   };
   const applyAsgn=async()=>{
     if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
@@ -1014,13 +1109,22 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
         <button style={BS(true)} onClick={onBack}>← Volver</button>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?16:20}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
-          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.category} - Torre {r.tower}/{r.unit}</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?16:20}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/><SlaBadge r={r}/></div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.category} - Torre {r.tower}/{r.unit}{r.dueDate?" · 📅 Vence "+fmt(r.dueDate):""}</div>
         </div>
       </div>
       {(can(role,"changeStatus")||can(role,"assign"))&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
         <div style={{...card,padding:12,marginBottom:12}}>
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+            {can(role,"changeStatus")&&(
+              <div><label style={lbl}>Prioridad</label>
+              <div style={{display:"flex",gap:6}}>
+                <select style={{...sel,width:130,color:PC[pr]}} value={pr} onChange={ev=>setPr(ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
+                <button style={BP(true)} onClick={applyPriority}>OK</button>
+              </div>
+              {pr!==r.priority&&<div style={{fontSize:10,color:"#64748b",marginTop:3}}>Nuevo SLA: {fmtSlaHours(slaHoursFor(r.category,pr))} → vence {fmt(calcSlaDueDate(r.category,pr,r.createdAt))}</div>}
+              </div>
+            )}
             {can(role,"changeStatus")&&(
               <div><label style={lbl}>Estado</label>
               <div style={{display:"flex",gap:6}}>
@@ -1056,7 +1160,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
           <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Telefono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/>{r.affectedTowers&&<IR l="Torres afectadas" v={r.affectedTowers}/>}</div>
-          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/></div>
+          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/><IR l="Fecha límite (SLA)" v={r.dueDate?fmt(r.dueDate):"—"}/><div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:12}}><span style={{color:"#64748b"}}>Cumplimiento SLA</span><SlaBadge r={r}/></div></div>
           <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripcion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{r.description||"Sin descripcion."}</p></div>
           <div style={{...card,gridColumn:"1/-1"}}>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Comentarios ({safeComments.length})</div>
@@ -1194,7 +1298,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
-  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:"",priority:"Media"});
+  const reqDueDate=req?.dueDate?new Date(req.dueDate).toISOString().slice(0,10):"";
+  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media"});
   const [f,setF]=useState(initF());
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
@@ -1488,13 +1593,14 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
       return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:f.requesterName,preview:url,comment:""};
     }));
+    const finalCategory=tipo==="Administrativo"?adminCat:f.category;
     const nr=normReq({id:code,code,createdAt:now,...f,
-      category:tipo==="Administrativo"?adminCat:f.category,
+      category:finalCategory,
       subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
       affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
       status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
-      attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
+      attachmentsInitial,dueDate:calcSlaDueDate(finalCategory,f.priority,now),isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
     // Mail al solicitante
     if(f.requesterEmail&&f.requesterEmail.includes("@")){
@@ -1891,7 +1997,7 @@ function InspForm({inspections,setInsp,reqs,setReqs,showToast,role,onBack,mob,to
   const getItem=(sid,name)=>items[sid+"_"+name]||{state:"",obs:"",urgency:"",images:[],reqId:null};
   const all=Object.values(items); const answered=all.filter(v=>v.state).length; const pct=Math.round((answered/all.length)*100);
   const handleImg=ev=>{if(!pendImg)return;const fi=ev.target.files[0];if(!fi)return;const rd=new FileReader();rd.onload=e2=>{const{sid,name}=pendImg;setItem(sid,name,"images",[...(getItem(sid,name).images||[]),e2.target.result]);};rd.readAsDataURL(fi);ev.target.value="";};
-  const createReq=(sid,name)=>{const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");};
+  const createReq=(sid,name)=>{const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:calcSlaDueDate("Espacios comunes",pr,now),isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");};
   const save=st=>{if(!meta.sector||!meta.inspector){showToast("Complete sector e inspector","error");return;}if(st==="Finalizada"&&!meta.conclusion.trim()){showToast("Ingrese conclusión","error");return;}const code=genCode(inspections,"INS-");setInsp(p=>[{id:code,date:meta.date,inspector:meta.inspector,sector:meta.sector,status:st,conclusion:meta.conclusion,items},...p]);showToast(st==="Finalizada"?"Inspección finalizada":"Borrador guardado");onBack();};
   const secIdx=CL_SECTIONS.findIndex(s=>s.id===actSec); const sec=CL_SECTIONS[secIdx];
   return(
@@ -1959,7 +2065,7 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
   const malos=allEntries.filter(en=>en[1].state==="Malo");
   const regs=allEntries.filter(en=>en[1].state==="Regular");
   const bues=allEntries.filter(en=>en[1].state==="Bueno");
-  const createReq=(key,it)=>{if(it.reqId){showToast("Ya existe","error");return;}const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));showToast("Solicitud "+code+" creada");};
+  const createReq=(key,it)=>{if(it.reqId){showToast("Ya existe","error");return;}const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:calcSlaDueDate("Espacios comunes",pr,now),isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));showToast("Solicitud "+code+" creada");};
   const tabs=[{id:"resumen",label:"Resumen"},{id:"hallazgos",label:"Hallazgos ("+(malos.length+regs.length)+")"},{id:"checklist",label:"Checklist"}];
   return(
     <div>
@@ -2134,9 +2240,21 @@ function EmailsView({logs,setEmails,role}){
 function Reports({reqs,tasks,inventory,mob}){
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
   const maxCat=Math.max(...byCat.map(x=>x.n),1);
+  const slaEvaluadas=reqs.filter(r=>r.dueDate&&["Resuelta","Cerrada"].includes(r.status));
+  const slaCumplidas=slaEvaluadas.filter(r=>slaStatus(r)==="Cumplido");
+  const slaPct=slaEvaluadas.length?Math.round(slaCumplidas.length/slaEvaluadas.length*100):null;
+  const slaVencidasActivas=reqs.filter(r=>slaStatus(r)==="Vencido");
+  const slaPorVencerActivas=reqs.filter(r=>slaStatus(r)==="Por vencer");
   return(
     <div>
       <Grid cols={4} mob={mob}>{PRIORITIES.map(p=><Kpi key={p} value={reqs.filter(r=>r.priority===p).length} label={p} color={PC[p]} mob={mob}/>)}</Grid>
+      <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8,marginTop:12}}>⏱ Cumplimiento SLA</div>
+      <Grid cols={4} mob={mob}>
+        <Kpi value={slaPct!==null?slaPct+"%":"---"} label="Cumplidas en plazo" color="#10b981" mob={mob}/>
+        <Kpi value={slaCumplidas.length+"/"+slaEvaluadas.length} label="Casos evaluados" color="#6366f1" mob={mob}/>
+        <Kpi value={slaVencidasActivas.length} label="Vencidas (activas)" color="#ef4444" mob={mob}/>
+        <Kpi value={slaPorVencerActivas.length} label="Por vencer (24h)" color="#f59e0b" mob={mob}/>
+      </Grid>
       <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por estado</div>{STATUSES.map(s=>{const c=reqs.filter(r=>r.status===s).length;return c?<div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><SBadge s={s}/><span style={{fontWeight:600}}>{c}</span></div>:null;})}</div>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>{byCat.map(x=><div key={x.c} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div><div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div></div>)}</div>
@@ -2474,7 +2592,6 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});
   const toggleTow=id=>setTowers(p=>p.map(t=>t.id===id?{...t,active:!t.active}:t));
   const saveTow=t=>{if(editTow){setTowers(p=>p.map(x=>x.id===t.id?t:x));}else{setTowers(p=>[...p,{...t,id:"t"+uid()}]);}showToast("Guardada");setShowTF(false);setEditTow(null);};
-  const sla={Emergencia:"4h",Alta:"24h",Media:"72h",Baja:"7 dias"};
   const cfgTabs=[{id:"cats",label:"Categorías"},{id:"towers",label:"Torres"},{id:"equipos",label:"Equipos"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"}];
   return(
     <div>
@@ -2527,11 +2644,26 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
         </div>
       )}
       {tab==="sla"&&(
-        <div style={card}>
-          <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>
-          {Object.entries(sla).map(([p,t])=>(
-            <div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>
-          ))}
+        <div>
+          <div style={{...alrt("info"),marginBottom:12}}>Tiempo límite para resolver cada solicitud según categoría y prioridad. La fecha límite se calcula automáticamente al crear la solicitud y se recalcula si se cambia la prioridad.</div>
+          <div style={card}>
+            <table style={tbl}>
+              <thead><tr>{["Categoría",...PRIORITIES].map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <tbody>
+                {Object.keys(SLA_MATRIX).map(cat=>(
+                  <tr key={cat}>
+                    <td style={tdS}><strong>{cat}</strong></td>
+                    {PRIORITIES.map(p=><td key={p} style={tdS}><span style={bdg(PC[p],PB[p])}>{fmtSlaHours(SLA_MATRIX[cat][p])}</span></td>)}
+                  </tr>
+                ))}
+                <tr>
+                  <td style={tdS}><strong>Gestión administrativa</strong></td>
+                  {PRIORITIES.map(p=><td key={p} style={tdS}><span style={bdg(PC[p],PB[p])}>{fmtSlaHours(SLA_ADMIN[p])}</span></td>)}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>Estos tiempos están definidos en el código (tabla acordada) y aplican a toda solicitud nueva o con prioridad revisada.</div>
         </div>
       )}
     </div>

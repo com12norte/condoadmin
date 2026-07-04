@@ -614,7 +614,7 @@ export default function App(){
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
             {view==="misolicitudes"&&<MisSolicitudes tasks={tasks} reqs={reqs} session={session} role={er} onOpen={openReq} mob={mob}/>}
-            {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
+            {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session} onOpen={openReq}/>}
             {view==="inspections"&&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} showToast={showToast} role={er} mob={mob} towers={towers}/>}
             {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
             {view==="mantencion"&&<MantView mant={mant} setMant={setMantDB} role={er} showToast={showToast} mob={mob} respList={respList} towers={towers} equipos={equipos} setEquipos={setEquiposDB} certs={certs} setCerts={setCertsDB}/>}
@@ -944,7 +944,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
   const [fi,setFi]=useState({status:"",priority:"",tower:"",responsible:"",proveedor:"",q:""});
   const [sort,setSort]=useState("date");
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
-  const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):reqs;
+  const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):role==="Proveedor"?reqs.filter(r=>(r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email))||(r.proveedor&&(r.proveedor===session?.nombre||r.proveedor===session?.email))):reqs;
 
   // Listas únicas para filtros
   const respOptions=[...new Set(base.map(r=>r.assignedTo).filter(x=>x&&x!=="Sin asignar"))].sort();
@@ -1049,11 +1049,12 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [comment,setComment]=useState("");
   const [ns,setNs]=useState(r.status);
   const [asgn,setAsgn]=useState(r.assignedTo||"Sin asignar");
+  const [prov,setProv]=useState(r.proveedor||"");
   const [pr,setPr]=useState(r.priority);
   const [showTF,setShowTF]=useState(false);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
-  const [tab,setTab]=useState("info");
+  const [tab,setTab]=useState(role==="Proveedor"?"tasks":"info");
 
   const upd=(ch,he)=>{
     const updated={...r,...ch,history:he?[...safeHistory,{date:new Date().toISOString(),user:role,...he}]:safeHistory};
@@ -1082,6 +1083,10 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       const users=await res.json(); const u=users&&users[0];
       if(u?.email) addEmail({requestId:r.id,date:new Date().toISOString(),to:u.email,subject:"[CondoAdmin] Solicitud "+r.code+" asignada",type:"Asignacion",status:"Enviado",body:"Hola "+u.nombre+", se te asignó: "+r.code});
     }catch(_){}
+  };
+  const applyProveedor=()=>{
+    upd({proveedor:prov||null});
+    showToast("Proveedor actualizado");
   };
   const addCmt=()=>{
     if(!comment.trim()) return;
@@ -1144,12 +1149,11 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
             {can(role,"assign")&&(
               <div><label style={lbl}>Proveedor</label>
               <div style={{display:"flex",gap:6}}>
-                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
-                <button style={BS(true)} onClick={()=>{
-                  const val=document.getElementById("prov-input").value.trim();
-                  upd({proveedor:val||null});
-                  showToast("Proveedor actualizado");
-                }}>OK</button>
+                <select style={{...sel,width:150}} value={prov} onChange={ev=>setProv(ev.target.value)}>
+                  <option value="">Sin proveedor</option>
+                  {[...new Set([...respList.filter(s=>s!=="Sin asignar"),...(r.proveedor?[r.proveedor]:[])])].map(s=><option key={s}>{s}</option>)}
+                </select>
+                <button style={BS(true)} onClick={applyProveedor}>OK</button>
               </div></div>
             )}
             {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
@@ -1217,7 +1221,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                 <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
                 {myTasks.map(t=>{
                   const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
-                  const puedeVerInforme=!isEjecutor||miOrden;
+                  const puedeVerInforme=true; // el acceso ya está controlado a nivel de solicitud (ProviderDash / permisos)
                   return(
                     <div key={t.id}>
                       <TaskCard task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>
@@ -1909,8 +1913,8 @@ function MisSolicitudes({tasks,reqs,session,role,onOpen,mob}){
 }
 
 // ── ProviderDash ───────────────────────────────────────────────────────────
-function ProviderDash({role,mob,reqs,session}){
-  const myReqs=reqs.filter(r=>r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email));
+function ProviderDash({role,mob,reqs,session,onOpen}){
+  const myReqs=reqs.filter(r=>(r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email))||(r.proveedor&&(r.proveedor===session?.nombre||r.proveedor===session?.email)));
   return(
     <div>
       <div style={{...card,background:"#1e3a5f",marginBottom:16}}><div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Mis Trabajos Asignados</div><div style={{color:"#94a3b8",fontSize:12}}>Asignados a {session?.nombre||"ti"}</div></div>
@@ -1921,10 +1925,11 @@ function ProviderDash({role,mob,reqs,session}){
       </Grid>
       {myReqs.length===0?<Empty msg="No tienes solicitudes asignadas"/>:(
         <div>{myReqs.map(r=>(
-          <div key={r.id} style={{...card,borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0"),marginBottom:10,padding:14}}>
+          <div key={r.id} style={{...card,borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>onOpen(r)}>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}><span style={{fontWeight:700,color:"#3b82f6"}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
             <div style={{fontWeight:600,fontSize:14,marginBottom:3}}>{r.category}</div>
             <div style={{fontSize:12,color:"#374151",marginTop:4}}>{r.description}</div>
+            <div style={{fontSize:11,color:"#3b82f6",marginTop:6,fontWeight:600}}>→ Completar informe</div>
           </div>
         ))}</div>
       )}

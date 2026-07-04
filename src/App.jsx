@@ -58,8 +58,6 @@ const sendMail = async (to, subject, body) => {
 
 const ROLES = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
 const STATUSES = ["Ingresada","En revision","Asignada","En proceso","Resuelta","Cerrada","Rechazada"];
-const NEXT_STATUS = {Ingresada:"En revision","En revision":"Asignada",Asignada:"En proceso","En proceso":"Resuelta",Resuelta:"Cerrada"};
-const nextOf = s => NEXT_STATUS[s]||null;
 const PRIORITIES = ["Emergencia","Alta","Media","Baja"];
 const SC = {Ingresada:"#6366f1","En revision":"#f59e0b",Asignada:"#3b82f6","En proceso":"#8b5cf6",Resuelta:"#10b981",Cerrada:"#6b7280",Rechazada:"#ef4444"};
 const PC = {Emergencia:"#ef4444",Alta:"#f97316",Media:"#f59e0b",Baja:"#6b7280"};
@@ -1055,7 +1053,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [showTF,setShowTF]=useState(false);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
-  const [showManual,setShowManual]=useState(false);
   const [tab,setTab]=useState("info");
 
   const upd=(ch,he)=>{
@@ -1069,15 +1066,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     upd({status:ns},{action:"Estado cambiado",from:r.status,to:ns});
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
-  };
-  const avanzar=()=>{
-    const next=nextOf(r.status);
-    if(!next) return;
-    if(next==="Cerrada"){setShowCl(true);return;}
-    setNs(next);
-    upd({status:next},{action:"Estado avanzado",from:r.status,to:next});
-    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+next,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+next});
-    showToast("Avanzado a "+next);
   };
   const applyPriority=()=>{
     if(pr===r.priority) return;
@@ -1108,11 +1096,13 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   };
 
   const isProv=role==="Proveedor";
+  const nombre=session?.nombre||"";
+  const email=session?.email||"";
+  const isEjecutor=isProv; // el proveedor ve solo su propia orden con el resumen especial
   const tabs=[
     ...(isProv?[]:[{id:"info",label:"Info"}]),
     ...(isProv?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
     {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
-    {id:"informe",label:"Informe OT"},
     ...(isProv?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
   ];
 
@@ -1139,24 +1129,27 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
             )}
             {can(role,"changeStatus")&&(
               <div><label style={lbl}>Estado</label>
-              <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                <SBadge s={r.status}/>
-                {nextOf(r.status)&&<button style={BP(true)} onClick={avanzar}>Avanzar → {nextOf(r.status)}</button>}
-                <button style={{...BG(true),fontSize:11}} onClick={()=>setShowManual(v=>!v)}>{showManual?"Ocultar":"Otro estado"}</button>
-              </div>
-              {showManual&&(
-                <div style={{display:"flex",gap:6,marginTop:6}}>
-                  <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
-                  <button style={BS(true)} onClick={applyStatus}>OK</button>
-                </div>
-              )}
-              </div>
+              <div style={{display:"flex",gap:6}}>
+                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+                <button style={BP(true)} onClick={applyStatus}>OK</button>
+              </div></div>
             )}
             {can(role,"assign")&&(
               <div><label style={lbl}>Responsable</label>
               <div style={{display:"flex",gap:6}}>
                 <select style={{...sel,width:150}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
                 <button style={BS(true)} onClick={applyAsgn}>Asignar</button>
+              </div></div>
+            )}
+            {can(role,"assign")&&(
+              <div><label style={lbl}>Proveedor</label>
+              <div style={{display:"flex",gap:6}}>
+                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
+                <button style={BS(true)} onClick={()=>{
+                  const val=document.getElementById("prov-input").value.trim();
+                  upd({proveedor:val||null});
+                  showToast("Proveedor actualizado");
+                }}>OK</button>
               </div></div>
             )}
             {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
@@ -1201,90 +1194,75 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           )}
         </div>
       )}
-      {tab==="tasks"&&(
-        <div>
-          {!isProv&&(()=>{
-            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
-            return ["inicial","avance","cierre"].map(type=>{
-              const myAtt=allAtts.filter(a=>a.type===type);
+      {tab==="tasks"&&(()=>{
+        const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+        return(
+          <div>
+            {!isProv&&(()=>{
+              const myAtt=allAtts.filter(a=>a.type==="inicial");
               return(
-                <div key={type} style={card}>
+                <div style={card}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                    <div style={{fontWeight:600,fontSize:13}}>📎 Fotos iniciales</div>
+                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv("inicial")}>+ Agregar</button>}
                   </div>
                   {myAtt.length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>}
                 </div>
               );
-            });
-          })()}
-          {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true} onUpd={upd}/>}
-          {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
-          {myTasks.length>0&&(
-            <div style={{marginTop:8}}>
-              <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
-              {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
-            </div>
-          )}
-        </div>
-      )}
-      {tab==="informe"&&(
-        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=>{
-          const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
-          // Mostrar solo la orden correspondiente si soy ejecutor
-          const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
-          if(isEjecutor&&!miOrden) return null;
-          return(
-            <div key={t.id}>
-              {/* Resumen de la orden siempre visible en modo ejecutor */}
-              {isEjecutor&&(
-                <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
-                  <div style={{fontWeight:700,fontSize:14,color:"#4338ca",marginBottom:6}}>📋 Mi Orden de Trabajo</div>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                    <div>
-                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
-                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>👤 Responsable: {t.responsible}</div>
-                      <div style={{fontSize:12,color:"#6366f1"}}>🔧 Ejecutor: {t.ejecutor}</div>
-                      {t.desc&&<div style={{fontSize:12,color:"#374151",marginTop:4}}>{t.desc}</div>}
+            })()}
+            {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+            {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
+            {myTasks.length>0&&(
+              <div style={{marginTop:8}}>
+                <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
+                {myTasks.map(t=>{
+                  const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
+                  const puedeVerInforme=!isEjecutor||miOrden;
+                  return(
+                    <div key={t.id}>
+                      <TaskCard task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>
+                      {puedeVerInforme&&(
+                        <details style={{marginTop:-4,marginBottom:14}}>
+                          <summary style={{cursor:"pointer",fontSize:12,color:"#6366f1",fontWeight:600,padding:"4px 0 10px"}}>📋 Ver / completar informe de esta orden</summary>
+                          <div>
+                            {isEjecutor&&(
+                              <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
+                                <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
+                                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                                  <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
+                                  <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
+                                  <SBadge s={r.status}/>
+                                </div>
+                                <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
+                              </div>
+                            )}
+                            {["avance","cierre"].map(type=>{
+                              const myAtt=allAtts.filter(a=>a.type===type);
+                              return(
+                                <div key={type} style={card}>
+                                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                                  </div>
+                                  {myAtt.length===0
+                                    ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
+                                    :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
+                                  }
+                                </div>
+                              );
+                            })}
+                            <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+                          </div>
+                        </details>
+                      )}
                     </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
-                      <PBadge p={t.priority}/>
-                      <SBadge s={t.status}/>
-                      {t.dueDate&&<span style={{fontSize:11,color:"#64748b"}}>📅 {fmtD(t.dueDate)}</span>}
-                    </div>
-                  </div>
-                  {/* Info solicitud */}
-                  <div style={{marginTop:10,padding:"8px 10px",background:"#fff",borderRadius:8,border:"1px solid #c7d2fe"}}>
-                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                      <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
-                      <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
-                      <SBadge s={r.status}/>
-                    </div>
-                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
-                  </div>
-                </div>
-              )}
-              {["avance","cierre"].map(type=>{
-                const myAtt=allAtts.filter(a=>a.type===type);
-                return(
-                  <div key={type} style={card}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                      <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                      {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
-                    </div>
-                    {myAtt.length===0
-                      ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
-                      :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
-                    }
-                  </div>
-                );
-              })}
-              <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
-            </div>
-          );
-        })
-      )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
       {!isProv&&tab==="emails"&&(
         <div style={card}>
           {myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((em,i)=>(
@@ -1296,7 +1274,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           ))}
         </div>
       )}
-      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false} onUpd={upd}/>}
+      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
       {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
     </div>
@@ -1304,19 +1282,16 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 }
 
 // ── TaskForm ───────────────────────────────────────────────────────────────
-function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline,onUpd}){
+function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
   const reqDueDate=req?.dueDate?new Date(req.dueDate).toISOString().slice(0,10):"";
-  const initTitle=req?(req.category+(req.subcategory?" / "+req.subcategory:"")):"";
-  const initF=()=>({title:initTitle,desc:req?.description||"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media",proveedor:req?.proveedor||""});
+  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media"});
   const [f,setF]=useState(initF());
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
-    const{proveedor,...taskFields}=f;
-    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...taskFields,proveedor};
+    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
     setTasks(p=>[...p,newTask]); showToast("Orden creada");
-    if(onUpd&&proveedor&&proveedor!==req?.proveedor) onUpd({proveedor});
     if(inline) setF(initF()); else onClose();
     if(f.ejecutor){
       try{
@@ -1334,7 +1309,6 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={ev=>setF(p=>({...p,desc:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Proveedor</label><input style={inp} placeholder="Nombre proveedor (opcional)..." value={f.proveedor} onChange={ev=>setF(p=>({...p,proveedor:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={ev=>setF(p=>({...p,dueDate:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={ev=>setF(p=>({...p,priority:ev.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
@@ -1358,7 +1332,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
         <div style={{minWidth:0}}>
           <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div>
-          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor}{task.proveedor&&" · 🏢 "+task.proveedor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/></div>
       </div>

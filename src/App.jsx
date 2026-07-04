@@ -58,6 +58,8 @@ const sendMail = async (to, subject, body) => {
 
 const ROLES = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
 const STATUSES = ["Ingresada","En revision","Asignada","En proceso","Resuelta","Cerrada","Rechazada"];
+const NEXT_STATUS = {Ingresada:"En revision","En revision":"Asignada",Asignada:"En proceso","En proceso":"Resuelta",Resuelta:"Cerrada"};
+const nextOf = s => NEXT_STATUS[s]||null;
 const PRIORITIES = ["Emergencia","Alta","Media","Baja"];
 const SC = {Ingresada:"#6366f1","En revision":"#f59e0b",Asignada:"#3b82f6","En proceso":"#8b5cf6",Resuelta:"#10b981",Cerrada:"#6b7280",Rechazada:"#ef4444"};
 const PC = {Emergencia:"#ef4444",Alta:"#f97316",Media:"#f59e0b",Baja:"#6b7280"};
@@ -1053,6 +1055,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [showTF,setShowTF]=useState(false);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
+  const [showManual,setShowManual]=useState(false);
   const [tab,setTab]=useState("info");
 
   const upd=(ch,he)=>{
@@ -1066,6 +1069,15 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     upd({status:ns},{action:"Estado cambiado",from:r.status,to:ns});
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
+  };
+  const avanzar=()=>{
+    const next=nextOf(r.status);
+    if(!next) return;
+    if(next==="Cerrada"){setShowCl(true);return;}
+    setNs(next);
+    upd({status:next},{action:"Estado avanzado",from:r.status,to:next});
+    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+next,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+next});
+    showToast("Avanzado a "+next);
   };
   const applyPriority=()=>{
     if(pr===r.priority) return;
@@ -1127,27 +1139,24 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
             )}
             {can(role,"changeStatus")&&(
               <div><label style={lbl}>Estado</label>
-              <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
-                <button style={BP(true)} onClick={applyStatus}>OK</button>
-              </div></div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <SBadge s={r.status}/>
+                {nextOf(r.status)&&<button style={BP(true)} onClick={avanzar}>Avanzar → {nextOf(r.status)}</button>}
+                <button style={{...BG(true),fontSize:11}} onClick={()=>setShowManual(v=>!v)}>{showManual?"Ocultar":"Otro estado"}</button>
+              </div>
+              {showManual&&(
+                <div style={{display:"flex",gap:6,marginTop:6}}>
+                  <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+                  <button style={BS(true)} onClick={applyStatus}>OK</button>
+                </div>
+              )}
+              </div>
             )}
             {can(role,"assign")&&(
               <div><label style={lbl}>Responsable</label>
               <div style={{display:"flex",gap:6}}>
                 <select style={{...sel,width:150}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
                 <button style={BS(true)} onClick={applyAsgn}>Asignar</button>
-              </div></div>
-            )}
-            {can(role,"assign")&&(
-              <div><label style={lbl}>Proveedor</label>
-              <div style={{display:"flex",gap:6}}>
-                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
-                <button style={BS(true)} onClick={()=>{
-                  const val=document.getElementById("prov-input").value.trim();
-                  upd({proveedor:val||null});
-                  showToast("Proveedor actualizado");
-                }}>OK</button>
               </div></div>
             )}
             {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
@@ -1209,7 +1218,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               );
             });
           })()}
-          {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+          {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true} onUpd={upd}/>}
           {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
           {myTasks.length>0&&(
             <div style={{marginTop:8}}>
@@ -1287,7 +1296,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           ))}
         </div>
       )}
-      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
+      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false} onUpd={upd}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
       {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
     </div>
@@ -1295,16 +1304,19 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 }
 
 // ── TaskForm ───────────────────────────────────────────────────────────────
-function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
+function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline,onUpd}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
   const reqDueDate=req?.dueDate?new Date(req.dueDate).toISOString().slice(0,10):"";
-  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media"});
+  const initTitle=req?(req.category+(req.subcategory?" / "+req.subcategory:"")):"";
+  const initF=()=>({title:initTitle,desc:req?.description||"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media",proveedor:req?.proveedor||""});
   const [f,setF]=useState(initF());
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
-    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
+    const{proveedor,...taskFields}=f;
+    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...taskFields,proveedor};
     setTasks(p=>[...p,newTask]); showToast("Orden creada");
+    if(onUpd&&proveedor&&proveedor!==req?.proveedor) onUpd({proveedor});
     if(inline) setF(initF()); else onClose();
     if(f.ejecutor){
       try{
@@ -1322,6 +1334,7 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={ev=>setF(p=>({...p,desc:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Proveedor</label><input style={inp} placeholder="Nombre proveedor (opcional)..." value={f.proveedor} onChange={ev=>setF(p=>({...p,proveedor:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={ev=>setF(p=>({...p,dueDate:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={ev=>setF(p=>({...p,priority:ev.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
@@ -1345,7 +1358,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
         <div style={{minWidth:0}}>
           <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div>
-          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor}{task.proveedor&&" · 🏢 "+task.proveedor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/></div>
       </div>

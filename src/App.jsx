@@ -1248,23 +1248,24 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 
 // ── TaskForm ───────────────────────────────────────────────────────────────
 function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline,onUpd}){
-  const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
   const reqDueDate=req?.dueDate?new Date(req.dueDate).toISOString().slice(0,10):"";
   const initTitle=req?(req.category+(req.subcategory?" / "+req.subcategory:"")):"";
-  const initF=()=>({title:initTitle,desc:req?.description||"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media",proveedor:req?.proveedor||""});
+  const initF=()=>({title:initTitle,desc:req?.description||"",responsible:respAuto,dueDate:reqDueDate,priority:req?.priority||"Media",proveedor:req?.proveedor||""});
   const [f,setF]=useState(initF());
   const provOptions=[...new Set([...(respAssign||[]),...(req?.proveedor?[req.proveedor]:[])])];
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
     const{proveedor,...taskFields}=f;
-    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...taskFields,proveedor};
+    // ejecutor queda igual al proveedor (es quien realmente ejecuta el trabajo);
+    // se conserva el campo internamente para no romper permisos/visualización existentes.
+    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...taskFields,proveedor,ejecutor:proveedor};
     setTasks(p=>[...p,newTask]); showToast("Orden creada");
     if(onUpd&&proveedor&&proveedor!==req?.proveedor) onUpd({proveedor});
     if(inline) setF(initF()); else onClose();
-    if(f.ejecutor){
+    if(proveedor){
       try{
-        const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(f.ejecutor)+"&active=eq.true",{headers:hdr()});
+        const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(proveedor)+"&active=eq.true",{headers:hdr()});
         const users=await res.json(); const u=users&&users[0];
         if(u?.email) await sendMail(u.email,"[CondoAdmin] Nueva orden asignada","Hola "+u.nombre+", orden: "+f.title+(req?"\nSolicitud: "+req.code:""));
       }catch(_){}
@@ -1277,7 +1278,6 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo *</label><input style={inp} placeholder="Describe el trabajo..." value={f.title} onChange={ev=>setF(p=>({...p,title:ev.target.value}))}/></div>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={ev=>setF(p=>({...p,desc:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Proveedor</label><select style={sel} value={f.proveedor} onChange={ev=>setF(p=>({...p,proveedor:ev.target.value}))}><option value="">Sin proveedor</option>{provOptions.map(r=><option key={r}>{r}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={ev=>setF(p=>({...p,dueDate:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={ev=>setF(p=>({...p,priority:ev.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>

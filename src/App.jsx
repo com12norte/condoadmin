@@ -460,52 +460,11 @@ export default function App(){
     })();
   },[session]);
 
-  // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
-  useEffect(()=>{
-    if(!session||(!tasks.length&&!reqs.length)) return;
-    const run=async()=>{
-      const hoy=new Date(); hoy.setHours(0,0,0,0);
-      const fechaKey=hoy.toISOString().slice(0,10);
-      const LS_KEY="condoadmin_reminders_sent";
-      // Persistir en localStorage (sobrevive a recargas/reaperturas de la app).
-      // window._rem* solo vivía en memoria y se perdía cada vez que se abría la app,
-      // por eso se reenviaban todos los correos en cada apertura.
-      let store;
-      try{ store=JSON.parse(localStorage.getItem(LS_KEY)||"null"); }catch(_){ store=null; }
-      if(!store||store.date!==fechaKey) store={date:fechaKey,sent:{}};
-      const sent=store.sent;
-      const persist=()=>{ try{ localStorage.setItem(LS_KEY,JSON.stringify(store)); }catch(_){} };
-      for(const t of tasks){
-        if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;
-        const due=new Date(t.dueDate); due.setHours(0,0,0,0);
-        const diff=Math.ceil((due-hoy)/86400000);
-        if(diff>3||sent[t.id]) continue;
-        sent[t.id]=true; persist();
-        const esV=diff<0;
-        const diasTxt=esV?"venció hace "+Math.abs(diff)+" día(s)":diff===0?"vence HOY":"vence en "+diff+" día(s)";
-        const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
-        const cuerpo="Hola"+(t.responsible?" "+t.responsible:"")+",\n\nLa orden \""+t.title+"\" "+diasTxt+" ("+fmtD(t.dueDate)+") y aún no tiene informe.\n\n— CondoAdmin";
-        try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.responsible||"")+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
-        if(t.ejecutor&&t.ejecutor!==t.responsible){try{const r2=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.ejecutor)+"&active=eq.true",{headers:hdr()});const u2s=await r2.json();const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
-      }
-      // SLA de solicitudes: avisar al responsable desde 24h antes del vencimiento y mientras siga vencida
-      for(const r of reqs){
-        const st=slaStatus(r);
-        if(st!=="Vencido"&&st!=="Por vencer") continue;
-        const key="req_"+r.id;
-        if(sent[key]) continue;
-        sent[key]=true; persist();
-        const esV=st==="Vencido";
-        const asunto=esV?"[CondoAdmin] ⚠ SLA VENCIDO — Solicitud "+r.code:"[CondoAdmin] SLA por vencer (24h) — Solicitud "+r.code;
-        const cuerpo="Hola"+(r.assignedTo&&r.assignedTo!=="Sin asignar"?" "+r.assignedTo:"")+",\n\nLa solicitud "+r.code+" ("+r.category+" / "+r.subcategory+", prioridad "+r.priority+") "+(esV?"venció su plazo SLA":"está por vencer su plazo SLA")+" el "+fmt(r.dueDate)+".\n\n— CondoAdmin";
-        if(r.assignedTo&&r.assignedTo!=="Sin asignar"){
-          try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(r.assignedTo)+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
-        }
-      }
-    };
-    const timer=setTimeout(()=>run().catch(()=>{}),3000);
-    return()=>clearTimeout(timer);
-  },[tasks,reqs,session]);
+  // NOTA: el resumen diario de las 8am NO se envía desde aquí (el navegador).
+  // Se envía 100% desde el servidor (Supabase Edge Function "daily-summary" +
+  // pg_cron), para que salga automático a las 8am exista o no alguien con la
+  // app abierta, y para que abrir la app nunca dispare un correo por sí sola.
+  // Ver supabase-daily-summary-function.ts y supabase-cron-schedule.sql.
 
   const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};

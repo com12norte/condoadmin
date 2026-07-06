@@ -465,20 +465,22 @@ export default function App(){
     if(!session||(!tasks.length&&!reqs.length)) return;
     const run=async()=>{
       const hoy=new Date(); hoy.setHours(0,0,0,0);
-      const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
-      // Si ya se ejecutó hoy en esta sesión, no hacer nada
-      if(window._remDate===fechaKey) return;
-      window._remDate=fechaKey;
-      if(!window._remSent) window._remSent={};
-      // Limpiar enviados de días anteriores
-      window._remSent={};
-      const sent=window._remSent;
+      const fechaKey=hoy.toISOString().slice(0,10);
+      const LS_KEY="condoadmin_reminders_sent";
+      // Persistir en localStorage (sobrevive a recargas/reaperturas de la app).
+      // window._rem* solo vivía en memoria y se perdía cada vez que se abría la app,
+      // por eso se reenviaban todos los correos en cada apertura.
+      let store;
+      try{ store=JSON.parse(localStorage.getItem(LS_KEY)||"null"); }catch(_){ store=null; }
+      if(!store||store.date!==fechaKey) store={date:fechaKey,sent:{}};
+      const sent=store.sent;
+      const persist=()=>{ try{ localStorage.setItem(LS_KEY,JSON.stringify(store)); }catch(_){} };
       for(const t of tasks){
         if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;
         const due=new Date(t.dueDate); due.setHours(0,0,0,0);
         const diff=Math.ceil((due-hoy)/86400000);
         if(diff>3||sent[t.id]) continue;
-        sent[t.id]=true;
+        sent[t.id]=true; persist();
         const esV=diff<0;
         const diasTxt=esV?"venció hace "+Math.abs(diff)+" día(s)":diff===0?"vence HOY":"vence en "+diff+" día(s)";
         const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
@@ -492,7 +494,7 @@ export default function App(){
         if(st!=="Vencido"&&st!=="Por vencer") continue;
         const key="req_"+r.id;
         if(sent[key]) continue;
-        sent[key]=true;
+        sent[key]=true; persist();
         const esV=st==="Vencido";
         const asunto=esV?"[CondoAdmin] ⚠ SLA VENCIDO — Solicitud "+r.code:"[CondoAdmin] SLA por vencer (24h) — Solicitud "+r.code;
         const cuerpo="Hola"+(r.assignedTo&&r.assignedTo!=="Sin asignar"?" "+r.assignedTo:"")+",\n\nLa solicitud "+r.code+" ("+r.category+" / "+r.subcategory+", prioridad "+r.priority+") "+(esV?"venció su plazo SLA":"está por vencer su plazo SLA")+" el "+fmt(r.dueDate)+".\n\n— CondoAdmin";
@@ -1214,7 +1216,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                 </div>
               );
             })()}
-            {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+            {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true} onUpd={upd}/>}
             {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
             {myTasks.length>0&&(
               <div style={{marginTop:8}}>
@@ -1278,7 +1280,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           ))}
         </div>
       )}
-      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
+      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false} onUpd={upd}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
       {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
     </div>
@@ -1286,16 +1288,20 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 }
 
 // ── TaskForm ───────────────────────────────────────────────────────────────
-function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
+function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline,onUpd}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
   const reqDueDate=req?.dueDate?new Date(req.dueDate).toISOString().slice(0,10):"";
-  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media"});
+  const initTitle=req?(req.category+(req.subcategory?" / "+req.subcategory:"")):"";
+  const initF=()=>({title:initTitle,desc:req?.description||"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:reqDueDate,priority:req?.priority||"Media",proveedor:req?.proveedor||""});
   const [f,setF]=useState(initF());
+  const provOptions=[...new Set([...(respAssign||[]),...(req?.proveedor?[req.proveedor]:[])])];
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
-    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
+    const{proveedor,...taskFields}=f;
+    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...taskFields,proveedor};
     setTasks(p=>[...p,newTask]); showToast("Orden creada");
+    if(onUpd&&proveedor&&proveedor!==req?.proveedor) onUpd({proveedor});
     if(inline) setF(initF()); else onClose();
     if(f.ejecutor){
       try{
@@ -1313,6 +1319,7 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={ev=>setF(p=>({...p,desc:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Proveedor</label><select style={sel} value={f.proveedor} onChange={ev=>setF(p=>({...p,proveedor:ev.target.value}))}><option value="">Sin proveedor</option>{provOptions.map(r=><option key={r}>{r}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={ev=>setF(p=>({...p,dueDate:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={ev=>setF(p=>({...p,priority:ev.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
@@ -1336,7 +1343,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
         <div style={{minWidth:0}}>
           <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div>
-          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor}{task.proveedor&&" · 🏢 "+task.proveedor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/></div>
       </div>

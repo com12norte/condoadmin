@@ -2,7 +2,12 @@ name: Cron Recordatorios CondoAdmin
 
 on:
   schedule:
-    - cron: '0 12 * * *'
+    # Corre cada hora en punto. La función /api/cron-recordatorios decide sola
+    # si "ya son las 8am en Chile" (usando la hora real, no una hora fija en
+    # UTC), así que no hay que tocar este archivo cuando Chile cambia de
+    # horario de verano/invierno. Aunque corra 24 veces al día, el correo
+    # real solo sale una vez (la función también controla eso).
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:

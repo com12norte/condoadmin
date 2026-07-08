@@ -87,7 +87,18 @@ export default async function handler(req, res) {
   // Autenticación: mismo Bearer token que ya usa el workflow de GitHub Actions
   const auth = req.headers.authorization || "";
   if (auth !== `Bearer ${CRON_SECRET}`) {
-    return res.status(401).json({ error: "No autorizado" });
+    // Diagnóstico seguro: no expone los valores reales, solo si existen y sus largos,
+    // para detectar espacios/saltos de línea de más o una variable no definida.
+    return res.status(401).json({
+      error: "No autorizado",
+      diagnostico: {
+        envVarDefinida: !!process.env.CRON_SECRET,
+        largoEsperado: CRON_SECRET.length,
+        largoRecibido: auth.replace(/^Bearer /, "").length,
+        empiezaConBearer: auth.startsWith("Bearer "),
+        usandoValorPorDefecto: !process.env.CRON_SECRET,
+      },
+    });
   }
   if (!SUPA_KEY) {
     return res.status(500).json({ error: "Falta la variable de entorno SUPA_SERVICE_KEY en Vercel" });

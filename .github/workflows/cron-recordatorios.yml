@@ -17,4 +17,4 @@ jobs:
       - name: Ejecutar cron recordatorios
         run: |
           curl -X GET https://condoadmin-rouge.vercel.app/api/cron-recordatorios \
-            -H "Authorization: Bearer condoadmin2026"
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

@@ -247,6 +247,15 @@ function PBadge({p}){return <span style={{...bdg(PC[p]||"#64748b",PB[p]||"#f9faf
 function MBadge({m}){const st=getMantStatus(m);const dot=st==="Vigente"?"✓":st==="Por vencer"?"!":st==="Vencida"?"✗":"~";return <span style={bdg(MANT_SC[st]||"#64748b",MANT_SB[st]||"#f9fafb")}>{dot} {st}</span>;}
 function IR({l,v}){return <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f8fafc",fontSize:12}}><span style={{color:"#64748b"}}>{l}</span><span style={{fontWeight:600}}>{v==null?"---":String(v)}</span></div>;}
 function Empty({msg}){return <div style={{textAlign:"center",padding:"40px 20px",color:"#94a3b8",fontSize:13}}>{msg}</div>;}
+function ConfirmCheck({id,label,checked,onChange,error,important}){
+  return(
+    <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center",...(important?{background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}:{})}}>
+      <input type="checkbox" id={id} checked={checked} onChange={ev=>onChange(ev.target.checked)}/>
+      <label htmlFor={id} style={{fontSize:13,cursor:"pointer",color:important?"#16a34a":"#374151"}}>{important?"✓ ":""}{label}</label>
+      {error&&<span style={{color:"#ef4444",fontSize:10}}>{error}</span>}
+    </div>
+  );
+}
 function Kpi({value,label,color,mob}){return <div style={{...kpi,borderTop:"3px solid "+color}}><div style={{fontSize:mob?18:24,fontWeight:700,color}}>{value}</div><div style={{fontSize:11,color:"#64748b",marginTop:3}}>{label}</div></div>;}
 function Grid({cols,mob,children}){return <div style={{display:"grid",gridTemplateColumns:"repeat("+(mob?2:cols)+",1fr)",gap:12,marginBottom:16}}>{children}</div>;}
 function Tabs({tabs,active,onChange,accent}){
@@ -904,6 +913,7 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
 function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towers,respList,session}){
   const [fi,setFi]=useState({status:"",priority:"",tower:"",responsible:"",proveedor:"",q:""});
   const [sort,setSort]=useState("date");
+  const [showMoreFilters,setShowMoreFilters]=useState(false);
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
   const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):role==="Proveedor"?reqs.filter(r=>(r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email))||(r.proveedor&&(r.proveedor===session?.nombre||r.proveedor===session?.email))):reqs;
 
@@ -933,21 +943,30 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       <div style={{...card,padding:12,marginBottom:12}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
           <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
-          {[["status","Estado",STATUSES],["priority","Prioridad",PRIORITIES],["tower","Torre",actTowers]].map(([k,l,opts])=>(
+          {[["status","Estado",STATUSES],["priority","Prioridad",PRIORITIES]].map(([k,l,opts])=>(
             <select key={k} style={{...sel,flex:1}} value={fi[k]} onChange={ev=>setFi(p=>({...p,[k]:ev.target.value}))}>
               <option value="">...{l}</option>
               {opts.map(o=><option key={o}>{o}</option>)}
             </select>
           ))}
-          <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
-            <option value="">...Responsable</option>
-            {respOptions.map(o=><option key={o}>{o}</option>)}
-          </select>
-          <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
-            <option value="">...Proveedor</option>
-            {provOptions.map(o=><option key={o}>{o}</option>)}
-          </select>
+          <button style={BG(true)} onClick={()=>setShowMoreFilters(v=>!v)}>{showMoreFilters?"Menos filtros ▴":"Más filtros ▾"}{(fi.tower||fi.responsible||fi.proveedor)?" •":""}</button>
         </div>
+        {showMoreFilters&&(
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+            <select style={{...sel,flex:1}} value={fi.tower} onChange={ev=>setFi(p=>({...p,tower:ev.target.value}))}>
+              <option value="">...Torre</option>
+              {actTowers.map(o=><option key={o}>{o}</option>)}
+            </select>
+            <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
+              <option value="">...Responsable</option>
+              {respOptions.map(o=><option key={o}>{o}</option>)}
+            </select>
+            <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
+              <option value="">...Proveedor</option>
+              {provOptions.map(o=><option key={o}>{o}</option>)}
+            </select>
+          </div>
+        )}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button style={sort==="date"?BP(true):BS(true)} onClick={()=>setSort("date")}>Fecha</button>
           <button style={sort==="priority"?BP(true):BS(true)} onClick={()=>setSort("priority")}>Prioridad</button>
@@ -966,7 +985,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       ):(
         <div style={card}>
           <table style={tbl}>
-            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Proveedor","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
             <tbody>{visible.map(r=>(
               <tr key={r.id} style={{background:r.priority==="Emergencia"?"#fef2f2":"",cursor:"pointer"}} onClick={()=>onOpen(r)}>
                 <td style={tdS}>{r.priority==="Emergencia"?"⚠":""}</td>
@@ -982,9 +1001,12 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
                     {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-                      <select style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
-                        {STATUSES.map(s=><option key={s}>{s}</option>)}
-                      </select>
+                      <>
+                        <select style={{...sel,width:110,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
+                          {STATUSES.filter(s=>s!=="Rechazada").map(s=><option key={s}>{s}</option>)}
+                        </select>
+                        <button style={{...BD(true),fontSize:11,padding:"4px 6px"}} title="Rechazar" onClick={()=>{if(window.confirm("¿Rechazar "+r.code+"?"))quickSt(r,"Rechazada");}}>✕</button>
+                      </>
                     )}
                     {can(role,"manageConfig")&&(
                       <button style={BD(true)} onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"?"))deleteReq(r.id);}}>🗑</button>
@@ -1028,6 +1050,11 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     upd({status:ns},{action:"Estado cambiado",from:r.status,to:ns});
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
+  };
+  const rechazar=()=>{
+    upd({status:"Rechazada"},{action:"Solicitud rechazada",from:r.status,to:"Rechazada"});
+    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: Rechazada",type:"Cambio de estado",status:"Enviado",body:"Su solicitud fue rechazada."});
+    showToast("Solicitud rechazada");
   };
   const applyPriority=()=>{
     if(pr===r.priority) return;
@@ -1074,7 +1101,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const isEjecutor=isProv; // el proveedor ve solo su propia orden con el resumen especial
   const tabs=[
     ...(isProv?[]:[{id:"info",label:"Info"}]),
-    ...(isProv?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
     {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
     ...(isProv?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
   ];
@@ -1103,8 +1129,9 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
             {can(role,"changeStatus")&&(
               <div><label style={lbl}>Estado</label>
               <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.filter(s=>s!=="Rechazada").map(s=><option key={s}>{s}</option>)}</select>
                 <button style={BP(true)} onClick={applyStatus}>OK</button>
+                <button style={BD(true)} title="Rechazar" onClick={()=>{if(window.confirm("¿Rechazar esta solicitud?"))rechazar();}}>✕ Rechazar</button>
               </div></div>
             )}
             {can(role,"assign")&&(
@@ -1151,19 +1178,20 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               </div>
             )}
           </div>
-        </div>
-      )}
-      {tab==="history"&&(
-        <div style={card}>
-          {safeHistory.length===0?<Empty msg="Sin historial"/>:(
-            <div>{[...safeHistory].reverse().map((h,i)=>(
-              <div key={i} style={{paddingLeft:16,paddingBottom:14,borderLeft:"2px solid #e2e8f0",marginLeft:4}}>
-                <div style={{fontSize:13,fontWeight:600}}>{h.action}</div>
-                {h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}
-                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div>
-              </div>
-            ))}</div>
-          )}
+          <details style={{marginTop:12}}>
+            <summary style={{cursor:"pointer",fontSize:12,color:"#6366f1",fontWeight:600,padding:"6px 0"}}>🕒 Ver historial ({safeHistory.length})</summary>
+            <div style={{...card,marginTop:8}}>
+              {safeHistory.length===0?<Empty msg="Sin historial"/>:(
+                <div>{[...safeHistory].reverse().map((h,i)=>(
+                  <div key={i} style={{paddingLeft:16,paddingBottom:14,borderLeft:"2px solid #e2e8f0",marginLeft:4}}>
+                    <div style={{fontSize:13,fontWeight:600}}>{h.action}</div>
+                    {h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}
+                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div>
+                  </div>
+                ))}</div>
+              )}
+            </div>
+          </details>
         </div>
       )}
       {tab==="tasks"&&(()=>{
@@ -1423,7 +1451,7 @@ function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate}){
       <div style={fg}><label style={lbl}>Observaciones</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.observaciones} onChange={ev=>setFld("observaciones",ev.target.value)}/></div>
       <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id={"seg"+task.id} checked={f.requiereSeguimiento} onChange={ev=>setFld("requiereSeguimiento",ev.target.checked)}/><label htmlFor={"seg"+task.id} style={{fontSize:13,cursor:"pointer"}}>⚠️ Requiere seguimiento posterior</label></div>
       <div style={fg}><label style={lbl}>Nombre del ejecutor</label><input style={inp} value={f.nombreEjecutor} onChange={ev=>setFld("nombreEjecutor",ev.target.value)}/></div>
-      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}><input type="checkbox" id={"vb"+task.id} checked={f.vistoBueno} onChange={ev=>setFld("vistoBueno",ev.target.checked)}/><label htmlFor={"vb"+task.id} style={{fontSize:13,cursor:"pointer",color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado</label></div>
+      <ConfirmCheck id={"vb"+task.id} label="Confirmo que el trabajo fue realizado" checked={f.vistoBueno} onChange={v=>setFld("vistoBueno",v)} important/>
       <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}><button style={BSu(true)} onClick={guardar}>💾 Guardar informe</button></div>
     </div>
   );
@@ -1715,14 +1743,10 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
                   </div>
                 )}
               </div>
-              <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={ev=>setFld("accessPermission",ev.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
+              <ConfirmCheck id="acc" label="Autorizo ingreso al inmueble" checked={f.accessPermission} onChange={v=>setFld("accessPermission",v)}/>
             </>
           )}
-          <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}>
-            <input type="checkbox" id="conf" checked={f.confirm} onChange={ev=>setFld("confirm",ev.target.checked)}/>
-            <label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la información es correcta *</label>
-            {errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}
-          </div>
+          <ConfirmCheck id="conf" label="Confirmo que la información es correcta *" checked={f.confirm} onChange={v=>setFld("confirm",v)} error={errs.confirm} important/>
         </div>
         {tipo==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA</strong></div>}
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>

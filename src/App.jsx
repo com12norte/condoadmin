@@ -1049,6 +1049,13 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     upd({proveedor:prov||null});
     showToast("Proveedor actualizado");
   };
+  const comenzarTrabajo=t=>{
+    setTasks(p=>p.map(x=>x.id===t.id?{...x,status:"En proceso"}:x));
+    if(!["En proceso","Resuelta","Cerrada","Rechazada"].includes(r.status)){
+      upd({status:"En proceso"},{action:"Proveedor comenzó el trabajo",from:r.status,to:"En proceso"});
+    }
+    showToast("Trabajo iniciado");
+  };
   const addCmt=()=>{
     if(!comment.trim()) return;
     upd({comments:[...safeComments,{id:"c"+uid(),user:role,date:new Date().toISOString(),text:comment}]});
@@ -1181,8 +1188,45 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               <div style={{marginTop:8}}>
                 <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
                 {myTasks.map(t=>{
-                  const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
                   const puedeVerInforme=true; // el acceso ya está controlado a nivel de solicitud (ProviderDash / permisos)
+                  if(isProv){
+                    // Vista del proveedor: el informe va arriba y abierto, sin tarjeta ni desplegable de por medio.
+                    return(
+                      <div key={t.id}>
+                        {t.status==="Ingresada"&&(
+                          <div style={{...card,background:"#eff6ff",border:"2px solid #3b82f6",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                            <div style={{fontSize:13}}>Aún no has marcado que comenzaste este trabajo.</div>
+                            <button style={BP(true)} onClick={()=>comenzarTrabajo(t)}>▶ Comenzar trabajo</button>
+                          </div>
+                        )}
+                        <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
+                          <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                            <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
+                            <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
+                            <SBadge s={r.status}/>
+                          </div>
+                          <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
+                        </div>
+                        {["avance","cierre"].map(type=>{
+                          const myAtt=allAtts.filter(a=>a.type===type);
+                          return(
+                            <div key={type} style={card}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                                <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                                {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                              </div>
+                              {myAtt.length===0
+                                ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
+                                :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
+                              }
+                            </div>
+                          );
+                        })}
+                        <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd}/>
+                      </div>
+                    );
+                  }
                   return(
                     <div key={t.id}>
                       <TaskCard task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>
@@ -1190,17 +1234,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                         <details style={{marginTop:-4,marginBottom:14}}>
                           <summary style={{cursor:"pointer",fontSize:12,color:"#6366f1",fontWeight:600,padding:"4px 0 10px"}}>📋 Ver / completar informe de esta orden</summary>
                           <div>
-                            {isEjecutor&&(
-                              <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
-                                <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
-                                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                                  <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
-                                  <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
-                                  <SBadge s={r.status}/>
-                                </div>
-                                <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
-                              </div>
-                            )}
                             {["avance","cierre"].map(type=>{
                               const myAtt=allAtts.filter(a=>a.type===type);
                               return(
@@ -1216,7 +1249,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                                 </div>
                               );
                             })}
-                            <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+                            <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd}/>
                           </div>
                         </details>
                       )}
@@ -1307,6 +1340,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/></div>
       </div>
       {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
+      {task.requiereSeguimiento&&<div style={{...bdg("#f59e0b","#fffbeb"),marginBottom:10,padding:"4px 8px"}}>⚠️ Requiere seguimiento posterior</div>}
       {safeComments.map((c,i)=>(
         <div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}>
           <strong>{c.user}</strong> <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}
@@ -1326,7 +1360,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
 }
 
 // ── InformeInline ──────────────────────────────────────────────────────────
-function InformeInline({task,setTasks,showToast}){
+function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate}){
   const [f,setF]=useState({
     texto:task.informe||"",
     fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),
@@ -1350,8 +1384,18 @@ function InformeInline({task,setTasks,showToast}){
   const guardar=()=>{
     if(!f.texto.trim()){showToast("Ingrese la descripción","error");return;}
     if(!f.vistoBueno){showToast("Debe confirmar el trabajo realizado","error");return;}
-    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto}:t));
-    showToast("Informe guardado");
+    const nuevoEstadoTarea=f.estadoFinal==="Resuelto"?"Completada":"En proceso";
+    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto,status:nuevoEstadoTarea}:t));
+    // Mueve el estado de la solicitud automáticamente, sin que el admin tenga que
+    // entrar aparte a cambiarlo a mano (elimina el doble proceso).
+    if(onReqUpdate&&reqStatus&&!["Resuelta","Cerrada","Rechazada"].includes(reqStatus)){
+      if(f.estadoFinal==="Resuelto"){
+        onReqUpdate({status:"Resuelta"},{action:"Informe completado · Estado final: Resuelto",from:reqStatus,to:"Resuelta"});
+      }else if(reqStatus!=="En proceso"){
+        onReqUpdate({status:"En proceso"},{action:"Informe guardado · Estado final: "+f.estadoFinal,from:reqStatus,to:"En proceso"});
+      }
+    }
+    showToast(f.estadoFinal==="Resuelto"?"Informe guardado — solicitud marcada como Resuelta":"Informe guardado");
   };
   return(
     <div style={{...card,marginBottom:16}}>

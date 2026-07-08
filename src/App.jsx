@@ -1040,20 +1040,32 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [tab,setTab]=useState(role==="Proveedor"?"tasks":"info");
 
   const upd=(ch,he)=>{
+    const prevStatus=r.status;
     const updated={...r,...ch,history:he?[...safeHistory,{date:new Date().toISOString(),user:role,...he}]:safeHistory};
     setReqs(p=>p.map(x=>x.id===r.id?updated:x));
     setSelReq(prev=>({...prev,...ch}));
+    // Notifica al residente en TODO cambio de estado, venga de donde venga (dropdown manual,
+    // o automático desde el flujo del proveedor) — antes solo se avisaba si se cambiaba a mano.
+    if(ch.status&&ch.status!==prevStatus){
+      const cuerpos={
+        "En revision":"Su solicitud "+r.code+" está en revisión.",
+        "Asignada":"Su solicitud "+r.code+" fue asignada a un responsable.",
+        "En proceso":"Su solicitud "+r.code+" está en proceso de resolución.",
+        "Resuelta":"Su solicitud "+r.code+" fue marcada como resuelta. Si el problema persiste, puede reabrir el caso o contactar a administración.",
+        "Cerrada":"Su solicitud "+r.code+" fue cerrada. Gracias por su paciencia.",
+        "Rechazada":"Su solicitud "+r.code+" fue rechazada.",
+      };
+      addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" - Estado: "+ch.status,type:"Cambio de estado",status:"Enviado",body:cuerpos[ch.status]||("Cambio a: "+ch.status)});
+    }
   };
   const applyStatus=()=>{
     if(ns===r.status) return;
     if(ns==="Cerrada"){setShowCl(true);return;}
     upd({status:ns},{action:"Estado cambiado",from:r.status,to:ns});
-    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
   };
   const rechazar=()=>{
     upd({status:"Rechazada"},{action:"Solicitud rechazada",from:r.status,to:"Rechazada"});
-    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: Rechazada",type:"Cambio de estado",status:"Enviado",body:"Su solicitud fue rechazada."});
     showToast("Solicitud rechazada");
   };
   const applyPriority=()=>{
@@ -1196,8 +1208,16 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       )}
       {tab==="tasks"&&(()=>{
         const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+        // Etiqueta automática según la etapa actual — ya no hay que pensar cuál de las 3 galerías corresponde.
+        const tipoFotoActual=["Resuelta","Cerrada"].includes(r.status)?"cierre":["En proceso"].includes(r.status)?"avance":"inicial";
         return(
           <div>
+            {!isProv&&r.status!=="Cerrada"&&(
+              <div style={{...card,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontSize:12,color:"#374151"}}>📷 Subir foto — se guarda como "{tipoFotoActual==="inicial"?"inicial":tipoFotoActual==="avance"?"de avance":"de cierre"}" según la etapa actual</div>
+                <button style={BP(true)} onClick={()=>setShowEv(tipoFotoActual)}>+ Adjuntar foto</button>
+              </div>
+            )}
             {!isProv&&(()=>{
               const myAtt=allAtts.filter(a=>a.type==="inicial");
               return(
@@ -1236,6 +1256,15 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                           </div>
                           <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
                         </div>
+                        {r.status!=="Cerrada"&&(()=>{
+                          const tipoFotoProv=["Resuelta","Cerrada"].includes(r.status)?"cierre":"avance";
+                          return(
+                            <div style={{...card,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                              <div style={{fontSize:12,color:"#374151"}}>📷 Subir foto — se guarda como "{tipoFotoProv==="avance"?"de avance":"de cierre"}" según la etapa actual</div>
+                              <button style={BP(true)} onClick={()=>setShowEv(tipoFotoProv)}>+ Adjuntar foto</button>
+                            </div>
+                          );
+                        })()}
                         {["avance","cierre"].map(type=>{
                           const myAtt=allAtts.filter(a=>a.type===type);
                           return(
@@ -1251,7 +1280,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                             </div>
                           );
                         })}
-                        <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd}/>
+                        <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd} allTasksInReq={myTasks}/>
                       </div>
                     );
                   }
@@ -1277,7 +1306,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                                 </div>
                               );
                             })}
-                            <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd}/>
+                            <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd} allTasksInReq={myTasks}/>
                           </div>
                         </details>
                       )}
@@ -1388,7 +1417,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
 }
 
 // ── InformeInline ──────────────────────────────────────────────────────────
-function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate}){
+function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate,allTasksInReq}){
   const [f,setF]=useState({
     texto:task.informe||"",
     fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),
@@ -1414,16 +1443,18 @@ function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate}){
     if(!f.vistoBueno){showToast("Debe confirmar el trabajo realizado","error");return;}
     const nuevoEstadoTarea=f.estadoFinal==="Resuelto"?"Completada":"En proceso";
     setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto,status:nuevoEstadoTarea}:t));
-    // Mueve el estado de la solicitud automáticamente, sin que el admin tenga que
-    // entrar aparte a cambiarlo a mano (elimina el doble proceso).
+    // Solo avanza la solicitud a "Resuelta" cuando TODAS sus órdenes están completas —
+    // antes bastaba con que una sola orden se marcara Resuelto para cerrar toda la solicitud.
+    const otrasOrdenesCompletas=(allTasksInReq||[]).filter(t=>t.id!==task.id).every(t=>t.status==="Completada");
+    const todasCompletas=f.estadoFinal==="Resuelto"&&otrasOrdenesCompletas;
     if(onReqUpdate&&reqStatus&&!["Resuelta","Cerrada","Rechazada"].includes(reqStatus)){
-      if(f.estadoFinal==="Resuelto"){
-        onReqUpdate({status:"Resuelta"},{action:"Informe completado · Estado final: Resuelto",from:reqStatus,to:"Resuelta"});
+      if(todasCompletas){
+        onReqUpdate({status:"Resuelta"},{action:"Todas las órdenes completadas · Informe final: Resuelto",from:reqStatus,to:"Resuelta"});
       }else if(reqStatus!=="En proceso"){
         onReqUpdate({status:"En proceso"},{action:"Informe guardado · Estado final: "+f.estadoFinal,from:reqStatus,to:"En proceso"});
       }
     }
-    showToast(f.estadoFinal==="Resuelto"?"Informe guardado — solicitud marcada como Resuelta":"Informe guardado");
+    showToast(todasCompletas?"Informe guardado — todas las órdenes completas, solicitud Resuelta":f.estadoFinal==="Resuelto"?"Informe guardado — aún hay otras órdenes pendientes":"Informe guardado");
   };
   return(
     <div style={{...card,marginBottom:16}}>
@@ -1452,6 +1483,10 @@ function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate}){
       <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id={"seg"+task.id} checked={f.requiereSeguimiento} onChange={ev=>setFld("requiereSeguimiento",ev.target.checked)}/><label htmlFor={"seg"+task.id} style={{fontSize:13,cursor:"pointer"}}>⚠️ Requiere seguimiento posterior</label></div>
       <div style={fg}><label style={lbl}>Nombre del ejecutor</label><input style={inp} value={f.nombreEjecutor} onChange={ev=>setFld("nombreEjecutor",ev.target.value)}/></div>
       <ConfirmCheck id={"vb"+task.id} label="Confirmo que el trabajo fue realizado" checked={f.vistoBueno} onChange={v=>setFld("vistoBueno",v)} important/>
+      {(allTasksInReq||[]).length>1&&(()=>{
+        const completadas=(allTasksInReq||[]).filter(t=>t.status==="Completada"||(t.id===task.id&&f.estadoFinal==="Resuelto")).length;
+        return <div style={{fontSize:11,color:"#64748b",marginTop:8}}>Esta solicitud tiene {allTasksInReq.length} órdenes — {completadas} de {allTasksInReq.length} completas. La solicitud pasará a "Resuelta" cuando todas lo estén.</div>;
+      })()}
       <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}><button style={BSu(true)} onClick={guardar}>💾 Guardar informe</button></div>
     </div>
   );
@@ -1582,7 +1617,10 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const adminCatList=Object.keys(ADMIN_CATS);
   const [adminCat,setAdminCat]=useState(adminCatList[0]);
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
-  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
+  const lsKey="condoadmin_last_solicitante_"+(session?.email||"anon");
+  let remembered={};
+  try{remembered=JSON.parse(localStorage.getItem(lsKey)||"{}");}catch(_){remembered={};}
+  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:remembered.phone||"",tower:remembered.tower||initTower.name,unit:remembered.unit||"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
 
   const isAreaComun=f.tower==="Comun";
   const [errs,setErrs]=useState({});
@@ -1631,6 +1669,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
       attachmentsInitial,dueDate:calcSlaDueDate(finalCategory,f.priority,now),isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
+    try{localStorage.setItem(lsKey,JSON.stringify({tower:f.tower,unit:f.unit,phone:f.requesterPhone}));}catch(_){}
     // Mail al solicitante
     if(f.requesterEmail&&f.requesterEmail.includes("@")){
       console.log("Enviando mail a solicitante:", f.requesterEmail);
@@ -2271,6 +2310,20 @@ function Reports({reqs,tasks,inventory,mob}){
   const slaPct=slaEvaluadas.length?Math.round(slaCumplidas.length/slaEvaluadas.length*100):null;
   const slaVencidasActivas=reqs.filter(r=>slaStatus(r)==="Vencido");
   const slaPorVencerActivas=reqs.filter(r=>slaStatus(r)==="Por vencer");
+  // Desempeño por proveedor: aprovecha los mismos datos de SLA ya calculados por solicitud.
+  const proveedores=[...new Set(reqs.map(r=>r.proveedor).filter(Boolean))];
+  const provStats=proveedores.map(p=>{
+    const reqsProv=reqs.filter(r=>r.proveedor===p);
+    const evalProv=reqsProv.filter(r=>r.dueDate&&["Resuelta","Cerrada"].includes(r.status));
+    const cumplProv=evalProv.filter(r=>slaStatus(r)==="Cumplido");
+    const pct=evalProv.length?Math.round(cumplProv.length/evalProv.length*100):null;
+    const tiempos=reqsProv.map(r=>{
+      const h=(r.history||[]).find(x=>x.to==="Resuelta");
+      return h?(new Date(h.date)-new Date(r.createdAt))/3600000:null;
+    }).filter(x=>x!=null&&x>=0);
+    const promedioHoras=tiempos.length?Math.round(tiempos.reduce((a,b)=>a+b,0)/tiempos.length):null;
+    return{proveedor:p,total:reqsProv.length,pct,evaluadas:evalProv.length,promedioHoras};
+  }).sort((a,b)=>(b.pct??-1)-(a.pct??-1));
   return(
     <div>
       <Grid cols={4} mob={mob}>{PRIORITIES.map(p=><Kpi key={p} value={reqs.filter(r=>r.priority===p).length} label={p} color={PC[p]} mob={mob}/>)}</Grid>
@@ -2286,6 +2339,26 @@ function Reports({reqs,tasks,inventory,mob}){
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>{byCat.map(x=><div key={x.c} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div><div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div></div>)}</div>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Activas" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Cerradas" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Órdenes totales" v={tasks.length}/><IR l="Stock crítico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
       </div>
+      {provStats.length>0&&(
+        <div style={{marginTop:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>🏢 Desempeño por proveedor</div>
+          <div style={card}>
+            <table style={tbl}>
+              <thead><tr>{["Proveedor","Solicitudes","SLA cumplido","Tiempo prom. resolución"].map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <tbody>
+                {provStats.map(p=>(
+                  <tr key={p.proveedor}>
+                    <td style={tdS}><strong>{p.proveedor}</strong></td>
+                    <td style={tdS}>{p.total}</td>
+                    <td style={tdS}>{p.pct!==null?<span style={bdg(p.pct>=80?"#10b981":p.pct>=50?"#f59e0b":"#ef4444",p.pct>=80?"#f0fdf4":p.pct>=50?"#fffbeb":"#fef2f2")}>{p.pct}% ({p.evaluadas} eval.)</span>:"—"}</td>
+                    <td style={tdS}>{p.promedioHoras!==null?fmtSlaHours(p.promedioHoras):"—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

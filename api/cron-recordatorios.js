@@ -9,18 +9,17 @@
 // llame varias veces al día, el correo real solo sale UNA vez — y no hay que
 // tocar nada cuando Chile cambia de horario de verano/invierno.
 //
-// VARIABLES DE ENTORNO A CONFIGURAR EN VERCEL (Project Settings > Environment Variables):
-//   SUPABASE_SERVICE_ROLE_KEY  -> Project Settings > API en Supabase (NUNCA la publiques en el frontend)
-//   CRON_SECRET                -> el mismo valor que usas en el header Authorization del workflow
-//                                  (hoy es "condoadmin2026" — te recomiendo moverlo a esta variable
-//                                  de entorno en vez de dejarlo escrito en el .yml)
+// VARIABLES DE ENTORNO (ya configuradas en Vercel > Settings > Environment Variables):
+//   SUPA_URL          -> URL de tu proyecto Supabase
+//   SUPA_SERVICE_KEY   -> Secret key de Supabase (Project Settings > API Keys > Secret keys)
+//   CRON_SECRET        -> mismo valor que usa el header Authorization del workflow de GitHub Actions
 //
 // Reutiliza tu endpoint /api/send-email ya desplegado (Nodemailer + Gmail),
 // así no duplicamos la lógica de envío ni las credenciales de Gmail acá.
 // ---------------------------------------------------------------------------
 
-const SUPA_URL = "https://ijefrrtdtjshfquuytic.supabase.co";
-const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "sb_publishable_sZTDO3ROm8IEnzbWuEUK-w_DeOz65XG";
+const SUPA_URL = process.env.SUPA_URL || "https://ijefrrtdtjshfquuytic.supabase.co";
+const SUPA_KEY = process.env.SUPA_SERVICE_KEY;
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
 const CRON_SECRET = process.env.CRON_SECRET || "condoadmin2026";
 
@@ -45,12 +44,18 @@ async function dbUpsertConfig(key, data) {
 }
 
 async function sendMail(to, subject, body) {
-  const res = await fetch(`${SITE_URL}/api/send-email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, subject, body }),
-  });
-  if (!res.ok) console.warn("send-email error", res.status, await res.text());
+  try {
+    const res = await fetch(`${SITE_URL}/api/send-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, subject, body }),
+    });
+    const text = await res.text().catch(()=> "");
+    if (!res.ok) return { to, ok: false, status: res.status, error: text.slice(0,300) };
+    return { to, ok: true, status: res.status };
+  } catch (err) {
+    return { to, ok: false, error: String(err) };
+  }
 }
 
 function fmt(d) {
@@ -83,6 +88,9 @@ export default async function handler(req, res) {
   const auth = req.headers.authorization || "";
   if (auth !== `Bearer ${CRON_SECRET}`) {
     return res.status(401).json({ error: "No autorizado" });
+  }
+  if (!SUPA_KEY) {
+    return res.status(500).json({ error: "Falta la variable de entorno SUPA_SERVICE_KEY en Vercel" });
   }
 
   try {
@@ -152,12 +160,22 @@ export default async function handler(req, res) {
     const usuariosData = usuarios.map(u => u.data || u).filter(Boolean); // por si "usuarios" no usa el wrapper {data}
     const admins = usuariosData.filter(u => ["Administrador", "Administrador Edificio"].includes(u.rol) && u.active && u.email?.includes("@"));
 
+    const resultadosEnvio = [];
     for (const u of admins) {
-      await sendMail(u.email, asunto, cuerpo);
+      resultadosEnvio.push(await sendMail(u.email, asunto, cuerpo));
     }
     await dbUpsertConfig("daily_summary_last_sent", { date: chileDateKey, sentAt: now.toISOString() });
 
-    return res.status(200).json({ ok: true, enviados: admins.length, activas: activas.length, vencidas: vencidas.length });
+    const exitosos = resultadosEnvio.filter(r => r.ok).length;
+    return res.status(200).json({
+      ok: true,
+      adminsEncontrados: admins.length,
+      enviadosOk: exitosos,
+      enviadosFallidos: resultadosEnvio.length - exitosos,
+      detalle: resultadosEnvio,
+      activas: activas.length,
+      vencidas: vencidas.length,
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: String(err) });

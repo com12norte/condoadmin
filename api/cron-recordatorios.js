@@ -114,15 +114,13 @@ export default async function handler(req, res) {
     const chileHour = parseInt(get("hour"), 10);
     const chileDateKey = `${get("year")}-${get("month")}-${get("day")}`;
 
-    // === MODO PRUEBA TEMPORAL: ignora el chequeo de hora para forzar el envío ahora ===
-    // Bórralo y vuelve a subir la versión original una vez que confirmes que todo funciona.
-    if (false) {
+    if (chileHour !== 8) {
       return res.status(200).json({ ok: true, skipped: "no son las 8am en Chile", chileHour });
     }
 
     const configRows = await dbGet("config", "key=eq.daily_summary_last_sent&select=*");
     const last = configRows?.[0]?.data?.date;
-    if (false && last === chileDateKey) { // desactivado solo para esta prueba
+    if (last === chileDateKey) {
       return res.status(200).json({ ok: true, skipped: "ya se envió hoy", chileDateKey });
     }
 

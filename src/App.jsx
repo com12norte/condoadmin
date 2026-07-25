@@ -138,54 +138,6 @@ const PERMS = {
 const can = (role,action) => (PERMS[role]||[]).includes(action);
 const fmt = d => { try { return new Date(d).toLocaleString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); } catch(_){ return ""; }};
 const fmtD = d => { try { return new Date(d).toLocaleDateString("es-CL"); } catch(_){ return ""; }};
-
-// ── SLA por categoría y prioridad ────────────────────────────────────────
-// Horas límite según tabla acordada (1d=24h, 5d=120h, 7d=168h, 10d=240h)
-const SLA_MATRIX = {
-  Gas:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Electricidad:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Ascensores:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Agua:{Emergencia:4,Alta:8,Media:24,Baja:72},
-  Filtraciones:{Emergencia:4,Alta:8,Media:24,Baja:72},
-  Seguridad:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Motor:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Citofonia:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  "Espacios comunes":{Emergencia:8,Alta:24,Media:72,Baja:168},
-  Jardines:{Emergencia:8,Alta:24,Media:72,Baja:168},
-  Aseo:{Emergencia:8,Alta:24,Media:72,Baja:168},
-  Perimetral:{Emergencia:4,Alta:24,Media:48,Baja:168},
-  Otros:{Emergencia:8,Alta:24,Media:72,Baja:168},
-};
-const SLA_ADMIN = {Emergencia:24,Alta:48,Media:120,Baja:240}; // Gestión administrativa
-const SLA_DEFAULT = {Emergencia:8,Alta:24,Media:72,Baja:168}; // fallback = "Otros"
-const isAdminCat = c => Object.prototype.hasOwnProperty.call(ADMIN_CATS,c);
-const slaHoursFor = (category,priority) => {
-  const tbl = isAdminCat(category) ? SLA_ADMIN : (SLA_MATRIX[category]||SLA_DEFAULT);
-  return tbl[priority] ?? SLA_DEFAULT[priority];
-};
-const fmtSlaHours = h => h==null?"—":(h%24===0?(h/24)+"d":h+"h");
-const calcSlaDueDate = (category,priority,from) => {
-  const hrs = slaHoursFor(category,priority);
-  const base = from ? new Date(from) : new Date();
-  return new Date(base.getTime()+hrs*3600000).toISOString();
-};
-// Estado de cumplimiento SLA de una solicitud
-const slaStatus = r => {
-  if(!r.dueDate) return null;
-  const due=new Date(r.dueDate);
-  if(["Resuelta","Cerrada"].includes(r.status)){
-    const h=(r.history||[]).find(x=>x.to==="Resuelta"||x.to==="Cerrada");
-    const ref=h?new Date(h.date):new Date();
-    return ref<=due?"Cumplido":"Fuera de plazo";
-  }
-  if(r.status==="Rechazada") return null;
-  const now=new Date();
-  if(now>due) return "Vencido";
-  if((due-now)<=24*3600000) return "Por vencer";
-  return "En plazo";
-};
-const SLA_COLORS = {"Cumplido":"#10b981","Fuera de plazo":"#ef4444","Vencido":"#ef4444","Por vencer":"#f59e0b","En plazo":"#3b82f6"};
-function SlaBadge({r}){const s=slaStatus(r);if(!s)return null;const c=SLA_COLORS[s]||"#64748b";return <span style={bdg(c,c+"22")}>{s}</span>;}
 const uid = () => Math.random().toString(36).slice(2,9);
 const genCode = (arr,pfx) => {
   const nums = (arr||[]).map(r => { const n = parseInt((r.id||r.code||"").replace(pfx,"").replace(/\D/g,""),10); return isNaN(n)?0:n; });
@@ -247,15 +199,6 @@ function PBadge({p}){return <span style={{...bdg(PC[p]||"#64748b",PB[p]||"#f9faf
 function MBadge({m}){const st=getMantStatus(m);const dot=st==="Vigente"?"✓":st==="Por vencer"?"!":st==="Vencida"?"✗":"~";return <span style={bdg(MANT_SC[st]||"#64748b",MANT_SB[st]||"#f9fafb")}>{dot} {st}</span>;}
 function IR({l,v}){return <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f8fafc",fontSize:12}}><span style={{color:"#64748b"}}>{l}</span><span style={{fontWeight:600}}>{v==null?"---":String(v)}</span></div>;}
 function Empty({msg}){return <div style={{textAlign:"center",padding:"40px 20px",color:"#94a3b8",fontSize:13}}>{msg}</div>;}
-function ConfirmCheck({id,label,checked,onChange,error,important}){
-  return(
-    <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center",...(important?{background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}:{})}}>
-      <input type="checkbox" id={id} checked={checked} onChange={ev=>onChange(ev.target.checked)}/>
-      <label htmlFor={id} style={{fontSize:13,cursor:"pointer",color:important?"#16a34a":"#374151"}}>{important?"✓ ":""}{label}</label>
-      {error&&<span style={{color:"#ef4444",fontSize:10}}>{error}</span>}
-    </div>
-  );
-}
 function Kpi({value,label,color,mob}){return <div style={{...kpi,borderTop:"3px solid "+color}}><div style={{fontSize:mob?18:24,fontWeight:700,color}}>{value}</div><div style={{fontSize:11,color:"#64748b",marginTop:3}}>{label}</div></div>;}
 function Grid({cols,mob,children}){return <div style={{display:"grid",gridTemplateColumns:"repeat("+(mob?2:cols)+",1fr)",gap:12,marginBottom:16}}>{children}</div>;}
 function Tabs({tabs,active,onChange,accent}){
@@ -273,7 +216,7 @@ function Tabs({tabs,active,onChange,accent}){
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando...</div><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
-function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,onSwitchApp,er,mob}){
+function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,er,mob}){
   const navTo = id => { setView(id); setNavOpen(false); };
   const isAct = id => view===id||(view==="detail"&&id==="requests");
   return (
@@ -307,6 +250,7 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
           </div>
         )}
         {viewAs&&<button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir de vista</button>}
+        <button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>window.open("https://com12norte.github.io/administracion-edificio/","_blank")}>📄 Comprobante</button>
         <button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={onSwitchApp}>🔄 Cambiar de sistema</button>
         <button style={{...BD(true),width:"100%",justifyContent:"center"}} onClick={handleLogout}>Cerrar sesion</button>
       </div>
@@ -405,7 +349,6 @@ function LoginScreen({onLogin}){
 // ── App ────────────────────────────────────────────────────────────────────
 export default function App(){
   const mob=useMob();
-  const [appChoice,setAppChoice]=useState(null); // null | "incidentes" | "parking"
   const [session,setSession]=useState(null);
   const [loading,setLoading]=useState(true);
   const [viewAs,setViewAs]=useState(null);
@@ -471,11 +414,36 @@ export default function App(){
     })();
   },[session]);
 
-  // NOTA: el resumen diario de las 8am NO se envía desde aquí (el navegador).
-  // Se envía 100% desde el servidor (Supabase Edge Function "daily-summary" +
-  // pg_cron), para que salga automático a las 8am exista o no alguien con la
-  // app abierta, y para que abrir la app nunca dispare un correo por sí sola.
-  // Ver supabase-daily-summary-function.ts y supabase-cron-schedule.sql.
+  // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
+  useEffect(()=>{
+    if(!session||!tasks.length) return;
+    const run=async()=>{
+      const hoy=new Date(); hoy.setHours(0,0,0,0);
+      const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
+      // Si ya se ejecutó hoy en esta sesión, no hacer nada
+      if(window._remDate===fechaKey) return;
+      window._remDate=fechaKey;
+      if(!window._remSent) window._remSent={};
+      // Limpiar enviados de días anteriores
+      window._remSent={};
+      const sent=window._remSent;
+      for(const t of tasks){
+        if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;
+        const due=new Date(t.dueDate); due.setHours(0,0,0,0);
+        const diff=Math.ceil((due-hoy)/86400000);
+        if(diff>3||sent[t.id]) continue;
+        sent[t.id]=true;
+        const esV=diff<0;
+        const diasTxt=esV?"venció hace "+Math.abs(diff)+" día(s)":diff===0?"vence HOY":"vence en "+diff+" día(s)";
+        const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
+        const cuerpo="Hola"+(t.responsible?" "+t.responsible:"")+",\n\nLa orden \""+t.title+"\" "+diasTxt+" ("+fmtD(t.dueDate)+") y aún no tiene informe.\n\n— CondoAdmin";
+        try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.responsible||"")+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
+        if(t.ejecutor&&t.ejecutor!==t.responsible){try{const r2=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.ejecutor)+"&active=eq.true",{headers:hdr()});const u2s=await r2.json();const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
+      }
+    };
+    const timer=setTimeout(()=>run().catch(()=>{}),3000);
+    return()=>clearTimeout(timer);
+  },[tasks,session]);
 
   const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};
@@ -557,34 +525,6 @@ export default function App(){
     return()=>window.removeEventListener("popstate",onPop);
   },[session,view]);
 
-  if(appChoice==="parking"){
-    if(typeof window!=="undefined") window.location.href="https://parkadmin-ashy.vercel.app/";
-    return <Loader/>;
-  }
-  if(!appChoice){
-    return(
-      <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,background:"#f8fafc",padding:20}}>
-        <div style={{fontSize:22,fontWeight:700,color:"#1e293b",marginBottom:8}}>¿Qué necesitas gestionar?</div>
-        <div style={{display:"flex",gap:16,flexWrap:"wrap",justifyContent:"center"}}>
-          <button
-            onClick={()=>setAppChoice("incidentes")}
-            style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #3b82f6",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
-            <span style={{fontSize:36}}>🛠️</span>
-            <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Incidentes</span>
-            <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Solicitudes, mantención, órdenes de trabajo</span>
-          </button>
-          <button
-            onClick={()=>setAppChoice("parking")}
-            style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #10b981",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
-            <span style={{fontSize:36}}>🅿️</span>
-            <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Estacionamiento</span>
-            <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Gestión de estacionamientos</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   if(loading) return <Loader/>;
   if(!session) return <LoginScreen onLogin={handleLogin}/>;
 
@@ -595,7 +535,7 @@ export default function App(){
       <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
         {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onClick={()=>setNavOpen(false)}/>}
         {(!mob||navOpen)&&(
-          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} onSwitchApp={()=>setAppChoice(null)} er={er} mob={mob}/>
+          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} er={er} mob={mob}/>
         )}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}}>
@@ -614,7 +554,7 @@ export default function App(){
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
             {view==="misolicitudes"&&<MisSolicitudes tasks={tasks} reqs={reqs} session={session} role={er} onOpen={openReq} mob={mob}/>}
-            {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session} onOpen={openReq}/>}
+            {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
             {view==="inspections"&&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} showToast={showToast} role={er} mob={mob} towers={towers}/>}
             {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
             {view==="mantencion"&&<MantView mant={mant} setMant={setMantDB} role={er} showToast={showToast} mob={mob} respList={respList} towers={towers} equipos={equipos} setEquipos={setEquiposDB} certs={certs} setCerts={setCertsDB}/>}
@@ -660,8 +600,6 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
   const hoy=new Date(); hoy.setHours(0,0,0,0);
   const tareasVencidas=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<0);
   const tareasPorVencer=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)>=0&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<=3);
-  const reqsVencidas=reqs.filter(r=>slaStatus(r)==="Vencido");
-  const reqsPorVencer=reqs.filter(r=>slaStatus(r)==="Por vencer");
 
   // Por responsable
   const respStats={};
@@ -708,30 +646,6 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
         </div>
       ))}
       {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
-
-      {/* Alertas SLA de solicitudes */}
-      {reqsVencidas.length>0&&(
-        <div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",marginBottom:12}}>
-          <div style={{fontWeight:700,color:"#dc2626",fontSize:13,marginBottom:8}}>⚠ Solicitudes con SLA vencido ({reqsVencidas.length})</div>
-          {reqsVencidas.slice(0,5).map(r=>(
-            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fca5a5",flexWrap:"wrap",gap:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
-              <div><div style={{fontSize:12,fontWeight:600,color:"#991b1b"}}>{r.code} · {r.category}</div><div style={{fontSize:11,color:"#64748b"}}>Límite: {fmt(r.dueDate)}</div></div>
-              <div style={{display:"flex",gap:6,alignItems:"center"}}><PBadge p={r.priority}/><SlaBadge r={r}/></div>
-            </div>
-          ))}
-        </div>
-      )}
-      {reqsPorVencer.length>0&&(
-        <div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",marginBottom:12}}>
-          <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⏰ Solicitudes por vencer SLA - 24h ({reqsPorVencer.length})</div>
-          {reqsPorVencer.map(r=>(
-            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fde68a",flexWrap:"wrap",gap:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
-              <div><div style={{fontSize:12,fontWeight:600}}>{r.code} · {r.category}</div><div style={{fontSize:11,color:"#64748b"}}>Límite: {fmt(r.dueDate)}</div></div>
-              <div style={{display:"flex",gap:6,alignItems:"center"}}><PBadge p={r.priority}/><SlaBadge r={r}/></div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* KPIs Solicitudes */}
       <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>📋 Solicitudes</div>
@@ -943,9 +857,8 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
 function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towers,respList,session}){
   const [fi,setFi]=useState({status:"",priority:"",tower:"",responsible:"",proveedor:"",q:""});
   const [sort,setSort]=useState("date");
-  const [showMoreFilters,setShowMoreFilters]=useState(false);
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
-  const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):role==="Proveedor"?reqs.filter(r=>(r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email))||(r.proveedor&&(r.proveedor===session?.nombre||r.proveedor===session?.email))):reqs;
+  const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):reqs;
 
   // Listas únicas para filtros
   const respOptions=[...new Set(base.map(r=>r.assignedTo).filter(x=>x&&x!=="Sin asignar"))].sort();
@@ -973,30 +886,21 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       <div style={{...card,padding:12,marginBottom:12}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
           <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
-          {[["status","Estado",STATUSES],["priority","Prioridad",PRIORITIES]].map(([k,l,opts])=>(
+          {[["status","Estado",STATUSES],["priority","Prioridad",PRIORITIES],["tower","Torre",actTowers]].map(([k,l,opts])=>(
             <select key={k} style={{...sel,flex:1}} value={fi[k]} onChange={ev=>setFi(p=>({...p,[k]:ev.target.value}))}>
               <option value="">...{l}</option>
               {opts.map(o=><option key={o}>{o}</option>)}
             </select>
           ))}
-          <button style={BG(true)} onClick={()=>setShowMoreFilters(v=>!v)}>{showMoreFilters?"Menos filtros ▴":"Más filtros ▾"}{(fi.tower||fi.responsible||fi.proveedor)?" •":""}</button>
+          <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
+            <option value="">...Responsable</option>
+            {respOptions.map(o=><option key={o}>{o}</option>)}
+          </select>
+          <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
+            <option value="">...Proveedor</option>
+            {provOptions.map(o=><option key={o}>{o}</option>)}
+          </select>
         </div>
-        {showMoreFilters&&(
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
-            <select style={{...sel,flex:1}} value={fi.tower} onChange={ev=>setFi(p=>({...p,tower:ev.target.value}))}>
-              <option value="">...Torre</option>
-              {actTowers.map(o=><option key={o}>{o}</option>)}
-            </select>
-            <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
-              <option value="">...Responsable</option>
-              {respOptions.map(o=><option key={o}>{o}</option>)}
-            </select>
-            <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
-              <option value="">...Proveedor</option>
-              {provOptions.map(o=><option key={o}>{o}</option>)}
-            </select>
-          </div>
-        )}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <button style={sort==="date"?BP(true):BS(true)} onClick={()=>setSort("date")}>Fecha</button>
           <button style={sort==="priority"?BP(true):BS(true)} onClick={()=>setSort("priority")}>Prioridad</button>
@@ -1008,14 +912,14 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
           <div key={r.id} style={{...card,padding:12,marginBottom:8,cursor:"pointer",borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0")}} onClick={()=>onOpen(r)}>
             <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
               <div style={{minWidth:0}}><span style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{r.code}</span><div style={{fontSize:12}}>{r.requesterName}</div><div style={{fontSize:11,color:"#64748b"}}>{r.category}</div></div>
-              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}><PBadge p={r.priority}/><SBadge s={r.status}/><SlaBadge r={r}/></div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
             </div>
           </div>
         ))}</div>
       ):(
         <div style={card}>
           <table style={tbl}>
-            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Proveedor","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
             <tbody>{visible.map(r=>(
               <tr key={r.id} style={{background:r.priority==="Emergencia"?"#fef2f2":"",cursor:"pointer"}} onClick={()=>onOpen(r)}>
                 <td style={tdS}>{r.priority==="Emergencia"?"⚠":""}</td>
@@ -1024,19 +928,16 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}>{r.category}</td>
                 <td style={tdS}>{r.tower}/{r.unit}</td>
                 <td style={tdS}><PBadge p={r.priority}/></td>
-                <td style={tdS}><SBadge s={r.status}/><div style={{marginTop:3}}><SlaBadge r={r}/></div></td>
+                <td style={tdS}><SBadge s={r.status}/></td>
                 <td style={tdS}>{r.assignedTo}</td>
                 <td style={tdS}>{r.proveedor||"—"}</td>
                 <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
                     {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-                      <>
-                        <select style={{...sel,width:110,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
-                          {STATUSES.filter(s=>s!=="Rechazada").map(s=><option key={s}>{s}</option>)}
-                        </select>
-                        <button style={{...BD(true),fontSize:11,padding:"4px 6px"}} title="Rechazar" onClick={()=>{if(window.confirm("¿Rechazar "+r.code+"?"))quickSt(r,"Rechazada");}}>✕</button>
-                      </>
+                      <select style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
+                        {STATUSES.map(s=><option key={s}>{s}</option>)}
+                      </select>
                     )}
                     {can(role,"manageConfig")&&(
                       <button style={BD(true)} onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"?"))deleteReq(r.id);}}>🗑</button>
@@ -1062,47 +963,22 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [comment,setComment]=useState("");
   const [ns,setNs]=useState(r.status);
   const [asgn,setAsgn]=useState(r.assignedTo||"Sin asignar");
-  const [prov,setProv]=useState(r.proveedor||"");
-  const [pr,setPr]=useState(r.priority);
   const [showTF,setShowTF]=useState(false);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
-  const [tab,setTab]=useState(role==="Proveedor"?"tasks":"info");
+  const [tab,setTab]=useState("info");
 
   const upd=(ch,he)=>{
-    const prevStatus=r.status;
     const updated={...r,...ch,history:he?[...safeHistory,{date:new Date().toISOString(),user:role,...he}]:safeHistory};
     setReqs(p=>p.map(x=>x.id===r.id?updated:x));
     setSelReq(prev=>({...prev,...ch}));
-    // Notifica al residente en TODO cambio de estado, venga de donde venga (dropdown manual,
-    // o automático desde el flujo del proveedor) — antes solo se avisaba si se cambiaba a mano.
-    if(ch.status&&ch.status!==prevStatus){
-      const cuerpos={
-        "En revision":"Su solicitud "+r.code+" está en revisión.",
-        "Asignada":"Su solicitud "+r.code+" fue asignada a un responsable.",
-        "En proceso":"Su solicitud "+r.code+" está en proceso de resolución.",
-        "Resuelta":"Su solicitud "+r.code+" fue marcada como resuelta. Si el problema persiste, puede reabrir el caso o contactar a administración.",
-        "Cerrada":"Su solicitud "+r.code+" fue cerrada. Gracias por su paciencia.",
-        "Rechazada":"Su solicitud "+r.code+" fue rechazada.",
-      };
-      addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" - Estado: "+ch.status,type:"Cambio de estado",status:"Enviado",body:cuerpos[ch.status]||("Cambio a: "+ch.status)});
-    }
   };
   const applyStatus=()=>{
     if(ns===r.status) return;
     if(ns==="Cerrada"){setShowCl(true);return;}
     upd({status:ns},{action:"Estado cambiado",from:r.status,to:ns});
+    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
-  };
-  const rechazar=()=>{
-    upd({status:"Rechazada"},{action:"Solicitud rechazada",from:r.status,to:"Rechazada"});
-    showToast("Solicitud rechazada");
-  };
-  const applyPriority=()=>{
-    if(pr===r.priority) return;
-    const nuevaFecha=calcSlaDueDate(r.category,pr,r.createdAt);
-    upd({priority:pr,dueDate:nuevaFecha},{action:"Prioridad cambiada de "+r.priority+" a "+pr+" · SLA hasta "+fmt(nuevaFecha),from:r.priority,to:pr});
-    showToast("Prioridad actualizada — SLA recalculado");
   };
   const applyAsgn=async()=>{
     if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
@@ -1113,17 +989,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       const users=await res.json(); const u=users&&users[0];
       if(u?.email) addEmail({requestId:r.id,date:new Date().toISOString(),to:u.email,subject:"[CondoAdmin] Solicitud "+r.code+" asignada",type:"Asignacion",status:"Enviado",body:"Hola "+u.nombre+", se te asignó: "+r.code});
     }catch(_){}
-  };
-  const applyProveedor=()=>{
-    upd({proveedor:prov||null});
-    showToast("Proveedor actualizado");
-  };
-  const comenzarTrabajo=t=>{
-    setTasks(p=>p.map(x=>x.id===t.id?{...x,status:"En proceso"}:x));
-    if(!["En proceso","Resuelta","Cerrada","Rechazada"].includes(r.status)){
-      upd({status:"En proceso"},{action:"Proveedor comenzó el trabajo",from:r.status,to:"En proceso"});
-    }
-    showToast("Trabajo iniciado");
   };
   const addCmt=()=>{
     if(!comment.trim()) return;
@@ -1138,12 +1003,11 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   };
 
   const isProv=role==="Proveedor";
-  const nombre=session?.nombre||"";
-  const email=session?.email||"";
-  const isEjecutor=isProv; // el proveedor ve solo su propia orden con el resumen especial
   const tabs=[
     ...(isProv?[]:[{id:"info",label:"Info"}]),
+    ...(isProv?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
     {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
+    {id:"informe",label:"Informe OT"},
     ...(isProv?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
   ];
 
@@ -1152,28 +1016,18 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
         <button style={BS(true)} onClick={onBack}>← Volver</button>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?16:20}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/><SlaBadge r={r}/></div>
-          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.category} - Torre {r.tower}/{r.unit}{r.dueDate?" · 📅 Vence "+fmt(r.dueDate):""}</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?16:20}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.category} - Torre {r.tower}/{r.unit}</div>
         </div>
       </div>
       {(can(role,"changeStatus")||can(role,"assign"))&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
         <div style={{...card,padding:12,marginBottom:12}}>
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
             {can(role,"changeStatus")&&(
-              <div><label style={lbl}>Prioridad</label>
-              <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:130,color:PC[pr]}} value={pr} onChange={ev=>setPr(ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
-                <button style={BP(true)} onClick={applyPriority}>OK</button>
-              </div>
-              {pr!==r.priority&&<div style={{fontSize:10,color:"#64748b",marginTop:3}}>Nuevo SLA: {fmtSlaHours(slaHoursFor(r.category,pr))} → vence {fmt(calcSlaDueDate(r.category,pr,r.createdAt))}</div>}
-              </div>
-            )}
-            {can(role,"changeStatus")&&(
               <div><label style={lbl}>Estado</label>
               <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.filter(s=>s!=="Rechazada").map(s=><option key={s}>{s}</option>)}</select>
+                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
                 <button style={BP(true)} onClick={applyStatus}>OK</button>
-                <button style={BD(true)} title="Rechazar" onClick={()=>{if(window.confirm("¿Rechazar esta solicitud?"))rechazar();}}>✕ Rechazar</button>
               </div></div>
             )}
             {can(role,"assign")&&(
@@ -1186,11 +1040,12 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
             {can(role,"assign")&&(
               <div><label style={lbl}>Proveedor</label>
               <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:150}} value={prov} onChange={ev=>setProv(ev.target.value)}>
-                  <option value="">Sin proveedor</option>
-                  {[...new Set([...respList.filter(s=>s!=="Sin asignar"),...(r.proveedor?[r.proveedor]:[])])].map(s=><option key={s}>{s}</option>)}
-                </select>
-                <button style={BS(true)} onClick={applyProveedor}>OK</button>
+                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
+                <button style={BS(true)} onClick={()=>{
+                  const val=document.getElementById("prov-input").value.trim();
+                  upd({proveedor:val||null});
+                  showToast("Proveedor actualizado");
+                }}>OK</button>
               </div></div>
             )}
             {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
@@ -1203,7 +1058,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
           <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Telefono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/>{r.affectedTowers&&<IR l="Torres afectadas" v={r.affectedTowers}/>}</div>
-          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/><IR l="Fecha límite (SLA)" v={r.dueDate?fmt(r.dueDate):"—"}/><div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:12}}><span style={{color:"#64748b"}}>Cumplimiento SLA</span><SlaBadge r={r}/></div></div>
+          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/></div>
           <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripcion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{r.description||"Sin descripcion."}</p></div>
           <div style={{...card,gridColumn:"1/-1"}}>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Comentarios ({safeComments.length})</div>
@@ -1220,134 +1075,105 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               </div>
             )}
           </div>
-          <details style={{marginTop:12}}>
-            <summary style={{cursor:"pointer",fontSize:12,color:"#6366f1",fontWeight:600,padding:"6px 0"}}>🕒 Ver historial ({safeHistory.length})</summary>
-            <div style={{...card,marginTop:8}}>
-              {safeHistory.length===0?<Empty msg="Sin historial"/>:(
-                <div>{[...safeHistory].reverse().map((h,i)=>(
-                  <div key={i} style={{paddingLeft:16,paddingBottom:14,borderLeft:"2px solid #e2e8f0",marginLeft:4}}>
-                    <div style={{fontSize:13,fontWeight:600}}>{h.action}</div>
-                    {h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}
-                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div>
-                  </div>
-                ))}</div>
-              )}
-            </div>
-          </details>
         </div>
       )}
-      {tab==="tasks"&&(()=>{
-        const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
-        // Etiqueta automática según la etapa actual — ya no hay que pensar cuál de las 3 galerías corresponde.
-        const tipoFotoActual=["Resuelta","Cerrada"].includes(r.status)?"cierre":["En proceso"].includes(r.status)?"avance":"inicial";
-        return(
-          <div>
-            {!isProv&&r.status!=="Cerrada"&&(
-              <div style={{...card,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:12,color:"#374151"}}>📷 Subir foto — se guarda como "{tipoFotoActual==="inicial"?"inicial":tipoFotoActual==="avance"?"de avance":"de cierre"}" según la etapa actual</div>
-                <button style={BP(true)} onClick={()=>setShowEv(tipoFotoActual)}>+ Adjuntar foto</button>
+      {tab==="history"&&(
+        <div style={card}>
+          {safeHistory.length===0?<Empty msg="Sin historial"/>:(
+            <div>{[...safeHistory].reverse().map((h,i)=>(
+              <div key={i} style={{paddingLeft:16,paddingBottom:14,borderLeft:"2px solid #e2e8f0",marginLeft:4}}>
+                <div style={{fontSize:13,fontWeight:600}}>{h.action}</div>
+                {h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}
+                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div>
               </div>
-            )}
-            {!isProv&&(()=>{
-              const myAtt=allAtts.filter(a=>a.type==="inicial");
+            ))}</div>
+          )}
+        </div>
+      )}
+      {tab==="tasks"&&(
+        <div>
+          {!isProv&&(()=>{
+            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+            return ["inicial","avance","cierre"].map(type=>{
+              const myAtt=allAtts.filter(a=>a.type===type);
               return(
-                <div style={card}>
+                <div key={type} style={card}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <div style={{fontWeight:600,fontSize:13}}>📎 Fotos iniciales</div>
-                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv("inicial")}>+ Agregar</button>}
+                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
                   </div>
                   {myAtt.length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>}
                 </div>
               );
-            })()}
-            {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true} onUpd={upd}/>}
-            {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
-            {myTasks.length>0&&(
-              <div style={{marginTop:8}}>
-                <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
-                {myTasks.map(t=>{
-                  const puedeVerInforme=true; // el acceso ya está controlado a nivel de solicitud (ProviderDash / permisos)
-                  if(isProv){
-                    // Vista del proveedor: el informe va arriba y abierto, sin tarjeta ni desplegable de por medio.
-                    return(
-                      <div key={t.id}>
-                        {t.status==="Ingresada"&&(
-                          <div style={{...card,background:"#eff6ff",border:"2px solid #3b82f6",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                            <div style={{fontSize:13}}>Aún no has marcado que comenzaste este trabajo.</div>
-                            <button style={BP(true)} onClick={()=>comenzarTrabajo(t)}>▶ Comenzar trabajo</button>
-                          </div>
-                        )}
-                        <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
-                          <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
-                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                            <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
-                            <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
-                            <SBadge s={r.status}/>
-                          </div>
-                          <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
-                        </div>
-                        {r.status!=="Cerrada"&&(()=>{
-                          const tipoFotoProv=["Resuelta","Cerrada"].includes(r.status)?"cierre":"avance";
-                          return(
-                            <div style={{...card,background:"#eff6ff",border:"1px solid #bfdbfe",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                              <div style={{fontSize:12,color:"#374151"}}>📷 Subir foto — se guarda como "{tipoFotoProv==="avance"?"de avance":"de cierre"}" según la etapa actual</div>
-                              <button style={BP(true)} onClick={()=>setShowEv(tipoFotoProv)}>+ Adjuntar foto</button>
-                            </div>
-                          );
-                        })()}
-                        {["avance","cierre"].map(type=>{
-                          const myAtt=allAtts.filter(a=>a.type===type);
-                          return(
-                            <div key={type} style={card}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                                <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                                {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
-                              </div>
-                              {myAtt.length===0
-                                ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
-                                :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
-                              }
-                            </div>
-                          );
-                        })}
-                        <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd} allTasksInReq={myTasks}/>
-                      </div>
-                    );
-                  }
-                  return(
-                    <div key={t.id}>
-                      <TaskCard task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>
-                      {puedeVerInforme&&(
-                        <details style={{marginTop:-4,marginBottom:14}}>
-                          <summary style={{cursor:"pointer",fontSize:12,color:"#6366f1",fontWeight:600,padding:"4px 0 10px"}}>📋 Ver / completar informe de esta orden</summary>
-                          <div>
-                            {["avance","cierre"].map(type=>{
-                              const myAtt=allAtts.filter(a=>a.type===type);
-                              return(
-                                <div key={type} style={card}>
-                                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
-                                  </div>
-                                  {myAtt.length===0
-                                    ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
-                                    :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
-                                  }
-                                </div>
-                              );
-                            })}
-                            <InformeInline task={t} setTasks={setTasks} showToast={showToast} reqStatus={r.status} onReqUpdate={upd} allTasksInReq={myTasks}/>
-                          </div>
-                        </details>
-                      )}
+            });
+          })()}
+          {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+          {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
+          {myTasks.length>0&&(
+            <div style={{marginTop:8}}>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#374151"}}>Órdenes ({myTasks.length})</div>
+              {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
+            </div>
+          )}
+        </div>
+      )}
+      {tab==="informe"&&(
+        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=>{
+          const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+          // Mostrar solo la orden correspondiente si soy ejecutor
+          const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
+          if(isEjecutor&&!miOrden) return null;
+          return(
+            <div key={t.id}>
+              {/* Resumen de la orden siempre visible en modo ejecutor */}
+              {isEjecutor&&(
+                <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
+                  <div style={{fontWeight:700,fontSize:14,color:"#4338ca",marginBottom:6}}>📋 Mi Orden de Trabajo</div>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
+                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>👤 Responsable: {t.responsible}</div>
+                      <div style={{fontSize:12,color:"#6366f1"}}>🔧 Ejecutor: {t.ejecutor}</div>
+                      {t.desc&&<div style={{fontSize:12,color:"#374151",marginTop:4}}>{t.desc}</div>}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+                    <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                      <PBadge p={t.priority}/>
+                      <SBadge s={t.status}/>
+                      {t.dueDate&&<span style={{fontSize:11,color:"#64748b"}}>📅 {fmtD(t.dueDate)}</span>}
+                    </div>
+                  </div>
+                  {/* Info solicitud */}
+                  <div style={{marginTop:10,padding:"8px 10px",background:"#fff",borderRadius:8,border:"1px solid #c7d2fe"}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
+                      <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
+                      <SBadge s={r.status}/>
+                    </div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
+                  </div>
+                </div>
+              )}
+              {["avance","cierre"].map(type=>{
+                const myAtt=allAtts.filter(a=>a.type===type);
+                return(
+                  <div key={type} style={card}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                      {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                    </div>
+                    {myAtt.length===0
+                      ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
+                      :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
+                    }
+                  </div>
+                );
+              })}
+              <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+            </div>
+          );
+        })
+      )}
       {!isProv&&tab==="emails"&&(
         <div style={card}>
           {myEmails.length===0?<Empty msg="Sin correos"/>:myEmails.map((em,i)=>(
@@ -1359,7 +1185,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           ))}
         </div>
       )}
-      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false} onUpd={upd}/>}
+      {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
       {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
     </div>
@@ -1367,25 +1193,19 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 }
 
 // ── TaskForm ───────────────────────────────────────────────────────────────
-function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline,onUpd}){
+function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
+  const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
-  const reqDueDate=req?.dueDate?new Date(req.dueDate).toISOString().slice(0,10):"";
-  const initTitle=req?(req.category+(req.subcategory?" / "+req.subcategory:"")):"";
-  const initF=()=>({title:initTitle,desc:req?.description||"",responsible:respAuto,dueDate:reqDueDate,priority:req?.priority||"Media",proveedor:req?.proveedor||""});
+  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:"",priority:"Media"});
   const [f,setF]=useState(initF());
-  const provOptions=[...new Set([...(respAssign||[]),...(req?.proveedor?[req.proveedor]:[])])];
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
-    const{proveedor,...taskFields}=f;
-    // ejecutor queda igual al proveedor (es quien realmente ejecuta el trabajo);
-    // se conserva el campo internamente para no romper permisos/visualización existentes.
-    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...taskFields,proveedor,ejecutor:proveedor};
+    const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
     setTasks(p=>[...p,newTask]); showToast("Orden creada");
-    if(onUpd&&proveedor&&proveedor!==req?.proveedor) onUpd({proveedor});
     if(inline) setF(initF()); else onClose();
-    if(proveedor){
+    if(f.ejecutor){
       try{
-        const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(proveedor)+"&active=eq.true",{headers:hdr()});
+        const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(f.ejecutor)+"&active=eq.true",{headers:hdr()});
         const users=await res.json(); const u=users&&users[0];
         if(u?.email) await sendMail(u.email,"[CondoAdmin] Nueva orden asignada","Hola "+u.nombre+", orden: "+f.title+(req?"\nSolicitud: "+req.code:""));
       }catch(_){}
@@ -1398,7 +1218,7 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo *</label><input style={inp} placeholder="Describe el trabajo..." value={f.title} onChange={ev=>setF(p=>({...p,title:ev.target.value}))}/></div>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={ev=>setF(p=>({...p,desc:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Proveedor</label><select style={sel} value={f.proveedor} onChange={ev=>setF(p=>({...p,proveedor:ev.target.value}))}><option value="">Sin proveedor</option>{provOptions.map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={ev=>setF(p=>({...p,dueDate:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={ev=>setF(p=>({...p,priority:ev.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>
@@ -1422,12 +1242,11 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
         <div style={{minWidth:0}}>
           <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{task.title}</div>
-          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor}{task.proveedor&&" · 🏢 "+task.proveedor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>👤 {task.responsible}{task.ejecutor&&" · 🔧 "+task.ejecutor} · {task.dueDate?fmtD(task.dueDate):"Sin fecha"}</div>
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/></div>
       </div>
       {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
-      {task.requiereSeguimiento&&<div style={{...bdg("#f59e0b","#fffbeb"),marginBottom:10,padding:"4px 8px"}}>⚠️ Requiere seguimiento posterior</div>}
       {safeComments.map((c,i)=>(
         <div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}>
           <strong>{c.user}</strong> <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}
@@ -1447,7 +1266,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
 }
 
 // ── InformeInline ──────────────────────────────────────────────────────────
-function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate,allTasksInReq}){
+function InformeInline({task,setTasks,showToast}){
   const [f,setF]=useState({
     texto:task.informe||"",
     fechaEjecucion:task.fechaEjecucion||new Date().toISOString().slice(0,10),
@@ -1471,20 +1290,8 @@ function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate,allTasksIn
   const guardar=()=>{
     if(!f.texto.trim()){showToast("Ingrese la descripción","error");return;}
     if(!f.vistoBueno){showToast("Debe confirmar el trabajo realizado","error");return;}
-    const nuevoEstadoTarea=f.estadoFinal==="Resuelto"?"Completada":"En proceso";
-    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto,status:nuevoEstadoTarea}:t));
-    // Solo avanza la solicitud a "Resuelta" cuando TODAS sus órdenes están completas —
-    // antes bastaba con que una sola orden se marcara Resuelto para cerrar toda la solicitud.
-    const otrasOrdenesCompletas=(allTasksInReq||[]).filter(t=>t.id!==task.id).every(t=>t.status==="Completada");
-    const todasCompletas=f.estadoFinal==="Resuelto"&&otrasOrdenesCompletas;
-    if(onReqUpdate&&reqStatus&&!["Resuelta","Cerrada","Rechazada"].includes(reqStatus)){
-      if(todasCompletas){
-        onReqUpdate({status:"Resuelta"},{action:"Todas las órdenes completadas · Informe final: Resuelto",from:reqStatus,to:"Resuelta"});
-      }else if(reqStatus!=="En proceso"){
-        onReqUpdate({status:"En proceso"},{action:"Informe guardado · Estado final: "+f.estadoFinal,from:reqStatus,to:"En proceso"});
-      }
-    }
-    showToast(todasCompletas?"Informe guardado — todas las órdenes completas, solicitud Resuelta":f.estadoFinal==="Resuelto"?"Informe guardado — aún hay otras órdenes pendientes":"Informe guardado");
+    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto}:t));
+    showToast("Informe guardado");
   };
   return(
     <div style={{...card,marginBottom:16}}>
@@ -1512,11 +1319,7 @@ function InformeInline({task,setTasks,showToast,reqStatus,onReqUpdate,allTasksIn
       <div style={fg}><label style={lbl}>Observaciones</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.observaciones} onChange={ev=>setFld("observaciones",ev.target.value)}/></div>
       <div style={{...fg,display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id={"seg"+task.id} checked={f.requiereSeguimiento} onChange={ev=>setFld("requiereSeguimiento",ev.target.checked)}/><label htmlFor={"seg"+task.id} style={{fontSize:13,cursor:"pointer"}}>⚠️ Requiere seguimiento posterior</label></div>
       <div style={fg}><label style={lbl}>Nombre del ejecutor</label><input style={inp} value={f.nombreEjecutor} onChange={ev=>setFld("nombreEjecutor",ev.target.value)}/></div>
-      <ConfirmCheck id={"vb"+task.id} label="Confirmo que el trabajo fue realizado" checked={f.vistoBueno} onChange={v=>setFld("vistoBueno",v)} important/>
-      {(allTasksInReq||[]).length>1&&(()=>{
-        const completadas=(allTasksInReq||[]).filter(t=>t.status==="Completada"||(t.id===task.id&&f.estadoFinal==="Resuelto")).length;
-        return <div style={{fontSize:11,color:"#64748b",marginTop:8}}>Esta solicitud tiene {allTasksInReq.length} órdenes — {completadas} de {allTasksInReq.length} completas. La solicitud pasará a "Resuelta" cuando todas lo estén.</div>;
-      })()}
+      <div style={{...fg,display:"flex",gap:8,alignItems:"center",background:"#f0fdf4",padding:"10px 12px",borderRadius:8,border:"1px solid #86efac"}}><input type="checkbox" id={"vb"+task.id} checked={f.vistoBueno} onChange={ev=>setFld("vistoBueno",ev.target.checked)}/><label htmlFor={"vb"+task.id} style={{fontSize:13,cursor:"pointer",color:"#16a34a"}}>✓ Confirmo que el trabajo fue realizado</label></div>
       <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}><button style={BSu(true)} onClick={guardar}>💾 Guardar informe</button></div>
     </div>
   );
@@ -1647,10 +1450,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const adminCatList=Object.keys(ADMIN_CATS);
   const [adminCat,setAdminCat]=useState(adminCatList[0]);
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
-  const lsKey="condoadmin_last_solicitante_"+(session?.email||"anon");
-  let remembered={};
-  try{remembered=JSON.parse(localStorage.getItem(lsKey)||"{}");}catch(_){remembered={};}
-  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:remembered.phone||"",tower:remembered.tower||initTower.name,unit:remembered.unit||"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
+  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
 
   const isAreaComun=f.tower==="Comun";
   const [errs,setErrs]=useState({});
@@ -1690,16 +1490,14 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
       return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:f.requesterName,preview:url,comment:""};
     }));
-    const finalCategory=tipo==="Administrativo"?adminCat:f.category;
     const nr=normReq({id:code,code,createdAt:now,...f,
-      category:finalCategory,
+      category:tipo==="Administrativo"?adminCat:f.category,
       subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
       affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
       status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
-      attachmentsInitial,dueDate:calcSlaDueDate(finalCategory,f.priority,now),isUrgent:f.priority==="Emergencia"});
+      attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    try{localStorage.setItem(lsKey,JSON.stringify({tower:f.tower,unit:f.unit,phone:f.requesterPhone}));}catch(_){}
     // Mail al solicitante
     if(f.requesterEmail&&f.requesterEmail.includes("@")){
       console.log("Enviando mail a solicitante:", f.requesterEmail);
@@ -1812,10 +1610,14 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
                   </div>
                 )}
               </div>
-              <ConfirmCheck id="acc" label="Autorizo ingreso al inmueble" checked={f.accessPermission} onChange={v=>setFld("accessPermission",v)}/>
+              <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={ev=>setFld("accessPermission",ev.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
             </>
           )}
-          <ConfirmCheck id="conf" label="Confirmo que la información es correcta *" checked={f.confirm} onChange={v=>setFld("confirm",v)} error={errs.confirm} important/>
+          <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}>
+            <input type="checkbox" id="conf" checked={f.confirm} onChange={ev=>setFld("confirm",ev.target.checked)}/>
+            <label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la información es correcta *</label>
+            {errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}
+          </div>
         </div>
         {tipo==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA</strong></div>}
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
@@ -2016,8 +1818,8 @@ function MisSolicitudes({tasks,reqs,session,role,onOpen,mob}){
 }
 
 // ── ProviderDash ───────────────────────────────────────────────────────────
-function ProviderDash({role,mob,reqs,session,onOpen}){
-  const myReqs=reqs.filter(r=>(r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email))||(r.proveedor&&(r.proveedor===session?.nombre||r.proveedor===session?.email)));
+function ProviderDash({role,mob,reqs,session}){
+  const myReqs=reqs.filter(r=>r.assignedTo&&(r.assignedTo===session?.nombre||r.assignedTo===session?.email));
   return(
     <div>
       <div style={{...card,background:"#1e3a5f",marginBottom:16}}><div style={{color:"#fff",fontWeight:700,fontSize:16,marginBottom:4}}>Mis Trabajos Asignados</div><div style={{color:"#94a3b8",fontSize:12}}>Asignados a {session?.nombre||"ti"}</div></div>
@@ -2028,11 +1830,10 @@ function ProviderDash({role,mob,reqs,session,onOpen}){
       </Grid>
       {myReqs.length===0?<Empty msg="No tienes solicitudes asignadas"/>:(
         <div>{myReqs.map(r=>(
-          <div key={r.id} style={{...card,borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0"),marginBottom:10,padding:14,cursor:"pointer"}} onClick={()=>onOpen(r)}>
+          <div key={r.id} style={{...card,borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0"),marginBottom:10,padding:14}}>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}><span style={{fontWeight:700,color:"#3b82f6"}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
             <div style={{fontWeight:600,fontSize:14,marginBottom:3}}>{r.category}</div>
             <div style={{fontSize:12,color:"#374151",marginTop:4}}>{r.description}</div>
-            <div style={{fontSize:11,color:"#3b82f6",marginTop:6,fontWeight:600}}>→ Completar informe</div>
           </div>
         ))}</div>
       )}
@@ -2092,7 +1893,7 @@ function InspForm({inspections,setInsp,reqs,setReqs,showToast,role,onBack,mob,to
   const getItem=(sid,name)=>items[sid+"_"+name]||{state:"",obs:"",urgency:"",images:[],reqId:null};
   const all=Object.values(items); const answered=all.filter(v=>v.state).length; const pct=Math.round((answered/all.length)*100);
   const handleImg=ev=>{if(!pendImg)return;const fi=ev.target.files[0];if(!fi)return;const rd=new FileReader();rd.onload=e2=>{const{sid,name}=pendImg;setItem(sid,name,"images",[...(getItem(sid,name).images||[]),e2.target.result]);};rd.readAsDataURL(fi);ev.target.value="";};
-  const createReq=(sid,name)=>{const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:calcSlaDueDate("Espacios comunes",pr,now),isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");};
+  const createReq=(sid,name)=>{const it=getItem(sid,name);const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:meta.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:meta.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"[Insp] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:meta.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setItem(sid,name,"reqId",code);showToast("Solicitud "+code+" creada");};
   const save=st=>{if(!meta.sector||!meta.inspector){showToast("Complete sector e inspector","error");return;}if(st==="Finalizada"&&!meta.conclusion.trim()){showToast("Ingrese conclusión","error");return;}const code=genCode(inspections,"INS-");setInsp(p=>[{id:code,date:meta.date,inspector:meta.inspector,sector:meta.sector,status:st,conclusion:meta.conclusion,items},...p]);showToast(st==="Finalizada"?"Inspección finalizada":"Borrador guardado");onBack();};
   const secIdx=CL_SECTIONS.findIndex(s=>s.id===actSec); const sec=CL_SECTIONS[secIdx];
   return(
@@ -2160,7 +1961,7 @@ function InspDetail({inspection,inspections,setInsp,reqs,setReqs,showToast,role,
   const malos=allEntries.filter(en=>en[1].state==="Malo");
   const regs=allEntries.filter(en=>en[1].state==="Regular");
   const bues=allEntries.filter(en=>en[1].state==="Bueno");
-  const createReq=(key,it)=>{if(it.reqId){showToast("Ya existe","error");return;}const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:calcSlaDueDate("Espacios comunes",pr,now),isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));showToast("Solicitud "+code+" creada");};
+  const createReq=(key,it)=>{if(it.reqId){showToast("Ya existe","error");return;}const parts=key.split("_");const sid=parts[0];const name=parts.slice(1).join("_");const sec=CL_SECTIONS.find(s=>s.id===sid);const code=genCode(reqs,"SOL-");const now=new Date().toISOString();const pr=it.urgency==="Critica"?"Emergencia":it.urgency==="Alta"?"Alta":it.urgency==="Media"?"Media":"Baja";const nr=normReq({id:code,code,createdAt:now,requesterName:inspection.inspector,requesterEmail:"admin@condo.cl",tower:"Comun",unit:inspection.sector,category:"Espacios comunes",subcategory:sec?sec.label:"",description:"["+inspection.id+"] "+name+": "+(it.obs||""),priority:pr,status:"Ingresada",assignedTo:"Sin asignar",history:[{date:now,user:inspection.inspector,action:"Desde inspección",from:null,to:"Ingresada"}],dueDate:null,isUrgent:it.urgency==="Critica"});setReqs(p=>[nr,...p]);setInsp(p=>p.map(i=>i.id!==inspection.id?i:{...i,items:{...i.items,[key]:{...i.items[key],reqId:code}}}));showToast("Solicitud "+code+" creada");};
   const tabs=[{id:"resumen",label:"Resumen"},{id:"hallazgos",label:"Hallazgos ("+(malos.length+regs.length)+")"},{id:"checklist",label:"Checklist"}];
   return(
     <div>
@@ -2335,60 +2136,14 @@ function EmailsView({logs,setEmails,role}){
 function Reports({reqs,tasks,inventory,mob}){
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
   const maxCat=Math.max(...byCat.map(x=>x.n),1);
-  const slaEvaluadas=reqs.filter(r=>r.dueDate&&["Resuelta","Cerrada"].includes(r.status));
-  const slaCumplidas=slaEvaluadas.filter(r=>slaStatus(r)==="Cumplido");
-  const slaPct=slaEvaluadas.length?Math.round(slaCumplidas.length/slaEvaluadas.length*100):null;
-  const slaVencidasActivas=reqs.filter(r=>slaStatus(r)==="Vencido");
-  const slaPorVencerActivas=reqs.filter(r=>slaStatus(r)==="Por vencer");
-  // Desempeño por proveedor: aprovecha los mismos datos de SLA ya calculados por solicitud.
-  const proveedores=[...new Set(reqs.map(r=>r.proveedor).filter(Boolean))];
-  const provStats=proveedores.map(p=>{
-    const reqsProv=reqs.filter(r=>r.proveedor===p);
-    const evalProv=reqsProv.filter(r=>r.dueDate&&["Resuelta","Cerrada"].includes(r.status));
-    const cumplProv=evalProv.filter(r=>slaStatus(r)==="Cumplido");
-    const pct=evalProv.length?Math.round(cumplProv.length/evalProv.length*100):null;
-    const tiempos=reqsProv.map(r=>{
-      const h=(r.history||[]).find(x=>x.to==="Resuelta");
-      return h?(new Date(h.date)-new Date(r.createdAt))/3600000:null;
-    }).filter(x=>x!=null&&x>=0);
-    const promedioHoras=tiempos.length?Math.round(tiempos.reduce((a,b)=>a+b,0)/tiempos.length):null;
-    return{proveedor:p,total:reqsProv.length,pct,evaluadas:evalProv.length,promedioHoras};
-  }).sort((a,b)=>(b.pct??-1)-(a.pct??-1));
   return(
     <div>
       <Grid cols={4} mob={mob}>{PRIORITIES.map(p=><Kpi key={p} value={reqs.filter(r=>r.priority===p).length} label={p} color={PC[p]} mob={mob}/>)}</Grid>
-      <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8,marginTop:12}}>⏱ Cumplimiento SLA</div>
-      <Grid cols={4} mob={mob}>
-        <Kpi value={slaPct!==null?slaPct+"%":"---"} label="Cumplidas en plazo" color="#10b981" mob={mob}/>
-        <Kpi value={slaCumplidas.length+"/"+slaEvaluadas.length} label="Casos evaluados" color="#6366f1" mob={mob}/>
-        <Kpi value={slaVencidasActivas.length} label="Vencidas (activas)" color="#ef4444" mob={mob}/>
-        <Kpi value={slaPorVencerActivas.length} label="Por vencer (24h)" color="#f59e0b" mob={mob}/>
-      </Grid>
       <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por estado</div>{STATUSES.map(s=>{const c=reqs.filter(r=>r.status===s).length;return c?<div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><SBadge s={s}/><span style={{fontWeight:600}}>{c}</span></div>:null;})}</div>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>{byCat.map(x=><div key={x.c} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div><div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div></div>)}</div>
         <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Activas" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Cerradas" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Órdenes totales" v={tasks.length}/><IR l="Stock crítico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
       </div>
-      {provStats.length>0&&(
-        <div style={{marginTop:16}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>🏢 Desempeño por proveedor</div>
-          <div style={card}>
-            <table style={tbl}>
-              <thead><tr>{["Proveedor","Solicitudes","SLA cumplido","Tiempo prom. resolución"].map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
-              <tbody>
-                {provStats.map(p=>(
-                  <tr key={p.proveedor}>
-                    <td style={tdS}><strong>{p.proveedor}</strong></td>
-                    <td style={tdS}>{p.total}</td>
-                    <td style={tdS}>{p.pct!==null?<span style={bdg(p.pct>=80?"#10b981":p.pct>=50?"#f59e0b":"#ef4444",p.pct>=80?"#f0fdf4":p.pct>=50?"#fffbeb":"#fef2f2")}>{p.pct}% ({p.evaluadas} eval.)</span>:"—"}</td>
-                    <td style={tdS}>{p.promedioHoras!==null?fmtSlaHours(p.promedioHoras):"—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -2721,6 +2476,7 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});
   const toggleTow=id=>setTowers(p=>p.map(t=>t.id===id?{...t,active:!t.active}:t));
   const saveTow=t=>{if(editTow){setTowers(p=>p.map(x=>x.id===t.id?t:x));}else{setTowers(p=>[...p,{...t,id:"t"+uid()}]);}showToast("Guardada");setShowTF(false);setEditTow(null);};
+  const sla={Emergencia:"4h",Alta:"24h",Media:"72h",Baja:"7 dias"};
   const cfgTabs=[{id:"cats",label:"Categorías"},{id:"towers",label:"Torres"},{id:"equipos",label:"Equipos"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"}];
   return(
     <div>
@@ -2773,26 +2529,11 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
         </div>
       )}
       {tab==="sla"&&(
-        <div>
-          <div style={{...alrt("info"),marginBottom:12}}>Tiempo límite para resolver cada solicitud según categoría y prioridad. La fecha límite se calcula automáticamente al crear la solicitud y se recalcula si se cambia la prioridad.</div>
-          <div style={card}>
-            <table style={tbl}>
-              <thead><tr>{["Categoría",...PRIORITIES].map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
-              <tbody>
-                {Object.keys(SLA_MATRIX).map(cat=>(
-                  <tr key={cat}>
-                    <td style={tdS}><strong>{cat}</strong></td>
-                    {PRIORITIES.map(p=><td key={p} style={tdS}><span style={bdg(PC[p],PB[p])}>{fmtSlaHours(SLA_MATRIX[cat][p])}</span></td>)}
-                  </tr>
-                ))}
-                <tr>
-                  <td style={tdS}><strong>Gestión administrativa</strong></td>
-                  {PRIORITIES.map(p=><td key={p} style={tdS}><span style={bdg(PC[p],PB[p])}>{fmtSlaHours(SLA_ADMIN[p])}</span></td>)}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>Estos tiempos están definidos en el código (tabla acordada) y aplican a toda solicitud nueva o con prioridad revisada.</div>
+        <div style={card}>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>
+          {Object.entries(sla).map(([p,t])=>(
+            <div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>
+          ))}
         </div>
       )}
     </div>

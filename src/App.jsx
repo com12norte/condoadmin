@@ -383,8 +383,6 @@ function Root(){
   return <App onSwitchApp={()=>setAppChoice(null)}/>;
 }
 
-export default Root;
-
 function App({onSwitchApp}){
   const mob=useMob();
   const [session,setSession]=useState(null);
@@ -2619,3 +2617,5 @@ function TowerForm({tower,onSave,onClose}){
     </div></div>
   );
 }
+
+export default Root;

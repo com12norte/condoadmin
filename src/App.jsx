@@ -347,9 +347,46 @@ function LoginScreen({onLogin}){
 }
 
 // ── App ────────────────────────────────────────────────────────────────────
-export default function App(){
+function AppSelector({onSelect}){
+  return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,background:"#f8fafc",padding:20,fontFamily:"system-ui,sans-serif"}}>
+      <div style={{fontSize:13,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",color:"#64748b",marginBottom:4}}>Condominio 12 Norte</div>
+      <div style={{fontSize:22,fontWeight:700,color:"#1e293b",marginBottom:8}}>¿Qué necesitas gestionar?</div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",justifyContent:"center"}}>
+        <button onClick={()=>onSelect("incidentes")} style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #3b82f6",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
+          <span style={{fontSize:36}}>🛠️</span>
+          <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Incidentes</span>
+          <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Solicitudes, mantención, órdenes de trabajo</span>
+          <span style={{fontSize:12,fontWeight:600,color:"#fff",background:"#3b82f6",borderRadius:100,padding:"4px 14px"}}>→ Continúa aquí</span>
+        </button>
+        <button onClick={()=>onSelect("parking")} style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #10b981",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
+          <span style={{fontSize:36}}>🅿️</span>
+          <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Estacionamiento</span>
+          <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Gestión de estacionamientos</span>
+          <span style={{fontSize:12,fontWeight:600,color:"#fff",background:"#10b981",borderRadius:100,padding:"4px 14px"}}>→ Continúa aquí</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Root(){
+  const [appChoice,setAppChoice]=useState(null);
+  const handleSelect=choice=>{
+    if(choice==="parking"){
+      window.location.href="https://parkadmin-ashy.vercel.app/";
+      return;
+    }
+    setAppChoice(choice);
+  };
+  if(!appChoice) return <AppSelector onSelect={handleSelect}/>;
+  return <App onSwitchApp={()=>setAppChoice(null)}/>;
+}
+
+export default Root;
+
+function App({onSwitchApp}){
   const mob=useMob();
-  const [appChoice,setAppChoice]=useState(null); // null | "incidentes" | "parking"
   const [session,setSession]=useState(null);
   const [loading,setLoading]=useState(false);
   const [viewAs,setViewAs]=useState(null);
@@ -526,32 +563,6 @@ export default function App(){
     return()=>window.removeEventListener("popstate",onPop);
   },[session,view]);
 
-  if(appChoice==="parking"){
-    if(typeof window!=="undefined") window.location.href="https://parkadmin-ashy.vercel.app/";
-    return <Loader/>;
-  }
-  if(!appChoice){
-    return(
-      <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,background:"#f8fafc",padding:20}}>
-        <div style={{fontSize:22,fontWeight:700,color:"#1e293b",marginBottom:8}}>¿Qué necesitas gestionar?</div>
-        <div style={{display:"flex",gap:16,flexWrap:"wrap",justifyContent:"center"}}>
-          <button onClick={()=>setAppChoice("incidentes")} style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #3b82f6",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
-            <span style={{fontSize:36}}>🛠️</span>
-            <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Incidentes</span>
-            <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Solicitudes, mantención, órdenes de trabajo</span>
-            <span style={{fontSize:12,fontWeight:600,color:"#fff",background:"#3b82f6",borderRadius:100,padding:"4px 14px"}}>→ Continúa aquí</span>
-          </button>
-          <button onClick={()=>setAppChoice("parking")} style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #10b981",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
-            <span style={{fontSize:36}}>🅿️</span>
-            <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Estacionamiento</span>
-            <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Gestión de estacionamientos</span>
-            <span style={{fontSize:12,fontWeight:600,color:"#fff",background:"#10b981",borderRadius:100,padding:"4px 14px"}}>→ Continúa aquí</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   if(loading) return <Loader/>;
   if(!session) return <LoginScreen onLogin={handleLogin}/>;
 
@@ -562,7 +573,7 @@ export default function App(){
       <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
         {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onClick={()=>setNavOpen(false)}/>}
         {(!mob||navOpen)&&(
-          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} onSwitchApp={()=>setAppChoice(null)} er={er} mob={mob}/>
+          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} onSwitchApp={onSwitchApp} er={er} mob={mob}/>
         )}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}}>

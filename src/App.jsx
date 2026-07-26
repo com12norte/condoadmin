@@ -216,7 +216,7 @@ function Tabs({tabs,active,onChange,accent}){
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando...</div><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
-function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,er,mob}){
+function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,onSwitchApp,er,mob}){
   const navTo = id => { setView(id); setNavOpen(false); };
   const isAct = id => view===id||(view==="detail"&&id==="requests");
   return (

@@ -1488,6 +1488,15 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
   const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
 
+  // Cuando llegan las torres reales desde Supabase (reemplazando las hardcodeadas),
+  // actualizar la torre seleccionada si el valor actual ya no existe en la lista real.
+  useEffect(()=>{
+    const names=towers.filter(t=>t.active).map(t=>t.name);
+    if(names.length>0&&!names.includes(f.tower)){
+      setF(p=>({...p,tower:names[0]}));
+    }
+  },[towers]);
+
   const isAreaComun=f.tower==="Comun";
   const [errs,setErrs]=useState({});
   const [prevs,setPrevs]=useState([]);

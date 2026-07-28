@@ -1489,11 +1489,14 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const validate=()=>{
     const err={};
     if(tipo==="Incidencia"){
-      if(!f.requesterName) err.requesterName="Requerido";
+      if(!f.requesterName.trim()) err.requesterName="Nombre obligatorio";
       if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail)) err.requesterEmail="Email inválido";
-      if(!f.unit) err.unit="Requerido";
+      if(!f.requesterPhone.trim()) err.requesterPhone="Teléfono obligatorio";
+      if(!f.unit.trim()) err.unit="Unidad obligatoria";
+      if(!f.category) err.category="Categoría obligatoria";
+      if(!f.subcategory) err.subcategory="Subcategoría obligatoria";
     }
-    if(!f.description||f.description.length<10) err.description="Min. 10 caracteres";
+    if(!f.description||f.description.trim().length<10) err.description="Min. 10 caracteres";
     if(!f.confirm) err.confirm="Debe confirmar";
     setErrs(err);
     return !Object.keys(err).length;
@@ -1595,7 +1598,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {tipo==="Incidencia"&&(
             <>
-              {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,lb,tp])=>(
+              {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono *","text"]].map(([k,lb,tp])=>(
                 <div key={k} style={fg}><label style={lbl}>{lb}</label><input type={tp} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={ev=>setFld(k,ev.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
               ))}
               <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>{setFld("tower",ev.target.value);setFld("affectedTowers",[]);}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
@@ -1628,8 +1631,8 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
                 </div>
               )}
               <div style={fg}><label style={lbl}>Unidad / Piso *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401, Piso 4, Bodega 2"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
-              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setCategory(ev.target.value,c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
-              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Categoría *</label><select style={{...sel,borderColor:errs.category?"#ef4444":""}} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setCategory(ev.target.value,c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select>{errs.category&&<div style={{color:"#ef4444",fontSize:10}}>{errs.category}</div>}</div>
+              <div style={fg}><label style={lbl}>Subcategoría *</label><select style={{...sel,borderColor:errs.subcategory?"#ef4444":""}} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select>{errs.subcategory&&<div style={{color:"#ef4444",fontSize:10}}>{errs.subcategory}</div>}</div>
             </>
           )}
           {isAdmin&&tipo==="Administrativo"&&(

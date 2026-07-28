@@ -83,6 +83,24 @@ const DEF_CATS = {
   Jardines:["Poda","Riego","Dano en plantas","Sistema riego","Otro"],
   Otros:["Ruidos molestos","Mascotas","Dano propiedad comun","Otro"]
 };
+// Prioridad automática según categoría — el residente no selecciona prioridad manualmente.
+// Tabla acordada con administración.
+const CAT_PRIORITY = {
+  Gas:"Emergencia",
+  Electricidad:"Alta",
+  Ascensores:"Alta",
+  Agua:"Alta",
+  Filtraciones:"Media",
+  Seguridad:"Alta",
+  Motor:"Alta",
+  Citofonia:"Media",
+  "Espacios comunes":"Baja",
+  Jardines:"Baja",
+  Aseo:"Baja",
+  Perimetral:"Media",
+  Otros:"Baja",
+};
+const getCatPriority = cat => CAT_PRIORITY[cat] || "Media";
 const CL_SECTIONS = [
   {id:"s1",label:"Cierres perimetrales",items:["Reja perimetral","Porton peatonal","Porton vehicular","Cerraduras","Bisagras","Automatizacion","Citofonia","Senaletica"]},
   {id:"s2",label:"Jardines",items:["Cesped","Arboles","Arbustos","Macizos","Sistema riego","Podas","Maleza","Estado general"]},
@@ -434,36 +452,9 @@ function App({onSwitchApp}){
     })();
   },[session]);
 
-  // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
-  useEffect(()=>{
-    if(!session||!tasks.length) return;
-    const run=async()=>{
-      const hoy=new Date(); hoy.setHours(0,0,0,0);
-      const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
-      // Si ya se ejecutó hoy en esta sesión, no hacer nada
-      if(window._remDate===fechaKey) return;
-      window._remDate=fechaKey;
-      if(!window._remSent) window._remSent={};
-      // Limpiar enviados de días anteriores
-      window._remSent={};
-      const sent=window._remSent;
-      for(const t of tasks){
-        if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;
-        const due=new Date(t.dueDate); due.setHours(0,0,0,0);
-        const diff=Math.ceil((due-hoy)/86400000);
-        if(diff>3||sent[t.id]) continue;
-        sent[t.id]=true;
-        const esV=diff<0;
-        const diasTxt=esV?"venció hace "+Math.abs(diff)+" día(s)":diff===0?"vence HOY":"vence en "+diff+" día(s)";
-        const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
-        const cuerpo="Hola"+(t.responsible?" "+t.responsible:"")+",\n\nLa orden \""+t.title+"\" "+diasTxt+" ("+fmtD(t.dueDate)+") y aún no tiene informe.\n\n— CondoAdmin";
-        try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.responsible||"")+"&active=eq.true",{headers:hdr()});const us=await res.json();const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
-        if(t.ejecutor&&t.ejecutor!==t.responsible){try{const r2=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(t.ejecutor)+"&active=eq.true",{headers:hdr()});const u2s=await r2.json();const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
-      }
-    };
-    const timer=setTimeout(()=>run().catch(()=>{}),3000);
-    return()=>clearTimeout(timer);
-  },[tasks,session]);
+  // CORREOS: solo 2 tipos
+  // 1. Nueva solicitud → correo inmediato a admins (ya en NewReqModal)
+  // 2. Resumen diario 8am → via api/cron-recordatorios.js (servidor), no desde aquí
 
   const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};
@@ -1470,7 +1461,12 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const adminCatList=Object.keys(ADMIN_CATS);
   const [adminCat,setAdminCat]=useState(adminCatList[0]);
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
-  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
+  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:getCatPriority(initCat.name),accessPermission:false,confirm:false,affectedTowers:[]});
+
+  // Recalcular prioridad automáticamente cuando cambia la categoría
+  const setCategory=(cat,sub)=>{
+    setF(p=>({...p,category:cat,subcategory:sub||"",priority:getCatPriority(cat)}));
+  };
 
   // Cuando llegan las torres reales desde Supabase (reemplazando las hardcodeadas),
   // actualizar la torre seleccionada si el valor actual ya no existe en la lista real.
@@ -1548,11 +1544,21 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       console.log("Enviando mail a solicitante:", f.requesterEmail);
       addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
     }
-    // Mail a administradores
+    // Mail a administradores — siempre al crear cualquier solicitud
     try{
       const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
-      console.log("Admins a notificar:", admins.map(u=>u.email));
-      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+f.requesterName+"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)+"\nPrioridad: "+f.priority+"\n\nIngrese al sistema para gestionar."}));
+      const esUrgente=["Emergencia","Alta"].includes(f.priority);
+      const asunto=esUrgente
+        ?(f.priority==="Emergencia"?"🚨 [CondoAdmin] EMERGENCIA — "+code+" de "+f.requesterName:"⚡ [CondoAdmin] ALTA prioridad — "+code+" de "+f.requesterName)
+        :"[CondoAdmin] Nueva solicitud "+code+" de "+f.requesterName;
+      const cuerpo=(esUrgente?"⚠ SOLICITUD DE "+(f.priority==="Emergencia"?"EMERGENCIA":"ALTA PRIORIDAD")+"\n\n":"Nueva solicitud recibida:\n\n")
+        +"Código: "+code+"\nSolicitante: "+f.requesterName+"\nTorre/Unidad: "+f.tower+" / "+f.unit
+        +"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)
+        +"\nSubcategoría: "+(tipo==="Administrativo"?adminSub:f.subcategory)
+        +"\nPrioridad: "+f.priority
+        +"\nDescripción: "+f.description
+        +"\n\n"+(esUrgente?"Requiere atención INMEDIATA.":"Ingrese al sistema para gestionar.");
+      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:asunto,type:"Aviso",status:"Enviado",body:cuerpo}));
     }catch(ex){console.warn("Error notificando admins",ex);}
     setDone(nr); showToast("Solicitud "+code+" creada"); setSaving(false);
   };
@@ -1622,7 +1628,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
                 </div>
               )}
               <div style={fg}><label style={lbl}>Unidad / Piso *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401, Piso 4, Bodega 2"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
-              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setCategory(ev.target.value,c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
               <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
             </>
           )}
@@ -1637,7 +1643,10 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
             <textarea style={{...inp,height:tipo==="Administrativo"?120:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={ev=>setFld("description",ev.target.value)} placeholder={tipo==="Administrativo"?"Detalle administrativo...":"Describa el problema..."}/>
             {errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}
           </div>
-          <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={ev=>setFld("priority",ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+          {isAdmin
+            ? <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={ev=>setFld("priority",ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+            : <div style={fg}><label style={lbl}>Prioridad (asignada automáticamente)</label><div style={{...sel,display:"flex",alignItems:"center",gap:8,background:"#f8fafc",color:PC[f.priority],fontWeight:700,pointerEvents:"none"}}><PBadge p={f.priority}/><span style={{fontSize:11,color:"#64748b",fontWeight:400}}>según la categoría seleccionada</span></div></div>
+          }
           {tipo==="Incidencia"&&(
             <>
               <div style={{...fg,gridColumn:"1/-1"}}>

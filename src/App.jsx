@@ -2,9 +2,24 @@ import { useState, useEffect, useRef } from "react";
 
 const SUPA_URL = "https://ijefrrtdtjshfquuytic.supabase.co";
 const SUPA_KEY = "sb_publishable_sZTDO3ROm8IEnzbWuEUK-w_DeOz65XG";
-const EMAILJS_SID = "service_vxhdrlx";
-const EMAILJS_TID = "template_90tjafk";
-const EMAILJS_KEY = "wKxD2rJHuftU7W-WE";
+const SITE_URL = "https://condoadmin-rouge.vercel.app";
+
+const sendMail = async (to, subject, body) => {
+  if (!to || !to.includes("@")) return;
+  try {
+    const res = await fetch(SITE_URL + "/api/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, subject, body }),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      console.warn("send-email error", res.status, txt);
+    }
+  } catch (ex) {
+    console.warn("sendMail error", ex);
+  }
+};
 
 let _tok = null;
 const hdr = (t) => ({ "Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+(t||_tok||SUPA_KEY) });
@@ -23,37 +38,6 @@ const uploadImg = async (file,path) => {
   const res = await fetch(SUPA_URL+"/storage/v1/object/imagenes/"+path,{method:"POST",headers:{"apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Content-Type":file.type||"image/jpeg"},body:file});
   if(!res.ok) throw new Error("Storage error");
   return SUPA_URL+"/storage/v1/object/public/imagenes/"+path;
-};
-const sendMail = async (to, subject, body) => {
-  if(!to||!to.includes("@")) return;
-  try {
-    const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json",
-        "origin":"http://localhost"
-      },
-      body:JSON.stringify({
-        service_id: EMAILJS_SID,
-        template_id: EMAILJS_TID,
-        user_id: EMAILJS_KEY,
-        accessToken: EMAILJS_KEY,
-        template_params: {
-          to_email: to,
-          subject: subject,
-          message: body,
-          name: "CondoAdmin",
-          email: "no-reply@condoadmin.cl"
-        }
-      })
-    });
-    if(!res.ok){
-      const txt=await res.text();
-      console.warn("EmailJS",res.status,txt);
-    }
-  } catch(ex) {
-    console.warn("sendMail error", ex);
-  }
 };
 
 const ROLES = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
@@ -1543,6 +1527,22 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
       attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
+    // Crear Orden de Trabajo pre-llenada automáticamente
+    const newTask={
+      id:"t"+uid(),
+      requestId:code,
+      title:(tipo==="Administrativo"?adminCat:f.category)+(f.subcategory?" / "+f.subcategory:""),
+      desc:f.description,
+      responsible:"Sin asignar",
+      proveedor:"",
+      ejecutor:"",
+      dueDate:null,
+      priority:f.priority,
+      status:"Ingresada",
+      comments:[],attachments:[],materials:[],
+      informe:"",tiempoUsado:"",
+    };
+    setTasks(p=>[...p,newTask]);
     // Mail al solicitante
     if(f.requesterEmail&&f.requesterEmail.includes("@")){
       console.log("Enviando mail a solicitante:", f.requesterEmail);

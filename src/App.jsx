@@ -260,6 +260,101 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
   );
 }
 
+// ── Registro de Residente ──────────────────────────────────────────────────
+function RegistroResidente({onBack,onDone}){
+  const [f,setF]=useState({nombre:"",email:"",telefono:"",torre:"",unidad:"",tipo:"Propietario"});
+  const [errs,setErrs]=useState({});
+  const [saving,setSaving]=useState(false);
+  const [done,setDone]=useState(false);
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const validate=()=>{
+    const e={};
+    if(!f.nombre.trim()) e.nombre="Requerido";
+    if(!f.email||!/\S+@\S+\.\S+/.test(f.email)) e.email="Email inválido";
+    if(!f.telefono.trim()) e.telefono="Requerido";
+    if(!f.torre.trim()) e.torre="Requerido";
+    if(!f.unidad.trim()) e.unidad="Requerido";
+    setErrs(e);
+    return !Object.keys(e).length;
+  };
+  const submit=async()=>{
+    if(!validate()) return;
+    setSaving(true);
+    try{
+      // Guardar solicitud de registro en Supabase para que el admin la active
+      await fetch(SUPA_URL+"/rest/v1/usuarios",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Prefer":"return=minimal"},
+        body:JSON.stringify({
+          id:"reg_"+Date.now(),
+          data:{
+            nombre:f.nombre,email:f.email,telefono:f.telefono,
+            torre:f.torre,unidad:f.unidad,tipo:f.tipo,
+            rol:"Residente",active:false,
+            solicitudRegistro:true,fecha:new Date().toISOString()
+          }
+        })
+      });
+      // Notificar a admins por email
+      await fetch(SITE_URL+"/api/send-email",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          to:"com12norte@gmail.com",
+          subject:"[CondoAdmin] Solicitud de registro — "+f.nombre+" ("+f.torre+"/"+f.unidad+")",
+          body:"Nuevo residente solicita cuenta:\n\nNombre: "+f.nombre+"\nCorreo: "+f.email+"\nTeléfono: "+f.telefono+"\nTorre: "+f.torre+"\nUnidad: "+f.unidad+"\nTipo: "+f.tipo+"\n\nIngrese al sistema para activar la cuenta."
+        })
+      });
+      setDone(true);
+    }catch(ex){console.warn(ex);}
+    setSaving(false);
+  };
+  if(done) return(
+    <div style={{textAlign:"center",padding:"20px 0"}}>
+      <div style={{fontSize:40,marginBottom:12}}>✅</div>
+      <div style={{fontWeight:700,fontSize:16,color:"#fff",marginBottom:8}}>Solicitud enviada</div>
+      <div style={{color:"#bfdbfe",fontSize:13,marginBottom:20}}>La administración activará tu cuenta y te avisará por correo a {f.email}.</div>
+      <button onClick={onBack} style={{background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:"pointer",fontSize:14}}>Volver al inicio</button>
+    </div>
+  );
+  const field=(k,label,type="text",ph="")=>(
+    <div style={{marginBottom:10}}>
+      <label style={{...lbl,color:"#bfdbfe"}}>{label}</label>
+      <input type={type} style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid "+(errs[k]?"#fca5a5":"rgba(255,255,255,.3)"),color:"#fff"}} value={f[k]} onChange={ev=>set(k,ev.target.value)} placeholder={ph}/>
+      {errs[k]&&<div style={{color:"#fca5a5",fontSize:10,marginTop:2}}>{errs[k]}</div>}
+    </div>
+  );
+  return(
+    <div>
+      {field("nombre","Nombre completo *","text","Juan Pérez")}
+      {field("email","Correo electrónico *","email","tu@correo.cl")}
+      {field("telefono","Teléfono *","tel","+56 9 1234 5678")}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div>
+          <label style={{...lbl,color:"#bfdbfe"}}>Torre *</label>
+          <input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid "+(errs.torre?"#fca5a5":"rgba(255,255,255,.3)"),color:"#fff"}} value={f.torre} onChange={ev=>set("torre",ev.target.value)} placeholder="A, B, C..."/>
+          {errs.torre&&<div style={{color:"#fca5a5",fontSize:10}}>{errs.torre}</div>}
+        </div>
+        <div>
+          <label style={{...lbl,color:"#bfdbfe"}}>Unidad / Piso *</label>
+          <input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid "+(errs.unidad?"#fca5a5":"rgba(255,255,255,.3)"),color:"#fff"}} value={f.unidad} onChange={ev=>set("unidad",ev.target.value)} placeholder="401, Piso 4..."/>
+          {errs.unidad&&<div style={{color:"#fca5a5",fontSize:10}}>{errs.unidad}</div>}
+        </div>
+      </div>
+      <div style={{marginBottom:16,marginTop:10}}>
+        <label style={{...lbl,color:"#bfdbfe"}}>Tipo de residente</label>
+        <select style={{...sel,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} value={f.tipo} onChange={ev=>set("tipo",ev.target.value)}>
+          {["Propietario","Arrendatario","Ocupante"].map(t=><option key={t}>{t}</option>)}
+        </select>
+      </div>
+      <button onClick={submit} disabled={saving} style={{width:"100%",padding:"13px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer"}}>{saving?"Enviando...":"Solicitar registro"}</button>
+      <div style={{textAlign:"center",marginTop:10}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:"#bfdbfe",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Login ──────────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
   const [mode,setMode]=useState(null);
@@ -283,6 +378,25 @@ function LoginScreen({onLogin}){
       } else {
         setErr(ex.message||"Credenciales incorrectas");
       }
+    }
+    setLoad(false);
+  };
+
+  const doResCon=async()=>{
+    const passEl=document.getElementById("res-pass");
+    const pass=passEl?.value||"";
+    if(!resEmail||!/\S+@\S+\.\S+/.test(resEmail)){setResErr("Ingrese un correo válido");return;}
+    if(!pass){setResErr("Ingrese su contraseña");return;}
+    if(load) return;
+    setLoad(true);setResErr("");
+    try{
+      const auth=await signIn(resEmail,pass);
+      const res=await fetch(SUPA_URL+"/rest/v1/usuarios?email=eq."+encodeURIComponent(resEmail)+"&active=eq.true&rol=eq.Residente",{headers:hdr(auth.access_token)});
+      const users=await res.json();
+      if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
+      onLogin({...users[0],token:auth.access_token});
+    }catch(ex){
+      setResErr(ex.message||"Credenciales incorrectas");
     }
     setLoad(false);
   };
@@ -317,13 +431,37 @@ function LoginScreen({onLogin}){
   );
 
   if(mode==="residente") return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
-      <div style={{width:"100%",maxWidth:380}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:420}}>
         <button onClick={()=>{setMode(null);setResErr("");setResEmail("");}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
-        <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div></div>
-        {resErr&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{resErr}</div>}
-        <div style={{marginBottom:20}}><label style={{...lbl,color:"#bfdbfe"}}>Correo electrónico</label><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>ev.key==="Enter"&&doResidente()}/></div>
-        <button onClick={doResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
+        <div style={{textAlign:"center",marginBottom:28}}><div style={{fontSize:44,marginBottom:10}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div><div style={{color:"#bfdbfe",fontSize:13,marginTop:4}}>¿Tienes una cuenta registrada?</div></div>
+        {/* Opción 1: con cuenta */}
+        <div style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:14,padding:"20px 20px 16px",marginBottom:12}}>
+          <div style={{fontWeight:600,fontSize:14,color:"#fff",marginBottom:12}}>✅ Tengo cuenta — iniciar sesión</div>
+          {resErr&&mode==="residente"&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:12}}>{resErr}</div>}
+          <div style={{marginBottom:10}}><label style={{...lbl,color:"#bfdbfe"}}>Correo</label><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>{if(ev.key==="Enter")doResCon();}}/></div>
+          <div style={{marginBottom:12}}><label style={{...lbl,color:"#bfdbfe"}}>Contraseña</label><input id="res-pass" style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="password" placeholder="••••••••" onKeyDown={ev=>{if(ev.key==="Enter")doResCon();}}/></div>
+          <button onClick={doResCon} disabled={load} style={{width:"100%",padding:"12px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}}>{load?"Ingresando...":"Ingresar con mi cuenta"}</button>
+        </div>
+        {/* Opción 2: sin cuenta */}
+        <div style={{background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",borderRadius:14,padding:"20px 20px 16px"}}>
+          <div style={{fontWeight:600,fontSize:14,color:"#fff",marginBottom:4}}>📝 No tengo cuenta — continuar sin registro</div>
+          <div style={{fontSize:11,color:"#bfdbfe",marginBottom:12}}>Deberás completar tus datos personales en el formulario de la solicitud.</div>
+          <button onClick={()=>onLogin({id:"guest",nombre:"",email:"",rol:"Residente",token:null,openNewReq:true})} style={{width:"100%",padding:"12px",background:"rgba(255,255,255,.2)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer"}}>Continuar sin cuenta →</button>
+          <div style={{textAlign:"center",marginTop:12}}>
+            <button onClick={()=>setMode("registro")} style={{background:"none",border:"none",color:"#bfdbfe",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>¿Quieres registrarte? Crear cuenta gratis</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  if(mode==="registro") return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:420}}>
+        <button onClick={()=>setMode("residente")} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
+        <div style={{textAlign:"center",marginBottom:24}}><div style={{fontSize:40,marginBottom:8}}>📝</div><div style={{fontWeight:700,fontSize:20,color:"#fff"}}>Crear cuenta de Residente</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:4}}>La administración activará tu cuenta</div></div>
+        <RegistroResidente onBack={()=>setMode("residente")} onDone={()=>{setMode("residente");setResErr("✓ Solicitud enviada. La administración activará tu cuenta pronto.");}}/>
       </div>
     </div>
   );
@@ -575,7 +713,7 @@ function App({onSwitchApp}){
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);setView("requests");}} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} setTasks={setTasksDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);setView("requests");}} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
     </div>
   );
@@ -991,15 +1129,33 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
   };
-  const applyAsgn=async()=>{
-    if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
-    upd({assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:r.status,to:"Asignada"});
+  const [prov,setProv]=useState(r.proveedor||"");
+  const provOptions=[...new Set([...respList.filter(s=>s!=="Sin asignar"),...(r.proveedor?[r.proveedor]:[])])];
+
+  // Auto-avanza el estado según las acciones del administrador
+  const applyAsgnAuto=async(nombre)=>{
+    if(!nombre||nombre==="Sin asignar") return;
+    setAsgn(nombre);
+    const nextStatus=r.status==="Ingresada"||r.status==="En revision"?"Asignada":r.status;
+    upd({assignedTo:nombre,status:nextStatus},{action:"Asignada a "+nombre,from:r.status,to:nextStatus});
     showToast("Responsable asignado");
     try{
-      const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(asgn)+"&active=eq.true",{headers:hdr()});
+      const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(nombre)+"&active=eq.true",{headers:hdr()});
       const users=await res.json(); const u=users&&users[0];
       if(u?.email) addEmail({requestId:r.id,date:new Date().toISOString(),to:u.email,subject:"[CondoAdmin] Solicitud "+r.code+" asignada",type:"Asignacion",status:"Enviado",body:"Hola "+u.nombre+", se te asignó: "+r.code});
     }catch(_){}
+  };
+  const applyProvAuto=(nombre)=>{
+    setProv(nombre);
+    upd({proveedor:nombre||null,status:r.status==="Asignada"?"En proceso":r.status},{action:"Proveedor asignado: "+nombre,from:r.status,to:r.status==="Asignada"?"En proceso":r.status});
+    showToast("Proveedor asignado");
+  };
+  const applyStatusAuto=(newStatus)=>{
+    setNs(newStatus);
+    if(newStatus==="Cerrada"){setShowCl(true);return;}
+    upd({status:newStatus},{action:"Estado cambiado",from:r.status,to:newStatus});
+    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+newStatus,type:"Cambio de estado",status:"Enviado",body:"Su solicitud cambió a: "+newStatus});
+    showToast("Estado actualizado");
   };
   const addCmt=()=>{
     if(!comment.trim()) return;
@@ -1036,32 +1192,26 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
             {can(role,"changeStatus")&&(
               <div><label style={lbl}>Estado</label>
-              <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
-                <button style={BP(true)} onClick={applyStatus}>OK</button>
-              </div></div>
+              <select style={{...sel,width:140}} value={ns} onChange={ev=>applyStatusAuto(ev.target.value)}>
+                {STATUSES.filter(s=>s!=="Rechazada").map(s=><option key={s}>{s}</option>)}
+              </select>
+              <button style={{...BD(true),marginTop:4,fontSize:11}} onClick={()=>{if(window.confirm("¿Rechazar esta solicitud?"))applyStatusAuto("Rechazada");}}>✕ Rechazar</button>
+              </div>
             )}
             {can(role,"assign")&&(
               <div><label style={lbl}>Responsable</label>
-              <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:150}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
-                <button style={BS(true)} onClick={applyAsgn}>Asignar</button>
-              </div></div>
+              <select style={{...sel,width:150}} value={asgn} onChange={ev=>applyAsgnAuto(ev.target.value)}>
+                {respList.map(s=><option key={s}>{s}</option>)}
+              </select></div>
             )}
             {can(role,"assign")&&(
               <div><label style={lbl}>Proveedor</label>
-              <div style={{display:"flex",gap:6}}>
-                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
-                <button style={BS(true)} onClick={()=>{
-                  const val=document.getElementById("prov-input").value.trim();
-                  upd({proveedor:val||null});
-                  showToast("Proveedor actualizado");
-                }}>OK</button>
-              </div></div>
+              <select style={{...sel,width:150}} value={prov} onChange={ev=>applyProvAuto(ev.target.value)}>
+                <option value="">Sin proveedor</option>
+                {provOptions.map(s=><option key={s}>{s}</option>)}
+              </select></div>
             )}
-            {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
             {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>Cerrar</button>}
-            <button style={BS(true)} onClick={()=>setShowEv("avance")}>Evidencia</button>
           </div>
         </div>
       )}
@@ -1103,21 +1253,6 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       )}
       {tab==="tasks"&&(
         <div>
-          {!isProv&&(()=>{
-            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
-            return ["inicial","avance","cierre"].map(type=>{
-              const myAtt=allAtts.filter(a=>a.type===type);
-              return(
-                <div key={type} style={card}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
-                  </div>
-                  {myAtt.length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>}
-                </div>
-              );
-            });
-          })()}
           {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
           {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
           {myTasks.length>0&&(
@@ -1126,6 +1261,29 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
             </div>
           )}
+          {/* Imágenes al final de la Orden de Trabajo */}
+          {!isProv&&(()=>{
+            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+            return(
+              <div style={{marginTop:12}}>
+                {["inicial","avance","cierre"].map(type=>{
+                  const myAtt=allAtts.filter(a=>a.type===type);
+                  return(
+                    <div key={type} style={{...card,marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <div style={{fontWeight:600,fontSize:12}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                        {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                      </div>
+                      {myAtt.length===0
+                        ?<div style={{color:"#94a3b8",fontSize:12}}>Sin imágenes.</div>
+                        :<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
       {tab==="informe"&&(
@@ -1451,7 +1609,7 @@ function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
 }
 
 // ── NewReqModal ────────────────────────────────────────────────────────────
-function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
+function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
   const actCats=cats.filter(c=>c.active);
   const actTowers=towers.filter(t=>t.active);
   const initCat=actCats[0]||{name:"",subs:[""]};

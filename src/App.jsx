@@ -101,6 +101,30 @@ const CAT_PRIORITY = {
   Otros:"Baja",
 };
 const getCatPriority = cat => CAT_PRIORITY[cat] || "Media";
+
+// Horas SLA por categoría y prioridad (tabla acordada)
+const SLA_HRS = {
+  Gas:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Electricidad:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Ascensores:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Agua:{Emergencia:4,Alta:8,Media:24,Baja:72},
+  Filtraciones:{Emergencia:4,Alta:8,Media:24,Baja:72},
+  Seguridad:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Motor:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  Citofonia:{Emergencia:2,Alta:4,Media:24,Baja:48},
+  "Espacios comunes":{Emergencia:8,Alta:24,Media:72,Baja:168},
+  Jardines:{Emergencia:8,Alta:24,Media:72,Baja:168},
+  Aseo:{Emergencia:8,Alta:24,Media:72,Baja:168},
+  Perimetral:{Emergencia:4,Alta:24,Media:48,Baja:168},
+  Otros:{Emergencia:8,Alta:24,Media:72,Baja:168},
+};
+const SLA_DEFAULT = {Emergencia:8,Alta:24,Media:72,Baja:168};
+const calcSlaDueDate = (category, priority, from) => {
+  const tbl = SLA_HRS[category] || SLA_DEFAULT;
+  const hrs = tbl[priority] ?? SLA_DEFAULT[priority] ?? 72;
+  const base = from ? new Date(from) : new Date();
+  return new Date(base.getTime() + hrs * 3600000).toISOString();
+};
 const CL_SECTIONS = [
   {id:"s1",label:"Cierres perimetrales",items:["Reja perimetral","Porton peatonal","Porton vehicular","Cerraduras","Bisagras","Automatizacion","Citofonia","Senaletica"]},
   {id:"s2",label:"Jardines",items:["Cesped","Arboles","Arbustos","Macizos","Sistema riego","Podas","Maleza","Estado general"]},
@@ -1676,24 +1700,26 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
       try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
       return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:f.requesterName,preview:url,comment:""};
     }));
+    const finalCategory=tipo==="Administrativo"?adminCat:f.category;
+    const slaDueDate=calcSlaDueDate(finalCategory,f.priority,now);
     const nr=normReq({id:code,code,createdAt:now,...f,
-      category:tipo==="Administrativo"?adminCat:f.category,
+      category:finalCategory,
       subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
       affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
       status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
-      attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
+      attachmentsInitial,dueDate:slaDueDate,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    // Crear Orden de Trabajo pre-llenada automáticamente
+    // Crear Orden de Trabajo pre-llenada con la misma fecha límite SLA
     const newTask={
       id:"t"+uid(),
       requestId:code,
-      title:(tipo==="Administrativo"?adminCat:f.category)+(f.subcategory?" / "+f.subcategory:""),
+      title:finalCategory+(f.subcategory?" / "+f.subcategory:""),
       desc:f.description,
       responsible:"Sin asignar",
       proveedor:"",
       ejecutor:"",
-      dueDate:null,
+      dueDate:new Date(slaDueDate).toISOString().slice(0,10), // formato YYYY-MM-DD para el input date
       priority:f.priority,
       status:"Ingresada",
       comments:[],attachments:[],materials:[],

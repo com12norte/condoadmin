@@ -1327,61 +1327,16 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
         </div>
       )}
       {tab==="informe"&&(
-        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=>{
-          const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
-          // Mostrar solo la orden correspondiente si soy ejecutor
-          const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
-          if(isEjecutor&&!miOrden) return null;
-          return(
-            <div key={t.id}>
-              {/* Resumen de la orden siempre visible en modo ejecutor */}
-              {isEjecutor&&(
-                <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
-                  <div style={{fontWeight:700,fontSize:14,color:"#4338ca",marginBottom:6}}>📋 Mi Orden de Trabajo</div>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                    <div>
-                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
-                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>👤 Responsable: {t.responsible}</div>
-                      <div style={{fontSize:12,color:"#6366f1"}}>🔧 Ejecutor: {t.ejecutor}</div>
-                      {t.desc&&<div style={{fontSize:12,color:"#374151",marginTop:4}}>{t.desc}</div>}
-                    </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
-                      <PBadge p={t.priority}/>
-                      <SBadge s={t.status}/>
-                      {t.dueDate&&<span style={{fontSize:11,color:"#64748b"}}>📅 {fmtD(t.dueDate)}</span>}
-                    </div>
-                  </div>
-                  {/* Info solicitud */}
-                  <div style={{marginTop:10,padding:"8px 10px",background:"#fff",borderRadius:8,border:"1px solid #c7d2fe"}}>
-                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                      <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
-                      <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
-                      <SBadge s={r.status}/>
-                    </div>
-                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
-                  </div>
-                </div>
-              )}
-              {["avance","cierre"].map(type=>{
-                const myAtt=allAtts.filter(a=>a.type===type);
-                return(
-                  <div key={type} style={card}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                      <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                      {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
-                    </div>
-                    {myAtt.length===0
-                      ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
-                      :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
-                    }
-                  </div>
-                );
-              })}
-              <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
-            </div>
-          );
-        })
+        <div>
+          {myTasks.length===0
+            ? <Empty msg="No hay órdenes de trabajo para reportar."/>
+            : myTasks.map(t=>(
+              <div key={t.id} style={{marginBottom:16}}>
+                <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+              </div>
+            ))
+          }
+        </div>
       )}
       {!isProv&&tab==="emails"&&(
         <div style={card}>

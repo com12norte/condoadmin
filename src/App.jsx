@@ -1163,6 +1163,22 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     const nextStatus=r.status==="Ingresada"||r.status==="En revision"?"Asignada":r.status;
     upd({assignedTo:nombre,status:nextStatus},{action:"Asignada a "+nombre,from:r.status,to:nextStatus});
     showToast("Responsable asignado");
+    // Crear OT pre-llenada automáticamente si no existe ninguna para esta solicitud
+    if(myTasks.length===0){
+      const slaDueDate=r.dueDate?new Date(r.dueDate).toISOString().slice(0,10):"";
+      const newTask={
+        id:"t"+uid(),requestId:r.id,
+        title:r.category+(r.subcategory?" / "+r.subcategory:""),
+        desc:r.description||"",
+        responsible:nombre,proveedor:r.proveedor||"",ejecutor:"",
+        dueDate:slaDueDate,priority:r.priority,
+        status:"Ingresada",comments:[],attachments:[],materials:[],
+        informe:"",tiempoUsado:"",
+      };
+      setTasks(p=>[...p,newTask]);
+      try{await dbUpsert("tareas",{id:newTask.id,data:newTask});}catch(ex){console.warn("Error guardando OT:",ex);}
+      showToast("Responsable asignado y OT creada automáticamente");
+    }
     try{
       const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(nombre)+"&active=eq.true",{headers:hdr()});
       const users=await res.json(); const u=users&&users[0];
@@ -1480,10 +1496,12 @@ function InformeInline({task,setTasks,showToast}){
     recRef.current=rec; rec.start(); setEsc(true);
   };
   const detenerVoz=()=>{if(recRef.current)recRef.current.stop();setEsc(false);};
-  const guardar=()=>{
+  const guardar=async()=>{
     if(!f.texto.trim()){showToast("Ingrese la descripción","error");return;}
     if(!f.vistoBueno){showToast("Debe confirmar el trabajo realizado","error");return;}
-    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto}:t));
+    const updated={...task,...f,informe:f.texto};
+    setTasks(p=>p.map(t=>t.id===task.id?updated:t));
+    try{await dbUpsert("tareas",{id:task.id,data:updated});}catch(ex){console.warn("Error guardando informe:",ex);}
     showToast("Informe guardado");
   };
   return(
@@ -1710,22 +1728,7 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
       attachmentsInitial,dueDate:slaDueDate,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    // Crear Orden de Trabajo pre-llenada con la misma fecha límite SLA
-    const newTask={
-      id:"t"+uid(),
-      requestId:code,
-      title:finalCategory+(f.subcategory?" / "+f.subcategory:""),
-      desc:f.description,
-      responsible:"Sin asignar",
-      proveedor:"",
-      ejecutor:"",
-      dueDate:new Date(slaDueDate).toISOString().slice(0,10), // formato YYYY-MM-DD para el input date
-      priority:f.priority,
-      status:"Ingresada",
-      comments:[],attachments:[],materials:[],
-      informe:"",tiempoUsado:"",
-    };
-    setTasks(p=>[...p,newTask]);
+    // NO crear OT automáticamente aquí — se crea cuando el admin asigna responsable
     // Mail al solicitante
     if(f.requesterEmail&&f.requesterEmail.includes("@")){
       console.log("Enviando mail a solicitante:", f.requesterEmail);

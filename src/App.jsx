@@ -1,43 +1,75 @@
 import { useState, useEffect, useRef } from "react";
+import { initializeApp, getApps } from "firebase/app";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, orderBy, where } from "firebase/firestore";
+import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
-const SUPA_URL = "https://ijefrrtdtjshfquuytic.supabase.co";
-const SUPA_KEY = "sb_publishable_sZTDO3ROm8IEnzbWuEUK-w_DeOz65XG";
+// ── Firebase config ─────────────────────────────────────────────────────────
+// Reemplaza estos valores con los de tu proyecto Firebase
+// Firebase Console → Project Settings → Your apps → Config
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+const fbApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+const fbDb  = getFirestore(fbApp);
+const fbAuth = getAuth(fbApp);
+const fbStorage = getStorage(fbApp);
+
+// ── DB helpers (mantienen la misma interfaz que antes) ──────────────────────
+// Los documentos siguen la estructura {id, data:{...}} igual que en Supabase
+const dbGet = async (table, _filter="") => {
+  const snap = await getDocs(collection(fbDb, table));
+  return snap.docs.map(d => d.data());
+};
+const dbUpsert = async (table, item) => {
+  const id = String(item.id || item.key || "");
+  if (!id) return;
+  await setDoc(doc(fbDb, table, id), item, { merge: true });
+};
+const dbDelete = async (table, idVal) => {
+  // idVal puede ser "id=eq.XXX" (compat Supabase) o directo
+  const id = String(idVal).replace(/^id=eq\./, "");
+  await deleteDoc(doc(fbDb, table, id));
+};
+const dbPost = dbUpsert; // alias — en Firebase upsert y post son lo mismo
+const dbPatch = async (table, filter, data) => {
+  const id = String(filter).replace(/^id=eq\./, "");
+  await setDoc(doc(fbDb, table, id), data, { merge: true });
+};
+const dbGetOne = async (table, id) => {
+  const snap = await getDoc(doc(fbDb, table, String(id)));
+  return snap.exists() ? snap.data() : null;
+};
+
+const signIn = async (email, pass) => {
+  const cred = await signInWithEmailAndPassword(fbAuth, email, pass);
+  return { access_token: await cred.user.getIdToken(), user: cred.user };
+};
+
+const uploadImg = async (file, path) => {
+  const r = storageRef(fbStorage, "imagenes/" + path);
+  await uploadBytes(r, file, { contentType: file.type || "image/jpeg" });
+  return getDownloadURL(r);
+};
+
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
-
 const sendMail = async (to, subject, body) => {
   if (!to || !to.includes("@")) return;
   try {
-    const res = await fetch(SITE_URL + "/api/send-email", {
+    await fetch(SITE_URL + "/api/send-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ to, subject, body }),
     });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      console.warn("send-email error", res.status, txt);
-    }
   } catch (ex) {
     console.warn("sendMail error", ex);
   }
-};
-
-let _tok = null;
-const hdr = (t) => ({ "Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+(t||_tok||SUPA_KEY) });
-const dbGet = (t,f="") => fetch(SUPA_URL+"/rest/v1/"+t+(f||"?select=*"),{headers:hdr()}).then(r=>r.json());
-const dbPost = (t,b) => fetch(SUPA_URL+"/rest/v1/"+t,{method:"POST",headers:{...hdr(),"Prefer":"return=representation"},body:JSON.stringify(b)}).then(r=>r.json());
-const dbPatch = (t,f,b) => fetch(SUPA_URL+"/rest/v1/"+t+"?"+f,{method:"PATCH",headers:{...hdr(),"Prefer":"return=representation"},body:JSON.stringify(b)}).then(r=>r.json());
-const dbUpsert = (t,b) => fetch(SUPA_URL+"/rest/v1/"+t,{method:"POST",headers:{...hdr(),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify(b)});
-const dbDelete = (t,f) => fetch(SUPA_URL+"/rest/v1/"+t+"?"+f,{method:"DELETE",headers:hdr()});
-const signIn = async (email,pass) => {
-  const r = await fetch(SUPA_URL+"/auth/v1/token?grant_type=password",{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY},body:JSON.stringify({email,password:pass})});
-  const d = await r.json();
-  if(!r.ok) throw new Error(d.error_description||d.msg||"Error");
-  return d;
-};
-const uploadImg = async (file,path) => {
-  const res = await fetch(SUPA_URL+"/storage/v1/object/imagenes/"+path,{method:"POST",headers:{"apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Content-Type":file.type||"image/jpeg"},body:file});
-  if(!res.ok) throw new Error("Storage error");
-  return SUPA_URL+"/storage/v1/object/public/imagenes/"+path;
 };
 
 const ROLES = ["Administrador","Administrador Edificio","Conserjeria","Residente","Comite","Proveedor"];
@@ -82,48 +114,6 @@ const DEF_CATS = {
   Aseo:["Pasillo sucio","Retiro basura","Area comun","Otro"],
   Jardines:["Poda","Riego","Dano en plantas","Sistema riego","Otro"],
   Otros:["Ruidos molestos","Mascotas","Dano propiedad comun","Otro"]
-};
-// Prioridad automática según categoría — el residente no selecciona prioridad manualmente.
-// Tabla acordada con administración.
-const CAT_PRIORITY = {
-  Gas:"Emergencia",
-  Electricidad:"Alta",
-  Ascensores:"Alta",
-  Agua:"Alta",
-  Filtraciones:"Media",
-  Seguridad:"Alta",
-  Motor:"Alta",
-  Citofonia:"Media",
-  "Espacios comunes":"Baja",
-  Jardines:"Baja",
-  Aseo:"Baja",
-  Perimetral:"Media",
-  Otros:"Baja",
-};
-const getCatPriority = cat => CAT_PRIORITY[cat] || "Media";
-
-// Horas SLA por categoría y prioridad (tabla acordada)
-const SLA_HRS = {
-  Gas:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Electricidad:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Ascensores:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Agua:{Emergencia:4,Alta:8,Media:24,Baja:72},
-  Filtraciones:{Emergencia:4,Alta:8,Media:24,Baja:72},
-  Seguridad:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Motor:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  Citofonia:{Emergencia:2,Alta:4,Media:24,Baja:48},
-  "Espacios comunes":{Emergencia:8,Alta:24,Media:72,Baja:168},
-  Jardines:{Emergencia:8,Alta:24,Media:72,Baja:168},
-  Aseo:{Emergencia:8,Alta:24,Media:72,Baja:168},
-  Perimetral:{Emergencia:4,Alta:24,Media:48,Baja:168},
-  Otros:{Emergencia:8,Alta:24,Media:72,Baja:168},
-};
-const SLA_DEFAULT = {Emergencia:8,Alta:24,Media:72,Baja:168};
-const calcSlaDueDate = (category, priority, from) => {
-  const tbl = SLA_HRS[category] || SLA_DEFAULT;
-  const hrs = tbl[priority] ?? SLA_DEFAULT[priority] ?? 72;
-  const base = from ? new Date(from) : new Date();
-  return new Date(base.getTime() + hrs * 3600000).toISOString();
 };
 const CL_SECTIONS = [
   {id:"s1",label:"Cierres perimetrales",items:["Reja perimetral","Porton peatonal","Porton vehicular","Cerraduras","Bisagras","Automatizacion","Citofonia","Senaletica"]},
@@ -242,7 +232,7 @@ function Tabs({tabs,active,onChange,accent}){
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando...</div><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
-function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,onSwitchApp,er,mob}){
+function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,er,mob}){
   const navTo = id => { setView(id); setNavOpen(false); };
   const isAct = id => view===id||(view==="detail"&&id==="requests");
   return (
@@ -276,104 +266,7 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
           </div>
         )}
         {viewAs&&<button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir de vista</button>}
-        <button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>window.open("https://com12norte.github.io/administracion-edificio/","_blank")}>📄 Comprobante</button>
-        <button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={onSwitchApp}>🔄 Cambiar de sistema</button>
         <button style={{...BD(true),width:"100%",justifyContent:"center"}} onClick={handleLogout}>Cerrar sesion</button>
-      </div>
-    </div>
-  );
-}
-
-// ── Registro de Residente ──────────────────────────────────────────────────
-function RegistroResidente({onBack,onDone}){
-  const [f,setF]=useState({nombre:"",email:"",telefono:"",torre:"",unidad:"",tipo:"Propietario"});
-  const [errs,setErrs]=useState({});
-  const [saving,setSaving]=useState(false);
-  const [done,setDone]=useState(false);
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  const validate=()=>{
-    const e={};
-    if(!f.nombre.trim()) e.nombre="Requerido";
-    if(!f.email||!/\S+@\S+\.\S+/.test(f.email)) e.email="Email inválido";
-    if(!f.telefono.trim()) e.telefono="Requerido";
-    if(!f.torre.trim()) e.torre="Requerido";
-    if(!f.unidad.trim()) e.unidad="Requerido";
-    setErrs(e);
-    return !Object.keys(e).length;
-  };
-  const submit=async()=>{
-    if(!validate()) return;
-    setSaving(true);
-    try{
-      // Guardar solicitud de registro en Supabase para que el admin la active
-      await fetch(SUPA_URL+"/rest/v1/usuarios",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Prefer":"return=minimal"},
-        body:JSON.stringify({
-          id:"reg_"+Date.now(),
-          data:{
-            nombre:f.nombre,email:f.email,telefono:f.telefono,
-            torre:f.torre,unidad:f.unidad,tipo:f.tipo,
-            rol:"Residente",active:false,
-            solicitudRegistro:true,fecha:new Date().toISOString()
-          }
-        })
-      });
-      // Notificar a admins por email
-      await fetch(SITE_URL+"/api/send-email",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          to:"com12norte@gmail.com",
-          subject:"[CondoAdmin] Solicitud de registro — "+f.nombre+" ("+f.torre+"/"+f.unidad+")",
-          body:"Nuevo residente solicita cuenta:\n\nNombre: "+f.nombre+"\nCorreo: "+f.email+"\nTeléfono: "+f.telefono+"\nTorre: "+f.torre+"\nUnidad: "+f.unidad+"\nTipo: "+f.tipo+"\n\nIngrese al sistema para activar la cuenta."
-        })
-      });
-      setDone(true);
-    }catch(ex){console.warn(ex);}
-    setSaving(false);
-  };
-  if(done) return(
-    <div style={{textAlign:"center",padding:"20px 0"}}>
-      <div style={{fontSize:40,marginBottom:12}}>✅</div>
-      <div style={{fontWeight:700,fontSize:16,color:"#fff",marginBottom:8}}>Solicitud enviada</div>
-      <div style={{color:"#bfdbfe",fontSize:13,marginBottom:20}}>La administración activará tu cuenta y te avisará por correo a {f.email}.</div>
-      <button onClick={onBack} style={{background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:"pointer",fontSize:14}}>Volver al inicio</button>
-    </div>
-  );
-  const field=(k,label,type="text",ph="")=>(
-    <div style={{marginBottom:10}}>
-      <label style={{...lbl,color:"#bfdbfe"}}>{label}</label>
-      <input type={type} style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid "+(errs[k]?"#fca5a5":"rgba(255,255,255,.3)"),color:"#fff"}} value={f[k]} onChange={ev=>set(k,ev.target.value)} placeholder={ph}/>
-      {errs[k]&&<div style={{color:"#fca5a5",fontSize:10,marginTop:2}}>{errs[k]}</div>}
-    </div>
-  );
-  return(
-    <div>
-      {field("nombre","Nombre completo *","text","Juan Pérez")}
-      {field("email","Correo electrónico *","email","tu@correo.cl")}
-      {field("telefono","Teléfono *","tel","+56 9 1234 5678")}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div>
-          <label style={{...lbl,color:"#bfdbfe"}}>Torre *</label>
-          <input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid "+(errs.torre?"#fca5a5":"rgba(255,255,255,.3)"),color:"#fff"}} value={f.torre} onChange={ev=>set("torre",ev.target.value)} placeholder="A, B, C..."/>
-          {errs.torre&&<div style={{color:"#fca5a5",fontSize:10}}>{errs.torre}</div>}
-        </div>
-        <div>
-          <label style={{...lbl,color:"#bfdbfe"}}>Unidad / Piso *</label>
-          <input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid "+(errs.unidad?"#fca5a5":"rgba(255,255,255,.3)"),color:"#fff"}} value={f.unidad} onChange={ev=>set("unidad",ev.target.value)} placeholder="401, Piso 4..."/>
-          {errs.unidad&&<div style={{color:"#fca5a5",fontSize:10}}>{errs.unidad}</div>}
-        </div>
-      </div>
-      <div style={{marginBottom:16,marginTop:10}}>
-        <label style={{...lbl,color:"#bfdbfe"}}>Tipo de residente</label>
-        <select style={{...sel,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} value={f.tipo} onChange={ev=>set("tipo",ev.target.value)}>
-          {["Propietario","Arrendatario","Ocupante"].map(t=><option key={t}>{t}</option>)}
-        </select>
-      </div>
-      <button onClick={submit} disabled={saving} style={{width:"100%",padding:"13px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer"}}>{saving?"Enviando...":"Solicitar registro"}</button>
-      <div style={{textAlign:"center",marginTop:10}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:"#bfdbfe",fontSize:12,cursor:"pointer"}}>Cancelar</button>
       </div>
     </div>
   );
@@ -392,7 +285,8 @@ function LoginScreen({onLogin}){
     setLoad(true);setErr("");
     try{
       const auth=await signIn(email,pass);
-      const res=await fetch(SUPA_URL+"/rest/v1/usuarios?email=eq."+encodeURIComponent(email)+"&active=eq.true",{headers:hdr(auth.access_token)});
+      const snap=await (async()=>{const {getDocs,collection,query,where}=await import("firebase/firestore");const q=query(collection(fbDb,"usuarios"),where("email","==",email),where("active","==",true));return getDocs(q);})();
+      const res={json:()=>snap.docs.map(d=>d.data())};
       const users=await res.json();
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
       onLogin({...users[0],token:auth.access_token});
@@ -402,25 +296,6 @@ function LoginScreen({onLogin}){
       } else {
         setErr(ex.message||"Credenciales incorrectas");
       }
-    }
-    setLoad(false);
-  };
-
-  const doResCon=async()=>{
-    const passEl=document.getElementById("res-pass");
-    const pass=passEl?.value||"";
-    if(!resEmail||!/\S+@\S+\.\S+/.test(resEmail)){setResErr("Ingrese un correo válido");return;}
-    if(!pass){setResErr("Ingrese su contraseña");return;}
-    if(load) return;
-    setLoad(true);setResErr("");
-    try{
-      const auth=await signIn(resEmail,pass);
-      const res=await fetch(SUPA_URL+"/rest/v1/usuarios?email=eq."+encodeURIComponent(resEmail)+"&active=eq.true&rol=eq.Residente",{headers:hdr(auth.access_token)});
-      const users=await res.json();
-      if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
-      onLogin({...users[0],token:auth.access_token});
-    }catch(ex){
-      setResErr(ex.message||"Credenciales incorrectas");
     }
     setLoad(false);
   };
@@ -455,37 +330,13 @@ function LoginScreen({onLogin}){
   );
 
   if(mode==="residente") return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
-      <div style={{width:"100%",maxWidth:420}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:380}}>
         <button onClick={()=>{setMode(null);setResErr("");setResEmail("");}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
-        <div style={{textAlign:"center",marginBottom:28}}><div style={{fontSize:44,marginBottom:10}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div><div style={{color:"#bfdbfe",fontSize:13,marginTop:4}}>¿Tienes una cuenta registrada?</div></div>
-        {/* Opción 1: con cuenta */}
-        <div style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:14,padding:"20px 20px 16px",marginBottom:12}}>
-          <div style={{fontWeight:600,fontSize:14,color:"#fff",marginBottom:12}}>✅ Tengo cuenta — iniciar sesión</div>
-          {resErr&&mode==="residente"&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:12}}>{resErr}</div>}
-          <div style={{marginBottom:10}}><label style={{...lbl,color:"#bfdbfe"}}>Correo</label><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>{if(ev.key==="Enter")doResCon();}}/></div>
-          <div style={{marginBottom:12}}><label style={{...lbl,color:"#bfdbfe"}}>Contraseña</label><input id="res-pass" style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="password" placeholder="••••••••" onKeyDown={ev=>{if(ev.key==="Enter")doResCon();}}/></div>
-          <button onClick={doResCon} disabled={load} style={{width:"100%",padding:"12px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer"}}>{load?"Ingresando...":"Ingresar con mi cuenta"}</button>
-        </div>
-        {/* Opción 2: sin cuenta */}
-        <div style={{background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.18)",borderRadius:14,padding:"20px 20px 16px"}}>
-          <div style={{fontWeight:600,fontSize:14,color:"#fff",marginBottom:4}}>📝 No tengo cuenta — continuar sin registro</div>
-          <div style={{fontSize:11,color:"#bfdbfe",marginBottom:12}}>Deberás completar tus datos personales en el formulario de la solicitud.</div>
-          <button onClick={()=>onLogin({id:"guest",nombre:"",email:"",rol:"Residente",token:null,openNewReq:true})} style={{width:"100%",padding:"12px",background:"rgba(255,255,255,.2)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer"}}>Continuar sin cuenta →</button>
-          <div style={{textAlign:"center",marginTop:12}}>
-            <button onClick={()=>setMode("registro")} style={{background:"none",border:"none",color:"#bfdbfe",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>¿Quieres registrarte? Crear cuenta gratis</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  if(mode==="registro") return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
-      <div style={{width:"100%",maxWidth:420}}>
-        <button onClick={()=>setMode("residente")} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
-        <div style={{textAlign:"center",marginBottom:24}}><div style={{fontSize:40,marginBottom:8}}>📝</div><div style={{fontWeight:700,fontSize:20,color:"#fff"}}>Crear cuenta de Residente</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:4}}>La administración activará tu cuenta</div></div>
-        <RegistroResidente onBack={()=>setMode("residente")} onDone={()=>{setMode("residente");setResErr("✓ Solicitud enviada. La administración activará tu cuenta pronto.");}}/>
+        <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div></div>
+        {resErr&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{resErr}</div>}
+        <div style={{marginBottom:20}}><label style={{...lbl,color:"#bfdbfe"}}>Correo electrónico</label><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>ev.key==="Enter"&&doResidente()}/></div>
+        <button onClick={doResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
       </div>
     </div>
   );
@@ -501,7 +352,7 @@ function LoginScreen({onLogin}){
         <div style={{textAlign:"right",marginBottom:20}}>
           <button onClick={async()=>{
             if(!email||!email.includes("@")){setErr("Ingrese su correo primero");return;}
-            try{const res=await fetch(SUPA_URL+"/auth/v1/recover",{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY},body:JSON.stringify({email})});if(res.ok)setErr("✓ Mail enviado a "+email);else setErr("Error al enviar.");}catch(_){setErr("Error al enviar.");}
+            try{await sendPasswordResetEmail(fbAuth,email);setErr("✓ Mail enviado a "+email);}catch(_){setErr("Error al enviar.");}
           }} style={{background:"none",border:"none",color:"#6366f1",fontSize:12,cursor:"pointer",textDecoration:"underline"}}>¿Olvidaste tu contraseña?</button>
         </div>
         <button style={{width:"100%",padding:"13px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:"pointer"}} onClick={doLogin} disabled={load}>{load?"Ingresando...":"Ingresar"}</button>
@@ -511,46 +362,10 @@ function LoginScreen({onLogin}){
 }
 
 // ── App ────────────────────────────────────────────────────────────────────
-function AppSelector({onSelect}){
-  return(
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,background:"#f8fafc",padding:20,fontFamily:"system-ui,sans-serif"}}>
-      <div style={{fontSize:13,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",color:"#64748b",marginBottom:4}}>Condominio 12 Norte</div>
-      <div style={{fontSize:22,fontWeight:700,color:"#1e293b",marginBottom:8}}>¿Qué necesitas gestionar?</div>
-      <div style={{display:"flex",gap:16,flexWrap:"wrap",justifyContent:"center"}}>
-        <button onClick={()=>onSelect("incidentes")} style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #3b82f6",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
-          <span style={{fontSize:36}}>🛠️</span>
-          <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Incidentes</span>
-          <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Solicitudes, mantención, órdenes de trabajo</span>
-          <span style={{fontSize:12,fontWeight:600,color:"#fff",background:"#3b82f6",borderRadius:100,padding:"4px 14px"}}>→ Continúa aquí</span>
-        </button>
-        <button onClick={()=>onSelect("parking")} style={{width:220,padding:"28px 20px",borderRadius:16,border:"2px solid #10b981",background:"#fff",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
-          <span style={{fontSize:36}}>🅿️</span>
-          <span style={{fontWeight:700,fontSize:16,color:"#1e293b"}}>Estacionamiento</span>
-          <span style={{fontSize:12,color:"#64748b",textAlign:"center"}}>Gestión de estacionamientos</span>
-          <span style={{fontSize:12,fontWeight:600,color:"#fff",background:"#10b981",borderRadius:100,padding:"4px 14px"}}>→ Continúa aquí</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Root(){
-  const [appChoice,setAppChoice]=useState(null);
-  const handleSelect=choice=>{
-    if(choice==="parking"){
-      window.location.href="https://parkadmin-ashy.vercel.app/";
-      return;
-    }
-    setAppChoice(choice);
-  };
-  if(!appChoice) return <AppSelector onSelect={handleSelect}/>;
-  return <App onSwitchApp={()=>setAppChoice(null)}/>;
-}
-
-function App({onSwitchApp}){
+export default function App(){
   const mob=useMob();
   const [session,setSession]=useState(null);
-  const [loading,setLoading]=useState(false);
+  const [loading,setLoading]=useState(true);
   const [viewAs,setViewAs]=useState(null);
   const [view,setView]=useState("dashboard");
   const [reqs,setReqs]=useState([]);
@@ -587,14 +402,14 @@ function App({onSwitchApp}){
     (async()=>{
       try{
         const [rR,rT,rI,rM,rIn,rE,rCfg,rU]=await Promise.all([
-          dbGet("solicitudes","?order=created_at.desc"),
-          dbGet("tareas","?order=id.asc"),
-          dbGet("inventario","?order=id.asc"),
-          dbGet("mantenciones","?order=id.asc"),
-          dbGet("inspecciones","?order=id.asc"),
-          dbGet("correos","?order=id.asc"),
-          dbGet("config","?select=*"),
-          fetch(SUPA_URL+"/rest/v1/usuarios?active=eq.true&select=*",{headers:hdr()}).then(r=>r.json()),
+          dbGet("solicitudes"),
+          dbGet("tareas"),
+          dbGet("inventario"),
+          dbGet("mantenciones"),
+          dbGet("inspecciones"),
+          dbGet("correos"),
+          dbGet("config"),
+          dbGet("usuarios"),
         ]);
         if(Array.isArray(rR)) setReqs(rR.map(r=>normReq(r.data)).filter(Boolean));
         if(Array.isArray(rT)) setTasks(rT.map(r=>normTask(r.data)).filter(Boolean));
@@ -614,9 +429,36 @@ function App({onSwitchApp}){
     })();
   },[session]);
 
-  // CORREOS: solo 2 tipos
-  // 1. Nueva solicitud → correo inmediato a admins (ya en NewReqModal)
-  // 2. Resumen diario 8am → via api/cron-recordatorios.js (servidor), no desde aquí
+  // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
+  useEffect(()=>{
+    if(!session||!tasks.length) return;
+    const run=async()=>{
+      const hoy=new Date(); hoy.setHours(0,0,0,0);
+      const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
+      // Si ya se ejecutó hoy en esta sesión, no hacer nada
+      if(window._remDate===fechaKey) return;
+      window._remDate=fechaKey;
+      if(!window._remSent) window._remSent={};
+      // Limpiar enviados de días anteriores
+      window._remSent={};
+      const sent=window._remSent;
+      for(const t of tasks){
+        if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;
+        const due=new Date(t.dueDate); due.setHours(0,0,0,0);
+        const diff=Math.ceil((due-hoy)/86400000);
+        if(diff>3||sent[t.id]) continue;
+        sent[t.id]=true;
+        const esV=diff<0;
+        const diasTxt=esV?"venció hace "+Math.abs(diff)+" día(s)":diff===0?"vence HOY":"vence en "+diff+" día(s)";
+        const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
+        const cuerpo="Hola"+(t.responsible?" "+t.responsible:"")+",\n\nLa orden \""+t.title+"\" "+diasTxt+" ("+fmtD(t.dueDate)+") y aún no tiene informe.\n\n— CondoAdmin";
+        try{const _rSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",t.responsible||""),where("active","==",true)));const us=_rSnap.docs.map(d=>d.data());const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
+        if(t.ejecutor&&t.ejecutor!==t.responsible){try{const _eSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",t.ejecutor),where("active","==",true)));const u2s=_eSnap.docs.map(d=>d.data());const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
+      }
+    };
+    const timer=setTimeout(()=>run().catch(()=>{}),3000);
+    return()=>clearTimeout(timer);
+  },[tasks,session]);
 
   const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};
@@ -708,7 +550,7 @@ function App({onSwitchApp}){
       <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
         {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onClick={()=>setNavOpen(false)}/>}
         {(!mob||navOpen)&&(
-          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} onSwitchApp={onSwitchApp} er={er} mob={mob}/>
+          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} er={er} mob={mob}/>
         )}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}}>
@@ -737,7 +579,7 @@ function App({onSwitchApp}){
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} setTasks={setTasksDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);setView("requests");}} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);setView("requests");}} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
       {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
     </div>
   );
@@ -1153,49 +995,16 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
   };
-  const [prov,setProv]=useState(r.proveedor||"");
-  const provOptions=[...new Set([...respList.filter(s=>s!=="Sin asignar"),...(r.proveedor?[r.proveedor]:[])])];
-
-  // Auto-avanza el estado según las acciones del administrador
-  const applyAsgnAuto=async(nombre)=>{
-    if(!nombre||nombre==="Sin asignar") return;
-    setAsgn(nombre);
-    const nextStatus=r.status==="Ingresada"||r.status==="En revision"?"Asignada":r.status;
-    upd({assignedTo:nombre,status:nextStatus},{action:"Asignada a "+nombre,from:r.status,to:nextStatus});
+  const applyAsgn=async()=>{
+    if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
+    upd({assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:r.status,to:"Asignada"});
     showToast("Responsable asignado");
-    // Crear OT pre-llenada automáticamente si no existe ninguna para esta solicitud
-    if(myTasks.length===0){
-      const slaDueDate=r.dueDate?new Date(r.dueDate).toISOString().slice(0,10):"";
-      const newTask={
-        id:"t"+uid(),requestId:r.id,
-        title:r.category+(r.subcategory?" / "+r.subcategory:""),
-        desc:r.description||"",
-        responsible:nombre,proveedor:r.proveedor||"",ejecutor:"",
-        dueDate:slaDueDate,priority:r.priority,
-        status:"Ingresada",comments:[],attachments:[],materials:[],
-        informe:"",tiempoUsado:"",
-      };
-      setTasks(p=>[...p,newTask]);
-      try{await dbUpsert("tareas",{id:newTask.id,data:newTask});}catch(ex){console.warn("Error guardando OT:",ex);}
-      showToast("Responsable asignado y OT creada automáticamente");
-    }
     try{
-      const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(nombre)+"&active=eq.true",{headers:hdr()});
+      const _usSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",asgn),where("active","==",true)));
+      const res={json:()=>_usSnap.docs.map(d=>d.data())};
       const users=await res.json(); const u=users&&users[0];
       if(u?.email) addEmail({requestId:r.id,date:new Date().toISOString(),to:u.email,subject:"[CondoAdmin] Solicitud "+r.code+" asignada",type:"Asignacion",status:"Enviado",body:"Hola "+u.nombre+", se te asignó: "+r.code});
     }catch(_){}
-  };
-  const applyProvAuto=(nombre)=>{
-    setProv(nombre);
-    upd({proveedor:nombre||null,status:r.status==="Asignada"?"En proceso":r.status},{action:"Proveedor asignado: "+nombre,from:r.status,to:r.status==="Asignada"?"En proceso":r.status});
-    showToast("Proveedor asignado");
-  };
-  const applyStatusAuto=(newStatus)=>{
-    setNs(newStatus);
-    if(newStatus==="Cerrada"){setShowCl(true);return;}
-    upd({status:newStatus},{action:"Estado cambiado",from:r.status,to:newStatus});
-    addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+newStatus,type:"Cambio de estado",status:"Enviado",body:"Su solicitud cambió a: "+newStatus});
-    showToast("Estado actualizado");
   };
   const addCmt=()=>{
     if(!comment.trim()) return;
@@ -1232,26 +1041,32 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
             {can(role,"changeStatus")&&(
               <div><label style={lbl}>Estado</label>
-              <select style={{...sel,width:140}} value={ns} onChange={ev=>applyStatusAuto(ev.target.value)}>
-                {STATUSES.filter(s=>s!=="Rechazada").map(s=><option key={s}>{s}</option>)}
-              </select>
-              <button style={{...BD(true),marginTop:4,fontSize:11}} onClick={()=>{if(window.confirm("¿Rechazar esta solicitud?"))applyStatusAuto("Rechazada");}}>✕ Rechazar</button>
-              </div>
+              <div style={{display:"flex",gap:6}}>
+                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+                <button style={BP(true)} onClick={applyStatus}>OK</button>
+              </div></div>
             )}
             {can(role,"assign")&&(
               <div><label style={lbl}>Responsable</label>
-              <select style={{...sel,width:150}} value={asgn} onChange={ev=>applyAsgnAuto(ev.target.value)}>
-                {respList.map(s=><option key={s}>{s}</option>)}
-              </select></div>
+              <div style={{display:"flex",gap:6}}>
+                <select style={{...sel,width:150}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
+                <button style={BS(true)} onClick={applyAsgn}>Asignar</button>
+              </div></div>
             )}
             {can(role,"assign")&&(
               <div><label style={lbl}>Proveedor</label>
-              <select style={{...sel,width:150}} value={prov} onChange={ev=>applyProvAuto(ev.target.value)}>
-                <option value="">Sin proveedor</option>
-                {provOptions.map(s=><option key={s}>{s}</option>)}
-              </select></div>
+              <div style={{display:"flex",gap:6}}>
+                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
+                <button style={BS(true)} onClick={()=>{
+                  const val=document.getElementById("prov-input").value.trim();
+                  upd({proveedor:val||null});
+                  showToast("Proveedor actualizado");
+                }}>OK</button>
+              </div></div>
             )}
+            {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
             {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>Cerrar</button>}
+            <button style={BS(true)} onClick={()=>setShowEv("avance")}>Evidencia</button>
           </div>
         </div>
       )}
@@ -1293,6 +1108,21 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       )}
       {tab==="tasks"&&(
         <div>
+          {!isProv&&(()=>{
+            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+            return ["inicial","avance","cierre"].map(type=>{
+              const myAtt=allAtts.filter(a=>a.type===type);
+              return(
+                <div key={type} style={card}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{fontWeight:600,fontSize:13}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                    {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                  </div>
+                  {myAtt.length===0?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>:<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>}
+                </div>
+              );
+            });
+          })()}
           {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
           {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
           {myTasks.length>0&&(
@@ -1301,42 +1131,64 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
             </div>
           )}
-          {/* Imágenes al final de la Orden de Trabajo */}
-          {!isProv&&(()=>{
-            const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
-            return(
-              <div style={{marginTop:12}}>
-                {["inicial","avance","cierre"].map(type=>{
-                  const myAtt=allAtts.filter(a=>a.type===type);
-                  return(
-                    <div key={type} style={{...card,marginBottom:8}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                        <div style={{fontWeight:600,fontSize:12}}>📎 {type==="inicial"?"Fotos iniciales":type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
-                        {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
-                      </div>
-                      {myAtt.length===0
-                        ?<div style={{color:"#94a3b8",fontSize:12}}>Sin imágenes.</div>
-                        :<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
-                      }
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
         </div>
       )}
       {tab==="informe"&&(
-        <div>
-          {myTasks.length===0
-            ? <Empty msg="No hay órdenes de trabajo para reportar."/>
-            : myTasks.map(t=>(
-              <div key={t.id} style={{marginBottom:16}}>
-                <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
-              </div>
-            ))
-          }
-        </div>
+        myTasks.length===0?<Empty msg="No hay órdenes de trabajo para reportar."/>:myTasks.map(t=>{
+          const allAtts=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)];
+          // Mostrar solo la orden correspondiente si soy ejecutor
+          const miOrden=isEjecutor&&(t.ejecutor===nombre||t.ejecutor===email);
+          if(isEjecutor&&!miOrden) return null;
+          return(
+            <div key={t.id}>
+              {/* Resumen de la orden siempre visible en modo ejecutor */}
+              {isEjecutor&&(
+                <div style={{...card,background:"#eef2ff",border:"2px solid #6366f1",marginBottom:12}}>
+                  <div style={{fontWeight:700,fontSize:14,color:"#4338ca",marginBottom:6}}>📋 Mi Orden de Trabajo</div>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontWeight:600,fontSize:13}}>{t.title}</div>
+                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>👤 Responsable: {t.responsible}</div>
+                      <div style={{fontSize:12,color:"#6366f1"}}>🔧 Ejecutor: {t.ejecutor}</div>
+                      {t.desc&&<div style={{fontSize:12,color:"#374151",marginTop:4}}>{t.desc}</div>}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                      <PBadge p={t.priority}/>
+                      <SBadge s={t.status}/>
+                      {t.dueDate&&<span style={{fontSize:11,color:"#64748b"}}>📅 {fmtD(t.dueDate)}</span>}
+                    </div>
+                  </div>
+                  {/* Info solicitud */}
+                  <div style={{marginTop:10,padding:"8px 10px",background:"#fff",borderRadius:8,border:"1px solid #c7d2fe"}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Solicitud relacionada</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontWeight:700,color:"#6366f1"}}>{r.code}</span>
+                      <span style={{fontSize:12}}>{r.category} — {r.subcategory}</span>
+                      <SBadge s={r.status}/>
+                    </div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{r.description?.slice(0,100)}{r.description?.length>100?"...":""}</div>
+                  </div>
+                </div>
+              )}
+              {["avance","cierre"].map(type=>{
+                const myAtt=allAtts.filter(a=>a.type===type);
+                return(
+                  <div key={type} style={card}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <div style={{fontWeight:600,fontSize:13}}>📎 {type==="avance"?"Fotos de avance":"Fotos de cierre"}</div>
+                      {r.status!=="Cerrada"&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+                    </div>
+                    {myAtt.length===0
+                      ?<div style={{color:"#94a3b8",fontSize:13}}>Sin imágenes.</div>
+                      :<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{myAtt.map((a,i)=><img key={a.id||i} src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/>)}</div>
+                    }
+                  </div>
+                );
+              })}
+              <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+            </div>
+          );
+        })
       )}
       {!isProv&&tab==="emails"&&(
         <div style={card}>
@@ -1369,7 +1221,8 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
     if(inline) setF(initF()); else onClose();
     if(f.ejecutor){
       try{
-        const res=await fetch(SUPA_URL+"/rest/v1/usuarios?nombre=eq."+encodeURIComponent(f.ejecutor)+"&active=eq.true",{headers:hdr()});
+        const _exSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",f.ejecutor),where("active","==",true)));
+        const res={json:()=>_exSnap.docs.map(d=>d.data())};
         const users=await res.json(); const u=users&&users[0];
         if(u?.email) await sendMail(u.email,"[CondoAdmin] Nueva orden asignada","Hola "+u.nombre+", orden: "+f.title+(req?"\nSolicitud: "+req.code:""));
       }catch(_){}
@@ -1451,12 +1304,10 @@ function InformeInline({task,setTasks,showToast}){
     recRef.current=rec; rec.start(); setEsc(true);
   };
   const detenerVoz=()=>{if(recRef.current)recRef.current.stop();setEsc(false);};
-  const guardar=async()=>{
+  const guardar=()=>{
     if(!f.texto.trim()){showToast("Ingrese la descripción","error");return;}
     if(!f.vistoBueno){showToast("Debe confirmar el trabajo realizado","error");return;}
-    const updated={...task,...f,informe:f.texto};
-    setTasks(p=>p.map(t=>t.id===task.id?updated:t));
-    try{await dbUpsert("tareas",{id:task.id,data:updated});}catch(ex){console.warn("Error guardando informe:",ex);}
+    setTasks(p=>p.map(t=>t.id===task.id?{...t,...f,informe:f.texto}:t));
     showToast("Informe guardado");
   };
   return(
@@ -1606,7 +1457,7 @@ function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
 }
 
 // ── NewReqModal ────────────────────────────────────────────────────────────
-function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
+function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
   const actCats=cats.filter(c=>c.active);
   const actTowers=towers.filter(t=>t.active);
   const initCat=actCats[0]||{name:"",subs:[""]};
@@ -1616,21 +1467,7 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
   const adminCatList=Object.keys(ADMIN_CATS);
   const [adminCat,setAdminCat]=useState(adminCatList[0]);
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
-  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:getCatPriority(initCat.name),accessPermission:false,confirm:false,affectedTowers:[]});
-
-  // Recalcular prioridad automáticamente cuando cambia la categoría
-  const setCategory=(cat,sub)=>{
-    setF(p=>({...p,category:cat,subcategory:sub||"",priority:getCatPriority(cat)}));
-  };
-
-  // Cuando llegan las torres reales desde Supabase (reemplazando las hardcodeadas),
-  // actualizar la torre seleccionada si el valor actual ya no existe en la lista real.
-  useEffect(()=>{
-    const names=towers.filter(t=>t.active).map(t=>t.name);
-    if(names.length>0&&!names.includes(f.tower)){
-      setF(p=>({...p,tower:names[0]}));
-    }
-  },[towers]);
+  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
 
   const isAreaComun=f.tower==="Comun";
   const [errs,setErrs]=useState({});
@@ -1644,14 +1481,11 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
   const validate=()=>{
     const err={};
     if(tipo==="Incidencia"){
-      if(!f.requesterName.trim()) err.requesterName="Nombre obligatorio";
+      if(!f.requesterName) err.requesterName="Requerido";
       if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail)) err.requesterEmail="Email inválido";
-      if(!f.requesterPhone.trim()) err.requesterPhone="Teléfono obligatorio";
-      if(!f.unit.trim()) err.unit="Unidad obligatoria";
-      if(!f.category) err.category="Categoría obligatoria";
-      if(!f.subcategory) err.subcategory="Subcategoría obligatoria";
+      if(!f.unit) err.unit="Requerido";
     }
-    if(!f.description||f.description.trim().length<10) err.description="Min. 10 caracteres";
+    if(!f.description||f.description.length<10) err.description="Min. 10 caracteres";
     if(!f.confirm) err.confirm="Debe confirmar";
     setErrs(err);
     return !Object.keys(err).length;
@@ -1673,37 +1507,24 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
       try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
       return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:f.requesterName,preview:url,comment:""};
     }));
-    const finalCategory=tipo==="Administrativo"?adminCat:f.category;
-    const slaDueDate=calcSlaDueDate(finalCategory,f.priority,now);
     const nr=normReq({id:code,code,createdAt:now,...f,
-      category:finalCategory,
+      category:tipo==="Administrativo"?adminCat:f.category,
       subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
       affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
       status:"Ingresada",assignedTo:"Sin asignar",
       history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
-      attachmentsInitial,dueDate:slaDueDate,isUrgent:f.priority==="Emergencia"});
+      attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
     setReqs(p=>[nr,...p]);
-    // NO crear OT automáticamente aquí — se crea cuando el admin asigna responsable
     // Mail al solicitante
     if(f.requesterEmail&&f.requesterEmail.includes("@")){
       console.log("Enviando mail a solicitante:", f.requesterEmail);
       addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
     }
-    // Mail a administradores — siempre al crear cualquier solicitud
+    // Mail a administradores
     try{
       const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
-      const esUrgente=["Emergencia","Alta"].includes(f.priority);
-      const asunto=esUrgente
-        ?(f.priority==="Emergencia"?"🚨 [CondoAdmin] EMERGENCIA — "+code+" de "+f.requesterName:"⚡ [CondoAdmin] ALTA prioridad — "+code+" de "+f.requesterName)
-        :"[CondoAdmin] Nueva solicitud "+code+" de "+f.requesterName;
-      const cuerpo=(esUrgente?"⚠ SOLICITUD DE "+(f.priority==="Emergencia"?"EMERGENCIA":"ALTA PRIORIDAD")+"\n\n":"Nueva solicitud recibida:\n\n")
-        +"Código: "+code+"\nSolicitante: "+f.requesterName+"\nTorre/Unidad: "+f.tower+" / "+f.unit
-        +"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)
-        +"\nSubcategoría: "+(tipo==="Administrativo"?adminSub:f.subcategory)
-        +"\nPrioridad: "+f.priority
-        +"\nDescripción: "+f.description
-        +"\n\n"+(esUrgente?"Requiere atención INMEDIATA.":"Ingrese al sistema para gestionar.");
-      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:asunto,type:"Aviso",status:"Enviado",body:cuerpo}));
+      console.log("Admins a notificar:", admins.map(u=>u.email));
+      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+f.requesterName+"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)+"\nPrioridad: "+f.priority+"\n\nIngrese al sistema para gestionar."}));
     }catch(ex){console.warn("Error notificando admins",ex);}
     setDone(nr); showToast("Solicitud "+code+" creada"); setSaving(false);
   };
@@ -1740,7 +1561,7 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {tipo==="Incidencia"&&(
             <>
-              {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono *","text"]].map(([k,lb,tp])=>(
+              {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,lb,tp])=>(
                 <div key={k} style={fg}><label style={lbl}>{lb}</label><input type={tp} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={ev=>setFld(k,ev.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
               ))}
               <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>{setFld("tower",ev.target.value);setFld("affectedTowers",[]);}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
@@ -1773,8 +1594,8 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
                 </div>
               )}
               <div style={fg}><label style={lbl}>Unidad / Piso *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401, Piso 4, Bodega 2"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
-              <div style={fg}><label style={lbl}>Categoría *</label><select style={{...sel,borderColor:errs.category?"#ef4444":""}} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setCategory(ev.target.value,c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select>{errs.category&&<div style={{color:"#ef4444",fontSize:10}}>{errs.category}</div>}</div>
-              <div style={fg}><label style={lbl}>Subcategoría *</label><select style={{...sel,borderColor:errs.subcategory?"#ef4444":""}} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select>{errs.subcategory&&<div style={{color:"#ef4444",fontSize:10}}>{errs.subcategory}</div>}</div>
+              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
             </>
           )}
           {isAdmin&&tipo==="Administrativo"&&(
@@ -1788,10 +1609,7 @@ function NewReqModal({role,reqs,setReqs,setTasks,addEmail,showToast,onClose,onOp
             <textarea style={{...inp,height:tipo==="Administrativo"?120:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={ev=>setFld("description",ev.target.value)} placeholder={tipo==="Administrativo"?"Detalle administrativo...":"Describa el problema..."}/>
             {errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}
           </div>
-          {isAdmin
-            ? <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={ev=>setFld("priority",ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
-            : <div style={fg}><label style={lbl}>Prioridad (asignada automáticamente)</label><div style={{...sel,display:"flex",alignItems:"center",gap:8,background:"#f8fafc",color:PC[f.priority],fontWeight:700,pointerEvents:"none"}}><PBadge p={f.priority}/><span style={{fontSize:11,color:"#64748b",fontWeight:400}}>según la categoría seleccionada</span></div></div>
-          }
+          <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={ev=>setFld("priority",ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
           {tipo==="Incidencia"&&(
             <>
               <div style={{...fg,gridColumn:"1/-1"}}>
@@ -2659,17 +2477,17 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
   const [usuariosLocal,setUsuariosLocal]=useState([]); const [showUF,setShowUF]=useState(false); const [editUser,setEditUser]=useState(null);
   useEffect(()=>{if(tab==="usuarios")loadUsuarios();},[tab]);
   const loadUsuarios=async()=>{
-    try{const res=await fetch(SUPA_URL+"/rest/v1/usuarios?order=created_at.asc&select=*",{headers:hdr(session.token)});const data=await res.json();const list=Array.isArray(data)?data:[];setUsuariosLocal(list);setUsuarios(list);}catch(ex){console.error(ex);}
+    try{const _uAll=await dbGet("usuarios");const list=Array.isArray(_uAll)?_uAll:[];setUsuariosLocal(list);setUsuarios(list);}catch(ex){console.error(ex);}
   };
   const saveUsuario=async u=>{
     try{
-      if(u.isNew){await fetch(SUPA_URL+"/rest/v1/usuarios",{method:"POST",headers:{...hdr(session.token),"Prefer":"return=representation"},body:JSON.stringify({email:u.email,nombre:u.nombre,rol:u.rol,active:true})});showToast("Usuario creado");}
-      else{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"PATCH",headers:hdr(session.token),body:JSON.stringify({nombre:u.nombre,rol:u.rol,active:u.active??true})});showToast("Actualizado");}
+      if(u.isNew){const newId="u"+Date.now();await setDoc(doc(fbDb,"usuarios",newId),{id:newId,email:u.email,nombre:u.nombre,rol:u.rol,active:true});showToast("Usuario creado");}
+      else{await setDoc(doc(fbDb,"usuarios",String(u.id)),{id:u.id,email:u.email,nombre:u.nombre,rol:u.rol,active:u.active??true},{merge:true});showToast("Actualizado");}
       loadUsuarios();setShowUF(false);setEditUser(null);
     }catch(ex){showToast("Error: "+ex.message,"error");}
   };
-  const toggleUser=async u=>{try{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"PATCH",headers:hdr(session.token),body:JSON.stringify({active:!u.active})});loadUsuarios();}catch(_){showToast("Error","error");}};
-  const deleteUser=async u=>{if(!window.confirm("¿Eliminar "+u.nombre+"?"))return;try{await fetch(SUPA_URL+"/rest/v1/usuarios?id=eq."+u.id,{method:"DELETE",headers:hdr(session.token)});loadUsuarios();showToast("Eliminado");}catch(_){showToast("Error","error");}};
+  const toggleUser=async u=>{try{await setDoc(doc(fbDb,"usuarios",String(u.id)),{active:!u.active},{merge:true});loadUsuarios();}catch(_){showToast("Error","error");}};
+  const deleteUser=async u=>{if(!window.confirm("¿Eliminar "+u.nombre+"?"))return;try{await deleteDoc(doc(fbDb,"usuarios",String(u.id)));loadUsuarios();showToast("Eliminado");}catch(_){showToast("Error","error");}};
   const toggleCat=id=>setCats(p=>p.map(c=>c.id===id?{...c,active:!c.active}:c));
   const saveCat=cat=>{if(editCat){setCats(p=>p.map(c=>c.id===cat.id?cat:c));}else{setCats(p=>[...p,{...cat,id:"cat"+uid(),order:p.length}]);}showToast("Guardada");setShowCF(false);setEditCat(null);};
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});
@@ -2780,5 +2598,3 @@ function TowerForm({tower,onSave,onClose}){
     </div></div>
   );
 }
-
-export default Root;

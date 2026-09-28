@@ -411,20 +411,23 @@ export default function App(){
           dbGet("config"),
           dbGet("usuarios"),
         ]);
-        if(Array.isArray(rR)) setReqs(rR.map(r=>normReq(r.data)).filter(Boolean));
-        if(Array.isArray(rT)) setTasks(rT.map(r=>normTask(r.data)).filter(Boolean));
-        if(Array.isArray(rI)) setInv(rI.map(r=>r.data).filter(Boolean));
-        if(Array.isArray(rM)) setMant(rM.map(r=>normMant(r.data)).filter(Boolean));
-        if(Array.isArray(rIn)) setInsp(rIn.map(r=>normInsp(r.data)).filter(Boolean));
-        if(Array.isArray(rE)) setEmails(rE.map(r=>r.data).filter(Boolean));
+        if(Array.isArray(rR)) setReqs(rR.map(r=>normReq(r)).filter(Boolean));
+        if(Array.isArray(rT)) setTasks(rT.map(r=>normTask(r)).filter(Boolean));
+        if(Array.isArray(rI)) setInv(rI.filter(Boolean));
+        if(Array.isArray(rM)) setMant(rM.map(r=>normMant(r)).filter(Boolean));
+        if(Array.isArray(rIn)) setInsp(rIn.map(r=>normInsp(r)).filter(Boolean));
+        if(Array.isArray(rE)) setEmails(rE.filter(Boolean));
         if(Array.isArray(rU)) setUsuarios(rU);
-        if(Array.isArray(rCfg)) rCfg.forEach(c=>{
-          if(!c||!c.data) return;
-          if(c.key==="cats") setCats(c.data);
-          if(c.key==="towers") setTowers(c.data);
-          if(c.key==="equipos") setEquipos(c.data);
-          if(c.key==="certs") setCerts(c.data);
-        });
+        // config guardado como doc "main" con campos directos
+        if(Array.isArray(rCfg)) {
+          const cfg = rCfg.find(c=>c && (c.towers||c.cats||c.resps||c.equipos)) || rCfg[0];
+          if(cfg) {
+            if(cfg.cats) setCats(cfg.cats);
+            if(cfg.towers) setTowers(cfg.towers);
+            if(cfg.equipos) setEquipos(cfg.equipos);
+            if(cfg.certs) setCerts(cfg.certs);
+          }
+        }
       }catch(ex){console.error("load error",ex);}
     })();
   },[session]);

@@ -278,10 +278,11 @@ function LoginScreen({onLogin}){
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [load,setLoad]=useState(false); const [err,setErr]=useState("");
   const [resEmail,setResEmail]=useState(""); const [resErr,setResErr]=useState("");
+  const [loggedUser,setLoggedUser]=useState(null); // usuario autenticado esperando elegir módulo
 
   const doLogin=async()=>{
     if(!email||!pass){setErr("Ingrese correo y contraseña");return;}
-    if(load) return; // evitar doble click
+    if(load) return;
     setLoad(true);setErr("");
     try{
       const auth=await signIn(email,pass);
@@ -289,7 +290,8 @@ function LoginScreen({onLogin}){
       const res={json:()=>snap.docs.map(d=>d.data())};
       const users=await res.json();
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
-      onLogin({...users[0],token:auth.access_token});
+      setLoggedUser({...users[0],token:auth.access_token});
+      setMode("menu_personal"); // mostrar menú de módulos
     }catch(ex){
       if(ex.message?.includes("rate limit")||ex.message?.includes("429")){
         setErr("Demasiados intentos. Espera unos segundos.");
@@ -346,6 +348,35 @@ function LoginScreen({onLogin}){
             <div style={{marginBottom:12}}><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>ev.key==="Enter"&&doResidente()}/></div>
             <button onClick={doResidente} style={{width:"100%",padding:"13px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  if(mode==="menu_personal"&&loggedUser) return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0f172a",fontFamily:"system-ui,sans-serif",padding:16}}>
+      <div style={{width:"100%",maxWidth:420}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:40,marginBottom:8}}>👋</div>
+          <div style={{fontWeight:700,fontSize:20,color:"#fff"}}>Hola, {loggedUser.nombre}</div>
+          <div style={{color:"#94a3b8",fontSize:13,marginTop:4}}>¿A qué módulo deseas acceder?</div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <button onClick={()=>onLogin(loggedUser)} style={{background:"linear-gradient(135deg,#6366f1,#4f46e5)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(99,102,241,.4)"}}>
+            <div style={{fontSize:32}}>🚨</div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Incidencias</div><div style={{color:"#c7d2fe",fontSize:12,marginTop:2}}>Gestión de solicitudes y órdenes</div></div>
+            <div style={{marginLeft:"auto",color:"#c7d2fe",fontSize:18}}>→</div>
+          </button>
+          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(5,150,105,.4)"}}>
+            <div style={{fontSize:32}}>🅿️</div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Gestión de estacionamientos</div></div>
+            <div style={{marginLeft:"auto",color:"#a7f3d0",fontSize:18}}>→</div>
+          </button>
+          <button onClick={()=>window.open("https://com12norte.github.io/administracion-edificio/","_blank")} style={{background:"linear-gradient(135deg,#b45309,#92400e)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(180,83,9,.4)"}}>
+            <div style={{fontSize:32}}>🧾</div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Comprobante y Controles</div><div style={{color:"#fde68a",fontSize:12,marginTop:2}}>Comprobantes de entrega y listado de controles</div></div>
+            <div style={{marginLeft:"auto",color:"#fde68a",fontSize:18}}>→</div>
+          </button>
         </div>
       </div>
     </div>

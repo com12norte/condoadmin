@@ -342,12 +342,11 @@ function LoginScreen({onLogin}){
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Condo Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Reserva y gestión de estacionamientos</div></div>
             <div style={{marginLeft:"auto",color:"#a7f3d0",fontSize:20}}>→</div>
           </button>
-          <div style={{background:"rgba(255,255,255,.12)",borderRadius:14,padding:"20px"}}>
-            <div style={{textAlign:"center",marginBottom:14}}><div style={{fontSize:28,marginBottom:4}}>🚨</div><div style={{color:"#fff",fontWeight:700,fontSize:15}}>Reportar Incidencia</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Ingresa tu correo para continuar</div></div>
-            {resErr&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:12}}>{resErr}</div>}
-            <div style={{marginBottom:12}}><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>ev.key==="Enter"&&doResidente()}/></div>
-            <button onClick={doResidente} style={{width:"100%",padding:"13px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
-          </div>
+          <button onClick={()=>onLogin({id:"guest",nombre:"Residente",email:"",rol:"Residente",token:null,openNewReq:true})} style={{background:"linear-gradient(135deg,#dc2626,#991b1b)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(220,38,38,.4)"}}>
+            <div style={{fontSize:36}}>🚨</div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Reportar Incidencia</div><div style={{color:"#fca5a5",fontSize:12,marginTop:2}}>Ingresa y reporta tu solicitud</div></div>
+            <div style={{marginLeft:"auto",color:"#fca5a5",fontSize:20}}>→</div>
+          </button>
         </div>
       </div>
     </div>

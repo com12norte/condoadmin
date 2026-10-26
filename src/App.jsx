@@ -316,7 +316,7 @@ function LoginScreen({onLogin}){
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <button onClick={()=>setMode("residente")} style={{background:"linear-gradient(135deg,#3b82f6,#1d4ed8)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(59,130,246,.35)"}}>
             <div style={{fontSize:36}}>🏠</div>
-            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Soy Residente</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Crea o consulta tus solicitudes</div></div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Soy Residente</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Parking o incidencias</div></div>
             <div style={{marginLeft:"auto",color:"#bfdbfe",fontSize:20}}>→</div>
           </button>
           <button onClick={()=>setMode("personal")} style={{background:"linear-gradient(135deg,#0f172a,#1e3a5f)",border:"none",borderRadius:14,padding:"22px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(0,0,0,.25)"}}>
@@ -333,10 +333,20 @@ function LoginScreen({onLogin}){
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"linear-gradient(160deg,#1d4ed8,#3b82f6)",fontFamily:"system-ui,sans-serif",padding:16}}>
       <div style={{width:"100%",maxWidth:380}}>
         <button onClick={()=>{setMode(null);setResErr("");setResEmail("");}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
-        <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div></div>
-        {resErr&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:16}}>{resErr}</div>}
-        <div style={{marginBottom:20}}><label style={{...lbl,color:"#bfdbfe"}}>Correo electrónico</label><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>ev.key==="Enter"&&doResidente()}/></div>
-        <button onClick={doResidente} style={{width:"100%",padding:"16px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:12,fontSize:16,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
+        <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div><div style={{color:"#bfdbfe",fontSize:14,marginTop:6}}>¿Qué deseas hacer?</div></div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(5,150,105,.4)"}}>
+            <div style={{fontSize:36}}>🅿️</div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Condo Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Reserva y gestión de estacionamientos</div></div>
+            <div style={{marginLeft:"auto",color:"#a7f3d0",fontSize:20}}>→</div>
+          </button>
+          <div style={{background:"rgba(255,255,255,.12)",borderRadius:14,padding:"20px"}}>
+            <div style={{textAlign:"center",marginBottom:14}}><div style={{fontSize:28,marginBottom:4}}>🚨</div><div style={{color:"#fff",fontWeight:700,fontSize:15}}>Reportar Incidencia</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Ingresa tu correo para continuar</div></div>
+            {resErr&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",color:"#dc2626",padding:"8px 12px",borderRadius:8,fontSize:13,marginBottom:12}}>{resErr}</div>}
+            <div style={{marginBottom:12}}><input style={{...inp,background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff"}} type="email" value={resEmail} onChange={ev=>setResEmail(ev.target.value)} placeholder="tu@correo.cl" onKeyDown={ev=>ev.key==="Enter"&&doResidente()}/></div>
+            <button onClick={doResidente} style={{width:"100%",padding:"13px",background:"#fff",color:"#1d4ed8",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer"}}>Ingresar</button>
+          </div>
+        </div>
       </div>
     </div>
   );

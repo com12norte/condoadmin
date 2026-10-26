@@ -432,6 +432,7 @@ export default function App(){
     setSession(user);
     if(user.token) _tok=user.token;
     if(user.openNewReq) setShowNew(true);
+    if(user.rol==="Residente") setView("mis_reqs");
   };
   const handleLogout=()=>{setSession(null);setViewAs(null);setView("dashboard");_tok=null;};
 
@@ -552,8 +553,9 @@ export default function App(){
 
   const navItems=[
     {id:"dashboard",label:"Dashboard"},
-    {id:"misolicitudes",label:"Mis Solicitudes"},{id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
-    {id:"misolicitudes",label:"Mis Solicitudes"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
+    {id:"mis_reqs",label:"Mis Solicitudes"},
+    {id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
+    {id:"misolicitudes",label:"Mis Órdenes"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
     {id:"mantencion",label:"Mantención"},{id:"emails",label:"Correos"},{id:"reports",label:"Reportes"},{id:"config",label:"Config"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
@@ -563,6 +565,7 @@ export default function App(){
     if(n.id==="inventory"&&!can(er,"inventory")&&!can(er,"inventoryRead")) return false;
     if(n.id==="mantencion"&&!can(er,"mantencion")&&!can(er,"mantRead")) return false;
     if(n.id==="misolicitudes"&&er==="Residente") return false;
+    if(n.id==="mis_reqs"&&er!=="Residente") return false;
     if(n.id==="tasks"&&er==="Proveedor") return false;
     if(n.id==="dashboard"&&er==="Proveedor") return false;
     return true;
@@ -612,6 +615,7 @@ export default function App(){
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
             {view==="misolicitudes"&&<MisSolicitudes tasks={tasks} reqs={reqs} session={session} role={er} onOpen={openReq} mob={mob}/>}
+            {view==="mis_reqs"&&<ResidenteReqs reqs={reqs} tasks={tasks} session={session} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
             {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
             {view==="inspections"&&<Inspections inspections={inspections} setInsp={setInspDB} reqs={reqs} setReqs={setReqsDB} showToast={showToast} role={er} mob={mob} towers={towers}/>}
             {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
@@ -1732,6 +1736,72 @@ function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── ResidenteReqs — vista del residente: sus solicitudes + órdenes vencidas sin informe ──
+function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
+  const email=session?.email||"";
+  const hoy=new Date(); hoy.setHours(0,0,0,0);
+
+  // Solicitudes que levantó este residente (por email o si es guest muestra todas con rol Residente)
+  const misReqs=email
+    ? reqs.filter(r=>r.requesterEmail===email)
+    : reqs.filter(r=>r.requesterEmail==null||r.requesterEmail==="");
+
+  // Órdenes vencidas sin informe asociadas a sus solicitudes
+  const misReqIds=new Set(misReqs.map(r=>r.id));
+  const vencidas=tasks.filter(t=>{
+    if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") return false;
+    if(!misReqIds.has(t.requestId)) return false;
+    return new Date(t.dueDate)<hoy;
+  });
+
+  return(
+    <div>
+      {vencidas.length>0&&(
+        <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
+          <div style={{fontWeight:700,color:"#dc2626",fontSize:14,marginBottom:8}}>⚠ {vencidas.length} orden{vencidas.length>1?"es":""} vencida{vencidas.length>1?"s":""} sin informe</div>
+          {vencidas.map(t=>{
+            const req=reqs.find(r=>r.id===t.requestId);
+            const dias=Math.ceil((hoy-new Date(t.dueDate))/86400000);
+            return(
+              <div key={t.id} style={{background:"#fff",borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:"3px solid #ef4444",fontSize:13}}>
+                <div style={{fontWeight:600}}>{t.title}</div>
+                {req&&<div style={{color:"#3b82f6",fontSize:11}}>{req.code} — {req.category}</div>}
+                <div style={{color:"#dc2626",fontSize:11,marginTop:2}}>Venció hace {dias} día{dias>1?"s":""} · Sin informe de cierre</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{fontWeight:700,fontSize:15}}>Mis solicitudes ({misReqs.length})</div>
+        <button style={BP(true)} onClick={onNew}>+ Nueva</button>
+      </div>
+
+      {misReqs.length===0
+        ? <Empty msg="Aún no tienes solicitudes. Usa el botón + Nueva para reportar una incidencia."/>
+        : misReqs.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(r=>{
+            const tareasReq=tasks.filter(t=>t.requestId===r.id);
+            const venc=tareasReq.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&t.status!=="Cancelada"&&new Date(t.dueDate)<hoy);
+            return(
+              <div key={r.id} onClick={()=>onOpen(r)} style={{...card,marginBottom:8,padding:12,cursor:"pointer",borderLeft:"4px solid "+(SC[r.status]||"#e2e8f0")}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:600,fontSize:13}}>{r.code} — {r.category}</div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.description?.slice(0,80)}{r.description?.length>80?"…":""}</div>
+                    <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>📅 {fmtD(r.createdAt)}</div>
+                    {venc.length>0&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>⚠ {venc.length} orden{venc.length>1?"es":""} vencida{venc.length>1?"s":""}</div>}
+                  </div>
+                  <div style={{flexShrink:0}}><SBadge s={r.status}/></div>
+                </div>
+              </div>
+            );
+          })
+      }
     </div>
   );
 }

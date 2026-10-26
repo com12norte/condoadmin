@@ -567,7 +567,9 @@ export default function App(){
     if(n.id==="misolicitudes"&&er==="Residente") return false;
     if(n.id==="mis_reqs"&&er!=="Residente") return false;
     if(n.id==="tasks"&&er==="Proveedor") return false;
-    if(n.id==="dashboard"&&er==="Proveedor") return false;
+    if(n.id==="dashboard"&&(er==="Proveedor"||er==="Residente")) return false;
+    if(n.id==="requests"&&er==="Residente") return false;
+    if(n.id==="tasks"&&er==="Residente") return false;
     return true;
   });
 
@@ -610,7 +612,8 @@ export default function App(){
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
-            {view==="dashboard"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq}/>}
+            {view==="dashboard"&&er==="Residente"&&<ResidenteReqs reqs={reqs} tasks={tasks} session={session} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
+            {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}

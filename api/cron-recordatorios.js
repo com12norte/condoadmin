@@ -1,46 +1,113 @@
 // api/cron-recordatorios.js
 // ---------------------------------------------------------------------------
-// Envía UN solo correo resumen diario (solicitudes + órdenes de trabajo) a
-// los administradores. Corre en Vercel (servidor), disparado por el workflow
-// de GitHub Actions (.github/workflows/cron-recordatorios.yml).
+// Envía UN solo correo resumen diario por persona con todas sus órdenes
+// pendientes/vencidas sin informe. Corre en Vercel (Node.js), disparado por
+// GitHub Actions (.github/workflows/cron-recordatorios.yml) cada hora.
+// La función decide sola si "ya son las 8am en Chile" y si hoy ya se envió.
 //
-// Se auto-controla con la hora real de Chile (America/Santiago) y una marca
-// guardada en la tabla "config" de Supabase, así que aunque GitHub Actions lo
-// llame varias veces al día, el correo real solo sale UNA vez — y no hay que
-// tocar nada cuando Chile cambia de horario de verano/invierno.
-//
-// VARIABLES DE ENTORNO (ya configuradas en Vercel > Settings > Environment Variables):
-//   SUPA_URL          -> URL de tu proyecto Supabase
-//   SUPA_SERVICE_KEY   -> Secret key de Supabase (Project Settings > API Keys > Secret keys)
-//   CRON_SECRET        -> mismo valor que usa el header Authorization del workflow de GitHub Actions
-//
-// Reutiliza tu endpoint /api/send-email ya desplegado (Nodemailer + Gmail),
-// así no duplicamos la lógica de envío ni las credenciales de Gmail acá.
+// VARIABLES DE ENTORNO en Vercel > Settings > Environment Variables:
+//   FIREBASE_PROJECT_ID     -> ID del proyecto Firebase (ej: condoadmin-xxxxx)
+//   FIREBASE_CLIENT_EMAIL   -> client_email del Service Account JSON
+//   FIREBASE_PRIVATE_KEY    -> private_key del Service Account JSON (con \n reales)
+//   CRON_SECRET             -> token de autorización (mismo que el secret de GitHub)
 // ---------------------------------------------------------------------------
 
-const SUPA_URL = process.env.SUPA_URL || "https://ijefrrtdtjshfquuytic.supabase.co";
-const SUPA_KEY = process.env.SUPA_SERVICE_KEY;
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
 const CRON_SECRET = process.env.CRON_SECRET || "condoadmin2026";
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
+const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
+const PRIVATE_KEY = (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
 
-const PRIORITIES = ["Emergencia", "Alta", "Media", "Baja"];
+// ── JWT para Firestore REST API ─────────────────────────────────────────────
+async function getAccessToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const payload = {
+    iss: CLIENT_EMAIL,
+    sub: CLIENT_EMAIL,
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+    scope: "https://www.googleapis.com/auth/datastore",
+  };
+  const encode = obj => Buffer.from(JSON.stringify(obj)).toString("base64url");
+  const sigInput = encode(header) + "." + encode(payload);
 
-function hdr() {
-  return { "Content-Type": "application/json", "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY };
-}
+  const keyData = PRIVATE_KEY
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s/g, "");
+  const binaryKey = Buffer.from(keyData, "base64");
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8", binaryKey,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5", cryptoKey,
+    new TextEncoder().encode(sigInput)
+  );
+  const jwt = sigInput + "." + Buffer.from(sig).toString("base64url");
 
-async function dbGet(table, query = "select=*") {
-  const res = await fetch(`${SUPA_URL}/rest/v1/${table}?${query}`, { headers: hdr() });
-  if (!res.ok) throw new Error(`Error consultando ${table}: ${res.status} ${await res.text()}`);
-  return res.json();
-}
-
-async function dbUpsertConfig(key, data) {
-  await fetch(`${SUPA_URL}/rest/v1/config`, {
+  const resp = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
-    headers: { ...hdr(), "Prefer": "resolution=merge-duplicates" },
-    body: JSON.stringify({ key, data }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }),
   });
+  const data = await resp.json();
+  if (!data.access_token) throw new Error("No se obtuvo access_token: " + JSON.stringify(data));
+  return data.access_token;
+}
+
+// ── Firestore REST helpers ──────────────────────────────────────────────────
+async function fsGet(token, coleccion) {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${coleccion}?pageSize=500`;
+  const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!res.ok) throw new Error(`Firestore ${coleccion}: ${res.status} ${await res.text()}`);
+  const json = await res.json();
+  return (json.documents || []).map(fsDoc);
+}
+
+async function fsSet(token, coleccion, docId, fields) {
+  const fsFields = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (typeof v === "string") fsFields[k] = { stringValue: v };
+    else if (typeof v === "boolean") fsFields[k] = { booleanValue: v };
+    else if (typeof v === "number") fsFields[k] = { integerValue: String(v) };
+  }
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${coleccion}/${docId}`;
+  await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ fields: fsFields }),
+  });
+}
+
+function fsVal(v) {
+  if (!v) return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("integerValue" in v) return parseInt(v.integerValue);
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(fsVal);
+  if ("mapValue" in v) return fsDoc({ fields: v.mapValue.fields });
+  return null;
+}
+
+function fsDoc(doc) {
+  const out = {};
+  for (const [k, v] of Object.entries(doc.fields || {})) out[k] = fsVal(v);
+  if (doc.name) out._id = doc.name.split("/").pop();
+  return out;
+}
+
+// ── Utilidades ──────────────────────────────────────────────────────────────
+function fmtD(d) {
+  try { return new Date(d).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }); }
+  catch { return ""; }
 }
 
 async function sendMail(to, subject, body) {
@@ -50,66 +117,30 @@ async function sendMail(to, subject, body) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ to, subject, body }),
     });
-    const text = await res.text().catch(()=> "");
-    if (!res.ok) return { to, ok: false, status: res.status, error: text.slice(0,300) };
-    return { to, ok: true, status: res.status };
+    const text = await res.text().catch(() => "");
+    return { to, ok: res.ok, status: res.status, error: res.ok ? undefined : text.slice(0, 200) };
   } catch (err) {
     return { to, ok: false, error: String(err) };
   }
 }
 
-function fmt(d) {
-  try { return new Date(d).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Santiago" }); }
-  catch { return ""; }
-}
-function fmtD(d) {
-  try { return new Date(d).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }); }
-  catch { return ""; }
-}
-
-// Misma definición de SLA que usa la app (App.jsx) — si cambias la tabla allá, cámbiala también aquí.
-function slaStatus(r) {
-  if (!r.dueDate) return null;
-  const due = new Date(r.dueDate);
-  if (["Resuelta", "Cerrada"].includes(r.status)) {
-    const h = (r.history || []).find(x => x.to === "Resuelta" || x.to === "Cerrada");
-    const ref = h ? new Date(h.date) : new Date();
-    return ref <= due ? "Cumplido" : "Fuera de plazo";
-  }
-  if (r.status === "Rechazada") return null;
-  const now = new Date();
-  if (now > due) return "Vencido";
-  if ((due.getTime() - now.getTime()) <= 24 * 3600000) return "Por vencer";
-  return "En plazo";
-}
-
+// ── Handler principal ───────────────────────────────────────────────────────
 export default async function handler(req, res) {
-  // Autenticación: mismo Bearer token que ya usa el workflow de GitHub Actions
   const auth = req.headers.authorization || "";
   if (auth !== `Bearer ${CRON_SECRET}`) {
-    // Diagnóstico seguro: no expone los valores reales, solo si existen y sus largos,
-    // para detectar espacios/saltos de línea de más o una variable no definida.
-    return res.status(401).json({
-      error: "No autorizado",
-      diagnostico: {
-        envVarDefinida: !!process.env.CRON_SECRET,
-        largoEsperado: CRON_SECRET.length,
-        largoRecibido: auth.replace(/^Bearer /, "").length,
-        empiezaConBearer: auth.startsWith("Bearer "),
-        usandoValorPorDefecto: !process.env.CRON_SECRET,
-      },
-    });
+    return res.status(401).json({ error: "No autorizado" });
   }
-  if (!SUPA_KEY) {
-    return res.status(500).json({ error: "Falta la variable de entorno SUPA_SERVICE_KEY en Vercel" });
+  if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
+    return res.status(500).json({ error: "Faltan variables: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY" });
   }
 
   try {
-    // Auto-detección de hora de Chile (sin depender de ajustar el cron a mano
-    // dos veces al año). El workflow puede llamarse cada hora; esta función
-    // decide sola si "ya son las 8am en Chile" y si hoy ya se envió.
+    // Verificar hora de Chile — solo ejecutar a las 8am
     const now = new Date();
-    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", hour: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Santiago", hour: "2-digit", hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(now);
     const get = t => parts.find(p => p.type === t)?.value;
     const chileHour = parseInt(get("hour"), 10);
     const chileDateKey = `${get("year")}-${get("month")}-${get("day")}`;
@@ -118,74 +149,82 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, skipped: "no son las 8am en Chile", chileHour });
     }
 
-    const configRows = await dbGet("config", "key=eq.daily_summary_last_sent&select=*");
-    const last = configRows?.[0]?.data?.date;
-    if (last === chileDateKey) {
+    const token = await getAccessToken();
+
+    // Verificar si ya se envió hoy
+    const configDocs = await fsGet(token, "config");
+    const lastSent = configDocs.find(d => d._id === "daily_reminder_last_sent");
+    if (lastSent?.date === chileDateKey) {
       return res.status(200).json({ ok: true, skipped: "ya se envió hoy", chileDateKey });
     }
 
-    const [reqs, tasks, usuarios] = await Promise.all([
-      dbGet("solicitudes"),
-      dbGet("tareas"),
-      dbGet("usuarios"),
+    // Cargar datos
+    const [tasks, usuarios] = await Promise.all([
+      fsGet(token, "tareas"),
+      fsGet(token, "usuarios"),
     ]);
 
-    // Los datos vienen guardados como {id, data:{...}} — igual que en App.jsx
-    const reqsData = reqs.map(r => r.data).filter(Boolean);
-    const tasksData = tasks.map(t => t.data).filter(Boolean);
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
 
-    const activas = reqsData.filter(r => !["Cerrada", "Rechazada"].includes(r.status));
-    const vencidas = reqsData.filter(r => slaStatus(r) === "Vencido");
-    const porVencer = reqsData.filter(r => slaStatus(r) === "Por vencer");
-    const porPrioridad = PRIORITIES.map(p => `${p}: ${activas.filter(r => r.priority === p).length}`).join(" · ");
-    const ordenesPendientes = tasksData.filter(t => t.status !== "Completada" && t.status !== "Cancelada");
-    const ordenesVencidas = ordenesPendientes.filter(t => t.dueDate && new Date(t.dueDate) < now && !(t.informe || "").trim());
+    // Tareas vencidas o por vencer en 3 días, sin informe
+    const pendientes = tasks.filter(t => {
+      if (!t.dueDate || (t.informe || "").trim() || t.status === "Completada" || t.status === "Cancelada") return false;
+      const due = new Date(t.dueDate); due.setHours(0, 0, 0, 0);
+      return Math.ceil((due - hoy) / 86400000) <= 3;
+    });
 
-    let cuerpo = `Resumen diario CondoAdmin — ${fmtD(now)}\n\n`;
-    cuerpo += "SOLICITUDES\n";
-    cuerpo += `Activas: ${activas.length} (${porPrioridad})\n`;
-    cuerpo += `SLA vencido: ${vencidas.length}\n`;
-    cuerpo += `SLA por vencer (próximas 24h): ${porVencer.length}\n\n`;
-    if (vencidas.length) {
-      cuerpo += "— Vencidas —\n";
-      vencidas.slice(0, 15).forEach(r => { cuerpo += `${r.code} · ${r.category} · ${r.priority} · límite ${fmt(r.dueDate)}\n`; });
-      if (vencidas.length > 15) cuerpo += `... y ${vencidas.length - 15} más\n`;
-      cuerpo += "\n";
+    if (!pendientes.length) {
+      await fsSet(token, "config", "daily_reminder_last_sent", { date: chileDateKey, sentAt: now.toISOString() });
+      return res.status(200).json({ ok: true, mensaje: "Sin órdenes pendientes hoy", chileDateKey });
     }
-    if (porVencer.length) {
-      cuerpo += "— Por vencer —\n";
-      porVencer.slice(0, 15).forEach(r => { cuerpo += `${r.code} · ${r.category} · ${r.priority} · límite ${fmt(r.dueDate)}\n`; });
-      if (porVencer.length > 15) cuerpo += `... y ${porVencer.length - 15} más\n`;
-      cuerpo += "\n";
-    }
-    cuerpo += "ÓRDENES DE TRABAJO\n";
-    cuerpo += `Pendientes: ${ordenesPendientes.length}\n`;
-    cuerpo += `Vencidas sin informe: ${ordenesVencidas.length}\n`;
-    if (ordenesVencidas.length) {
-      ordenesVencidas.slice(0, 15).forEach(t => { cuerpo += `- ${t.title} · resp. ${t.responsible} · vencía ${fmtD(t.dueDate)}\n`; });
-      if (ordenesVencidas.length > 15) cuerpo += `... y ${ordenesVencidas.length - 15} más\n`;
-    }
-    cuerpo += "\nIngresa al sistema para más detalle.\n— CondoAdmin";
 
-    const asunto = `[CondoAdmin] Resumen diario — ${fmtD(now)} (${activas.length} activas, ${vencidas.length} vencidas)`;
-    const usuariosData = usuarios.map(u => u.data || u).filter(Boolean); // por si "usuarios" no usa el wrapper {data}
-    const admins = usuariosData.filter(u => ["Administrador", "Administrador Edificio"].includes(u.rol) && u.active && u.email?.includes("@"));
+    // Índice email por nombre de usuario
+    const emailPorNombre = {};
+    usuarios.filter(u => u.active && u.nombre && u.email).forEach(u => { emailPorNombre[u.nombre] = u.email; });
 
-    const resultadosEnvio = [];
-    for (const u of admins) {
-      resultadosEnvio.push(await sendMail(u.email, asunto, cuerpo));
+    // Agrupar por destinatario
+    const porEmail = {};
+    const addItem = (email, nombre, tarea) => {
+      if (!email) return;
+      if (!porEmail[email]) porEmail[email] = { nombre, tareas: [] };
+      porEmail[email].tareas.push(tarea);
+    };
+
+    for (const t of pendientes) {
+      const due = new Date(t.dueDate); due.setHours(0, 0, 0, 0);
+      const diff = Math.ceil((due - hoy) / 86400000);
+      const esV = diff < 0;
+      const diasTxt = esV
+        ? "⚠ VENCIDA hace " + Math.abs(diff) + " día(s)"
+        : diff === 0 ? "🔴 Vence HOY"
+        : "🟡 Vence en " + diff + " día(s)";
+      const item = { ...t, diasTxt, esV };
+      if (t.responsible) addItem(emailPorNombre[t.responsible], t.responsible, item);
+      if (t.ejecutor && t.ejecutor !== t.responsible) addItem(emailPorNombre[t.ejecutor], t.ejecutor, item);
     }
-    await dbUpsertConfig("daily_summary_last_sent", { date: chileDateKey, sentAt: now.toISOString() });
 
-    const exitosos = resultadosEnvio.filter(r => r.ok).length;
+    // Un correo por persona
+    const resultados = [];
+    for (const [email, { nombre, tareas }] of Object.entries(porEmail)) {
+      const venc = tareas.filter(t => t.esV).length;
+      const asunto = venc > 0
+        ? `[CondoAdmin] ⚠ Tienes ${venc} orden${venc > 1 ? "es" : ""} vencida${venc > 1 ? "s" : ""} sin informe`
+        : `[CondoAdmin] Recordatorio: ${tareas.length} orden${tareas.length > 1 ? "es" : ""} pendiente${tareas.length > 1 ? "s" : ""} de informe`;
+      const filas = tareas.map(t => `  • [${t.diasTxt}] ${t.title} (vence: ${fmtD(t.dueDate)})`).join("\n");
+      const cuerpo = `Hola ${nombre},\n\nTienes las siguientes órdenes pendientes de informe de cierre:\n\n${filas}\n\nIngresa al sistema y completa el informe de cada orden.\n\n— CondoAdmin`;
+      resultados.push(await sendMail(email, asunto, cuerpo));
+    }
+
+    await fsSet(token, "config", "daily_reminder_last_sent", { date: chileDateKey, sentAt: now.toISOString() });
+
+    const ok = resultados.filter(r => r.ok).length;
     return res.status(200).json({
       ok: true,
-      adminsEncontrados: admins.length,
-      enviadosOk: exitosos,
-      enviadosFallidos: resultadosEnvio.length - exitosos,
-      detalle: resultadosEnvio,
-      activas: activas.length,
-      vencidas: vencidas.length,
+      chileDateKey,
+      destinatarios: resultados.length,
+      enviadosOk: ok,
+      enviadosFallidos: resultados.length - ok,
+      detalle: resultados,
     });
   } catch (err) {
     console.error(err);

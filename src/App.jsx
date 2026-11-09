@@ -473,36 +473,8 @@ export default function App(){
     })();
   },[session]);
 
-  // Recordatorios: desde 3 días antes hasta que se guarde el informe — solo 1 vez por día
-  useEffect(()=>{
-    if(!session||!tasks.length) return;
-    const run=async()=>{
-      const hoy=new Date(); hoy.setHours(0,0,0,0);
-      const fechaKey="reminders_"+hoy.toISOString().slice(0,10);
-      // Si ya se ejecutó hoy en esta sesión, no hacer nada
-      if(window._remDate===fechaKey) return;
-      window._remDate=fechaKey;
-      if(!window._remSent) window._remSent={};
-      // Limpiar enviados de días anteriores
-      window._remSent={};
-      const sent=window._remSent;
-      for(const t of tasks){
-        if(!t.dueDate||t.informe?.trim()||t.status==="Completada"||t.status==="Cancelada") continue;
-        const due=new Date(t.dueDate); due.setHours(0,0,0,0);
-        const diff=Math.ceil((due-hoy)/86400000);
-        if(diff>3||sent[t.id]) continue;
-        sent[t.id]=true;
-        const esV=diff<0;
-        const diasTxt=esV?"venció hace "+Math.abs(diff)+" día(s)":diff===0?"vence HOY":"vence en "+diff+" día(s)";
-        const asunto=esV?"[CondoAdmin] ⚠ Orden VENCIDA sin informe: "+t.title:"[CondoAdmin] Recordatorio: "+diasTxt+" — "+t.title;
-        const cuerpo="Hola"+(t.responsible?" "+t.responsible:"")+",\n\nLa orden \""+t.title+"\" "+diasTxt+" ("+fmtD(t.dueDate)+") y aún no tiene informe.\n\n— CondoAdmin";
-        try{const _rSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",t.responsible||""),where("active","==",true)));const us=_rSnap.docs.map(d=>d.data());const u=us&&us[0];if(u?.email)await sendMail(u.email,asunto,cuerpo);}catch(_){}
-        if(t.ejecutor&&t.ejecutor!==t.responsible){try{const _eSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",t.ejecutor),where("active","==",true)));const u2s=_eSnap.docs.map(d=>d.data());const u2=u2s&&u2s[0];if(u2?.email)await sendMail(u2.email,asunto,cuerpo);}catch(_){}}
-      }
-    };
-    const timer=setTimeout(()=>run().catch(()=>{}),3000);
-    return()=>clearTimeout(timer);
-  },[tasks,session]);
+  // Los recordatorios diarios los maneja el cron de GitHub Actions (api/cron-recordatorios.js)
+  // No se envían correos desde el frontend para evitar duplicados al abrir la app.
 
   const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};

@@ -585,7 +585,7 @@ export default function App(){
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
             {view==="dashboard"&&er==="Residente"&&<ResidenteReqs reqs={reqs} tasks={tasks} session={session} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
-            {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq}/>}
+            {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq} setReqs={setReqsDB} showToast={showToast}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
@@ -608,13 +608,23 @@ export default function App(){
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
-function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq}){
+function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,deleteTask,deleteReq}){
   const emerg=reqs.filter(r=>r.priority==="Emergencia"&&!["Cerrada","Rechazada"].includes(r.status));
   const recent=[...reqs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,5);
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,6);
   const mv=mant.filter(m=>getMantStatus(m)==="Vencida").length;
   const mp=mant.filter(m=>getMantStatus(m)==="Por vencer").length;
   const isAnalyst=role==="Administrador"||role==="Administrador Edificio"||role==="Comite";
+  const [closingId,setClosingId]=useState(null);
+  const [closeNote,setCloseNote]=useState("");
+
+  const quickClose=(r)=>{
+    if(!closeNote.trim()){return;}
+    const upd={...r,status:"Cerrada",history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Cerrada desde dashboard",from:r.status,to:"Cerrada",note:closeNote}]};
+    setReqs(p=>p.map(x=>x.id===r.id?upd:x));
+    showToast("Solicitud "+r.code+" cerrada");
+    setClosingId(null); setCloseNote("");
+  };
 
   // ── Cálculos para análisis ──
   const cerradas=reqs.filter(r=>r.status==="Cerrada");
@@ -684,24 +694,12 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
       ))}
       {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
 
-      {/* KPIs Solicitudes */}
-      <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>📋 Solicitudes</div>
-      <Grid cols={5} mob={mob}>
-        <Kpi value={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Abiertas" color="#3b82f6" mob={mob}/>
-        <Kpi value={reqs.filter(r=>r.priority==="Emergencia").length} label="Emergencias" color="#ef4444" mob={mob}/>
-        <Kpi value={reqs.filter(r=>r.status==="En proceso").length} label="En proceso" color="#8b5cf6" mob={mob}/>
-        <Kpi value={cerradas.length} label="Cerradas" color="#10b981" mob={mob}/>
-        <Kpi value={avgResolucion!==null?avgResolucion+" días":"---"} label="Promedio resolución" color="#f97316" mob={mob}/>
-      </Grid>
-
-      {/* KPIs Órdenes */}
-      <div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1,marginBottom:8,marginTop:4}}>⚙️ Órdenes de Trabajo</div>
-      <Grid cols={5} mob={mob}>
-        <Kpi value={tasks.length} label="Total órdenes" color="#6366f1" mob={mob}/>
-        <Kpi value={tasks.filter(t=>t.status==="Completada").length} label="Completadas" color="#10b981" mob={mob}/>
-        <Kpi value={tasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada").length} label="Pendientes" color="#f59e0b" mob={mob}/>
-        <Kpi value={tareasVencidas.length} label="Vencidas sin informe" color="#ef4444" mob={mob}/>
-        <Kpi value={avgAsignacion!==null?Math.round(avgAsignacion)+" hrs":"---"} label="1ª asignación (prom.)" color="#3b82f6" mob={mob}/>
+      {/* KPIs unificados */}
+      <Grid cols={mob?2:4} mob={mob}>
+        <Kpi value={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Solicitudes abiertas" color="#3b82f6" mob={mob}/>
+        <Kpi value={reqs.filter(r=>r.priority==="Emergencia"&&!["Cerrada","Rechazada"].includes(r.status)).length} label="Emergencias activas" color="#ef4444" mob={mob}/>
+        <Kpi value={reqs.filter(r=>r.assignedTo==="Sin asignar"&&!["Cerrada","Rechazada"].includes(r.status)).length} label="Sin asignar" color="#f59e0b" mob={mob}/>
+        <Kpi value={avgResolucion!==null?avgResolucion+" días":"---"} label="Prom. resolución" color="#10b981" mob={mob}/>
       </Grid>
 
       {/* Alertas órdenes vencidas */}
@@ -837,22 +835,35 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,mob,deleteTask,deleteReq})
               })}
             </div>
 
-            {/* Solicitudes recientes */}
+            {/* Solicitudes recientes con cierre rápido */}
             <div style={card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{fontWeight:700,fontSize:13}}>🕐 Solicitudes recientes</div>
                 {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
               </div>
               {recent.length===0?<Empty msg="Sin solicitudes"/>:recent.map(r=>(
-                <div key={r.id} style={{padding:"7px 0",borderBottom:"1px solid #f1f5f9",cursor:"pointer",display:"flex",justifyContent:"space-between",gap:8}} onClick={()=>onOpen(r)}>
-                  <div style={{minWidth:0}}>
-                    <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span>
-                    <div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.category}</div>
+                <div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
+                    <div style={{minWidth:0}}>
+                      <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span>
+                      <span style={{fontSize:11,color:"#64748b",marginLeft:6}}>{r.category}</span>
+                      <div style={{fontSize:11,color:"#94a3b8"}}>👤 {r.assignedTo||"Sin asignar"}</div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end",flexShrink:0}}>
+                      <PBadge p={r.priority}/><SBadge s={r.status}/>
+                    </div>
                   </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end",flexShrink:0}}>
-                    <PBadge p={r.priority}/>
-                    <SBadge s={r.status}/>
-                  </div>
+                  {can(role,"closeCases")&&!["Cerrada","Rechazada"].includes(r.status)&&(
+                    closingId===r.id?(
+                      <div style={{marginTop:6,display:"flex",gap:6}}>
+                        <input style={{...inp,flex:1,fontSize:12,padding:"5px 8px"}} placeholder="Nota de cierre..." value={closeNote} onChange={ev=>setCloseNote(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&quickClose(r)} autoFocus/>
+                        <button style={BP(true)} onClick={()=>quickClose(r)}>✓</button>
+                        <button style={BS(true)} onClick={()=>{setClosingId(null);setCloseNote("");}}>✕</button>
+                      </div>
+                    ):(
+                      <button style={{...BS(true),marginTop:4,fontSize:11}} onClick={ev=>{ev.stopPropagation();setClosingId(r.id);setCloseNote("");}}>✓ Cerrar</button>
+                    )
+                  )}
                 </div>
               ))}
             </div>
@@ -2239,15 +2250,192 @@ function EmailsView({logs,setEmails,role}){
 
 // ── Reports ────────────────────────────────────────────────────────────────
 function Reports({reqs,tasks,inventory,mob}){
-  const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);
-  const maxCat=Math.max(...byCat.map(x=>x.n),1);
+  const hoy=new Date(); hoy.setHours(0,0,0,0);
+  const cerradas=reqs.filter(r=>r.status==="Cerrada");
+  const abiertas=reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status));
+
+  // Promedio días resolución global
+  const avgGlobal=cerradas.length?Math.round(cerradas.reduce((s,r)=>{
+    const h=(r.history||[]).find(x=>x.to==="Cerrada");
+    if(!h||!r.createdAt) return s;
+    return s+(new Date(h.date)-new Date(r.createdAt))/86400000;
+  },0)/cerradas.length):null;
+
+  // Tendencia últimos 6 meses
+  const meses=[];
+  for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);meses.push({key:d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"),label:d.toLocaleString("es-CL",{month:"short"})});}
+  const tendencia=meses.map(m=>({
+    label:m.label,
+    creadas:reqs.filter(r=>r.createdAt?.startsWith(m.key)).length,
+    cerradas:reqs.filter(r=>{const h=(r.history||[]).find(x=>x.to==="Cerrada");return h?.date?.startsWith(m.key);}).length,
+  }));
+  const maxTend=Math.max(...tendencia.map(m=>Math.max(m.creadas,m.cerradas)),1);
+
+  // Por categoría con tiempo promedio resolución
+  const catStats=Object.keys(DEF_CATS).map(c=>{
+    const rCat=reqs.filter(r=>r.category===c);
+    const rCerr=rCat.filter(r=>r.status==="Cerrada");
+    const avg=rCerr.length?Math.round(rCerr.reduce((s,r)=>{
+      const h=(r.history||[]).find(x=>x.to==="Cerrada");
+      if(!h||!r.createdAt) return s;
+      return s+(new Date(h.date)-new Date(r.createdAt))/86400000;
+    },0)/rCerr.length):null;
+    return {c,total:rCat.length,abiertas:rCat.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length,cerradas:rCerr.length,avg};
+  }).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+  const maxCat=Math.max(...catStats.map(x=>x.total),1);
+
+  // Ranking responsables: total asignadas, pendientes, prom. días cierre
+  const respMap={};
+  reqs.filter(r=>r.assignedTo&&r.assignedTo!=="Sin asignar").forEach(r=>{
+    const rp=r.assignedTo;
+    if(!respMap[rp]) respMap[rp]={asignadas:0,cerradas:0,pendientes:0,vencidas:0,dias:[]};
+    respMap[rp].asignadas++;
+    if(r.status==="Cerrada"){
+      respMap[rp].cerradas++;
+      const h=(r.history||[]).find(x=>x.to==="Cerrada");
+      if(h&&r.createdAt){const d=(new Date(h.date)-new Date(r.createdAt))/86400000;if(d>=0)respMap[rp].dias.push(d);}
+    } else {
+      respMap[rp].pendientes++;
+      if(r.dueDate&&new Date(r.dueDate)<hoy) respMap[rp].vencidas++;
+    }
+  });
+  const respArr=Object.entries(respMap).sort((a,b)=>b[1].asignadas-a[1].asignadas);
+
+  // Solicitudes sin asignar (atención inmediata)
+  const sinAsignar=abiertas.filter(r=>!r.assignedTo||r.assignedTo==="Sin asignar").sort((a,b)=>PRIORITIES.indexOf(a.priority)-PRIORITIES.indexOf(b.priority));
+
   return(
     <div>
-      <Grid cols={4} mob={mob}>{PRIORITIES.map(p=><Kpi key={p} value={reqs.filter(r=>r.priority===p).length} label={p} color={PC[p]} mob={mob}/>)}</Grid>
+      {/* KPIs resumen */}
+      <Grid cols={mob?2:4} mob={mob}>
+        <Kpi value={reqs.length} label="Total solicitudes" color="#6366f1" mob={mob}/>
+        <Kpi value={abiertas.length} label="Abiertas" color="#3b82f6" mob={mob}/>
+        <Kpi value={cerradas.length} label="Cerradas" color="#10b981" mob={mob}/>
+        <Kpi value={avgGlobal!==null?avgGlobal+" días":"---"} label="Prom. resolución" color="#f97316" mob={mob}/>
+      </Grid>
+
+      {/* Sin asignar */}
+      {sinAsignar.length>0&&(
+        <div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",marginBottom:12}}>
+          <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⚠ {sinAsignar.length} solicitud{sinAsignar.length>1?"es":""} sin asignar</div>
+          {sinAsignar.slice(0,5).map(r=>(
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #fde68a",fontSize:12}}>
+              <span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span>
+              <span style={{color:"#64748b",flex:1,marginLeft:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.category}</span>
+              <PBadge p={r.priority}/>
+            </div>
+          ))}
+          {sinAsignar.length>5&&<div style={{fontSize:11,color:"#92400e",marginTop:4}}>...y {sinAsignar.length-5} más</div>}
+        </div>
+      )}
+
+      {/* Tendencia mensual */}
+      <div style={{...card,marginBottom:12}}>
+        <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📈 Tendencia mensual (últimos 6 meses)</div>
+        <div style={{display:"flex",gap:4,alignItems:"flex-end",height:110}}>
+          {tendencia.map(m=>(
+            <div key={m.label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+              <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:80}}>
+                <div title={"Creadas: "+m.creadas} style={{flex:1,background:"#3b82f6",borderRadius:"3px 3px 0 0",minHeight:2,height:Math.round((m.creadas/maxTend)*78)+2}}/>
+                <div title={"Cerradas: "+m.cerradas} style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",minHeight:2,height:Math.round((m.cerradas/maxTend)*78)+2}}/>
+              </div>
+              <div style={{fontSize:9,color:"#94a3b8"}}>{m.label}</div>
+              <div style={{fontSize:9,color:"#64748b"}}>{m.creadas}/{m.cerradas}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:12,marginTop:6,justifyContent:"center"}}>
+          <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#3b82f6",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Creadas</span></div>
+          <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#10b981",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Cerradas</span></div>
+        </div>
+      </div>
+
       <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por estado</div>{STATUSES.map(s=>{const c=reqs.filter(r=>r.status===s).length;return c?<div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><SBadge s={s}/><span style={{fontWeight:600}}>{c}</span></div>:null;})}</div>
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Por categoría</div>{byCat.map(x=><div key={x.c} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{x.c}</span><span style={{fontWeight:600}}>{x.n}</span></div><div style={{height:5,background:"#f1f5f9",borderRadius:99}}><div style={{height:5,background:"#6366f1",borderRadius:99,width:(x.n/maxCat*100)+"%"}}/></div></div>)}</div>
-        <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Resumen</div><IR l="Total solicitudes" v={reqs.length}/><IR l="Activas" v={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length}/><IR l="Cerradas" v={reqs.filter(r=>r.status==="Cerrada").length}/><IR l="Emergencias" v={reqs.filter(r=>r.priority==="Emergencia").length}/><IR l="Órdenes totales" v={tasks.length}/><IR l="Stock crítico" v={inventory.filter(i=>i.stock<i.minStock).length}/></div>
+        {/* Por categoría */}
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>📂 Por categoría</div>
+          {catStats.length===0?<Empty msg="Sin datos"/>:catStats.map(x=>(
+            <div key={x.c} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130,fontWeight:500}}>{x.c}</span>
+                <div style={{display:"flex",gap:4,flexShrink:0}}>
+                  <span style={{fontWeight:700}}>{x.total}</span>
+                  {x.avg!==null&&<span style={bdg("#64748b","#f1f5f9")}>{x.avg}d prom.</span>}
+                  {x.abiertas>0&&<span style={bdg("#f59e0b","#fffbeb")}>{x.abiertas} abiertas</span>}
+                </div>
+              </div>
+              <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                <div style={{height:6,background:"#6366f1",borderRadius:99,width:(x.total/maxCat*100)+"%"}}/>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Ranking responsables */}
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>👤 Ranking responsables</div>
+          {respArr.length===0?<Empty msg="Sin datos"/>:respArr.map(([resp,st])=>{
+            const pct=st.asignadas>0?Math.round(st.cerradas/st.asignadas*100):0;
+            const avg=st.dias.length?Math.round(st.dias.reduce((a,b)=>a+b,0)/st.dias.length):null;
+            return(
+              <div key={resp} style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                  <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{resp}</span>
+                  <div style={{display:"flex",gap:4,flexShrink:0}}>
+                    <span style={bdg("#10b981","#f0fdf4")}>{st.cerradas}/{st.asignadas}</span>
+                    {avg!==null&&<span style={bdg("#64748b","#f1f5f9")}>{avg}d prom.</span>}
+                    {st.vencidas>0&&<span style={bdg("#ef4444","#fef2f2")}>{st.vencidas} venc.</span>}
+                  </div>
+                </div>
+                <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                  <div style={{height:6,background:pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444",borderRadius:99,width:pct+"%"}}/>
+                </div>
+                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{pct}% cerradas · {st.pendientes} pendiente{st.pendientes!==1?"s":""}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Por estado */}
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>📊 Por estado</div>
+          {STATUSES.map(s=>{
+            const c=reqs.filter(r=>r.status===s).length;
+            const pct=reqs.length?Math.round(c/reqs.length*100):0;
+            return c>0?(
+              <div key={s} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <SBadge s={s}/>
+                <div style={{flex:1,height:5,background:"#f1f5f9",borderRadius:99}}>
+                  <div style={{height:5,background:SC[s]||"#94a3b8",borderRadius:99,width:pct+"%"}}/>
+                </div>
+                <span style={{fontWeight:700,fontSize:12,minWidth:24,textAlign:"right"}}>{c}</span>
+              </div>
+            ):null;
+          })}
+        </div>
+
+        {/* Por prioridad */}
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>🚨 Por prioridad</div>
+          {PRIORITIES.map(p=>{
+            const n=reqs.filter(r=>r.priority===p).length;
+            const pct=reqs.length?Math.round(n/reqs.length*100):0;
+            return(
+              <div key={p} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <PBadge p={p}/>
+                <div style={{flex:1,height:5,background:"#f1f5f9",borderRadius:99}}>
+                  <div style={{height:5,background:PC[p],borderRadius:99,width:pct+"%"}}/>
+                </div>
+                <span style={{fontWeight:700,fontSize:12,minWidth:20,textAlign:"right"}}>{n}</span>
+              </div>
+            );
+          })}
+          {inventory.filter(i=>i.stock<i.minStock).length>0&&(
+            <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #f1f5f9"}}>
+              <span style={bdg("#ef4444","#fef2f2")}>⚠ {inventory.filter(i=>i.stock<i.minStock).length} ítems con stock crítico</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

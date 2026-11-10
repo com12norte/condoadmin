@@ -251,7 +251,32 @@ const tieneCorreo = r => !!r.requesterEmail&&r.requesterEmail.includes("@");
 const aplanar = d => { if(!d||!d.data||typeof d.data!=="object"||Array.isArray(d.data)) return d; const {data,...rest}=d; return {...rest,...data}; };
 // Acceso del residente verificado con código por correo (se recuerda 30 días en el dispositivo)
 const ACC_LS="ca_acceso";
-const getAcceso = () => { try{ const a=JSON.parse(localStorage.getItem(ACC_LS)||"null"); return a&&a.email&&a.hasta>Date.now()?a:null; }catch(_){ return null; } };
+const getAcceso = () => { try{ const a=JSON.parse(localStorage.getItem(ACC_LS)||"null"); return a&&a.email&&a.sesion&&a.hasta>Date.now()?a:null; }catch(_){ return null; } };
+// Residente que entró por "Soy Residente" sin iniciar sesión
+const esInvitado = s => !!s&&s.id==="guest";
+// Las llamadas al servidor (api/) devuelven JSON {ok, error}
+const apiPost = async (ruta, body) => {
+  const res=await fetch(SITE_URL+ruta,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  let j={}; try{ j=await res.json(); }catch(_){}
+  return {...j,ok:res.ok&&!!j.ok,status:res.status};
+};
+// Reduce una foto (máx. 1280 px, JPEG) para que suba rápido y quepa en la base
+const achicarFoto = (file, max=1280, q=0.6) => new Promise(resolve=>{
+  const rd=new FileReader();
+  rd.onerror=()=>resolve(null);
+  rd.onload=()=>{
+    const img=new Image();
+    img.onerror=()=>resolve(rd.result);
+    img.onload=()=>{
+      const k=Math.min(1,max/Math.max(img.width,img.height));
+      const c=document.createElement("canvas"); c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      try{ resolve(c.toDataURL("image/jpeg",q)); }catch(_){ resolve(rd.result); }
+    };
+    img.src=rd.result;
+  };
+  rd.readAsDataURL(file);
+});
 const setAcceso = a => { try{ a?localStorage.setItem(ACC_LS,JSON.stringify(a)):localStorage.removeItem(ACC_LS); }catch(_){} };
 
 // ── Styles ─────────────────────────────────────────────────────────────────
@@ -536,16 +561,14 @@ export default function App(){
     (async()=>{
       setDataLoading(true);
       try{
-        const [rR,rT,rI,rM,rIn,rE,rCfg,rU]=await Promise.all([
-          dbGet("solicitudes"),
-          dbGet("tareas"),
-          dbGet("inventario"),
-          dbGet("mantenciones"),
-          dbGet("inspecciones"),
-          dbGet("correos"),
-          dbGet("config"),
-          dbGet("usuarios"),
-        ]);
+        // El residente sin sesión no puede leer la base (reglas de Firebase): solo se intenta la configuración
+        const invitado=esInvitado(session);
+        const tablas=invitado?["config"]:["solicitudes","tareas","inventario","mantenciones","inspecciones","correos","config","usuarios"];
+        const resp=await Promise.allSettled(tablas.map(t=>dbGet(t)));
+        const leido={}; const fallas=[];
+        tablas.forEach((t,i)=>{ if(resp[i].status==="fulfilled") leido[t]=resp[i].value; else { fallas.push(t); console.warn("No se pudo leer",t,resp[i].reason); } });
+        const rR=leido.solicitudes,rT=leido.tareas,rI=leido.inventario,rM=leido.mantenciones,rIn=leido.inspecciones,rE=leido.correos,rCfg=leido.config,rU=leido.usuarios;
+        if(!invitado&&fallas.length) showToast(fallas.includes("solicitudes")?"No se pudieron cargar las solicitudes. Revisa tu conexión y vuelve a entrar.":"No se pudo cargar parte de la información ("+fallas.join(", ")+").","error");
         if(Array.isArray(rR)) setReqs(rR.filter(Boolean).map(r=>normReq(aplanar(r))));
         if(Array.isArray(rT)) setTasks(rT.filter(Boolean).map(r=>normTask(aplanar(r))));
         if(Array.isArray(rI)) setInv(rI.filter(Boolean).map(aplanar));
@@ -564,7 +587,7 @@ export default function App(){
           if(val("equipos")) setEquipos(val("equipos"));
           if(val("certs")) setCerts(val("certs"));
         }
-      }catch(ex){console.error("load error",ex);showToast("No se pudieron cargar los datos. Revisa tu conexión y vuelve a entrar.","error");}
+      }catch(ex){console.error("load error",ex);if(!esInvitado(session))showToast("No se pudieron cargar los datos. Revisa tu conexión y vuelve a entrar.","error");}
       finally{setDataLoading(false);}
     })();
   },[session]);
@@ -610,7 +633,7 @@ export default function App(){
   const addEmail=async log=>{
     const item={id:"e"+uid(),...log};
     setEmails(p=>[item,...p]);
-    try{await setDoc(doc(fbDb,"correos",String(item.id)),{...JSON.parse(JSON.stringify(item)),request_id:item.requestId||""},{merge:true});}catch(_){}
+    if(!esInvitado(session)) try{await setDoc(doc(fbDb,"correos",String(item.id)),{...JSON.parse(JSON.stringify(item)),request_id:item.requestId||""},{merge:true});}catch(_){}
     // Enviar mail en background sin bloquear
     sendMail(log.to, log.subject, log.body).catch(ex=>console.warn("addEmail sendMail",ex));
   };
@@ -1111,7 +1134,16 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     const c=reabrirReq(r,usuario,evalDe(r)&&evalDe(r).resuelto===false?"El residente indicó que no quedó resuelto":"");
     setReqs(p=>p.map(x=>x.id===r.id?c:x)); setSelReq(c); setNs(c.status); showToast("Solicitud reabierta");
   };
-  const evaluar=ok=>{
+  const evaluar=async ok=>{
+    if(esInvitado(session)){
+      try{
+        const res=await fetch(SITE_URL+"/api/evaluar",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({id:r.id,t:r.evalToken||"",r:ok?"si":"no"}).toString()});
+        if(!res.ok) throw new Error();
+        setSelReq(p=>({...p,evaluacion:{resuelto:ok,date:new Date().toISOString(),via:"app",token:r.evalToken||""}}));
+        showToast(ok?"¡Gracias por confirmar!":"Gracias. Avisamos a la administración.");
+      }catch(_){ showToast("No se pudo registrar tu respuesta. Intenta de nuevo.","error"); }
+      return;
+    }
     upd({evaluacion:{resuelto:ok,date:new Date().toISOString(),via:"app",token:r.evalToken||""}},{action:ok?"El residente confirmó que quedó resuelto":"El residente indicó que NO quedó resuelto",from:null,to:null});
     showToast(ok?"¡Gracias por confirmar!":"Gracias. Avisamos a la administración.");
   };
@@ -1683,8 +1715,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       libres--;
       const id=uid();
       const rd=new FileReader();
-      rd.onload=e2=>setPrevs(p=>p.length>=MAX_FOTOS?p:[...p,{id,name:fi.name,url:e2.target.result,file:fi}]);
-      rd.readAsDataURL(fi);
+      achicarFoto(fi).then(url=>{ if(url) setPrevs(p=>p.length>=MAX_FOTOS?p:[...p,{id,name:fi.name,url,file:fi}]); else showToast("No se pudo leer "+fi.name,"error"); });
     });
   };
 
@@ -1692,11 +1723,12 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     if(saving||!validate()) return;
     setSaving(true);
     try{
-      const code=genCode(reqs,"SOL-"); const now=new Date().toISOString();
+      const invitado=esInvitado(session);
+      let code=invitado?"SOL-NUEVA":genCode(reqs,"SOL-"); const now=new Date().toISOString();
       const datos={...f,priority:prioFinal,requesterName:f.requesterName.trim(),requesterEmail:f.requesterEmail.trim().toLowerCase(),requesterPhone:f.requesterPhone.trim(),unit:f.unit.trim(),description:f.description.trim()};
       const attachmentsInitial=await Promise.all(prevs.map(async pv=>{
         const path=code+"/inicial/"+uid()+"_"+pv.name; let url=pv.url;
-        try{if(pv.file)url=await uploadImg(pv.file,path);}catch(_){}
+        try{if(pv.file&&!invitado)url=await uploadImg(pv.file,path);}catch(_){}
         return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:datos.requesterName,preview:url,comment:""};
       }));
       const categoria=tipo==="Administrativo"?adminCat:f.category;
@@ -1707,7 +1739,13 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
         status:"Ingresada",assignedTo:"Sin asignar",
         history:[{date:now,user:datos.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada",note:tipo==="Incidencia"?"Prioridad automática: "+prioFinal+" ("+auto.motivo+")":""}],
         prioAuto:tipo==="Incidencia",attachmentsInitial,dueDate:null,isUrgent:prioFinal==="Emergencia"});
-      setReqs(p=>[nr,...p]);
+      if(invitado){
+        // Sin sesión la app no puede escribir en la base: la registra el servidor y asigna el código
+        const r=await apiPost("/api/crear-solicitud",{solicitud:{...nr,historyNote:nr.history[0].note}});
+        if(!r.ok) throw new Error(r.error||"No se pudo registrar la solicitud");
+        code=r.code; nr.id=code; nr.code=code;
+        nr.attachmentsInitial=nr.attachmentsInitial.map(a=>({...a,requestId:code}));
+      } else setReqs(p=>[nr,...p]);
       if(esResidente) setResLS({requesterName:datos.requesterName,requesterEmail:datos.requesterEmail,requesterPhone:datos.requesterPhone,tower:f.tower,unit:isAreaComun?(getResLS().unit||""):datos.unit});
       // Mail al solicitante
       if(datos.requesterEmail.includes("@")){
@@ -1721,7 +1759,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       setDone(nr); showToast("Solicitud "+code+" creada");
     }catch(ex){
       console.error("Error creando solicitud",ex);
-      showToast("No se pudo enviar la solicitud. Intenta de nuevo.","error");
+      showToast((ex&&ex.message&&!/fetch/i.test(ex.message)?ex.message:"No se pudo enviar la solicitud. Revisa tu conexión e intenta de nuevo."),"error");
     }finally{
       setSaving(false);
     }
@@ -1750,7 +1788,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
           <div>• Puedes ver su avance en {esResidente?"«Mis solicitudes»":"el listado de solicitudes"} con este código.</div>
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-          <button style={BP(true)} onClick={()=>{onClose();onOpen(done);}}>Ver solicitud</button>
+          {!esInvitado(session)&&<button style={BP(true)} onClick={()=>{onClose();onOpen(done);}}>Ver solicitud</button>}
           <button style={BS(true)} onClick={otra}>+ Ingresar otra</button>
           <button style={BS(true)} onClick={onClose}>Cerrar</button>
         </div>
@@ -1971,7 +2009,7 @@ function AccesoResidente({onOk}){
   const llamar=async body=>{
     const res=await fetch(SITE_URL+"/api/residente-codigo",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     let j={}; try{ j=await res.json(); }catch(_){}
-    return {ok:res.ok&&j.ok,error:j.error};
+    return {...j,ok:res.ok&&j.ok,error:j.error};
   };
   const enviar=async()=>{
     const e=email.trim().toLowerCase();
@@ -1991,7 +2029,7 @@ function AccesoResidente({onOk}){
     try{
       const e=email.trim().toLowerCase();
       const r=await llamar({accion:"verificar",email:e,codigo:c});
-      if(r.ok){const a={email:e,hasta:Date.now()+30*86400000};setAcceso(a);onOk(a);}
+      if(r.ok&&r.sesion){const a={email:e,hasta:r.hasta||Date.now()+30*86400000,sesion:r.sesion};setAcceso(a);onOk(a);}
       else setMsg({t:"error",m:r.error||"Código incorrecto."});
     }catch(_){setMsg({t:"error",m:"No se pudo verificar. Revisa tu conexión."});}
     setBusy(false);
@@ -2022,10 +2060,27 @@ function AccesoResidente({onOk}){
   );
 }
 
-function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
+function ResidenteReqs({reqs:reqsApp,tasks:tasksApp,session,onOpen,onNew,mob}){
   // Quien entra sin cuenta debe confirmar su correo con un código antes de ver solicitudes
   const [acc,setAcc]=useState(getAcceso);
   const invitado=!session?.email;
+  const [remoto,setRemoto]=useState(null);   // {solicitudes,tareas} traídas del servidor
+  const [cargando,setCargando]=useState(false);
+  const [errRem,setErrRem]=useState("");
+  const cargar=async()=>{
+    if(!acc) return;
+    setCargando(true); setErrRem("");
+    try{
+      const r=await apiPost("/api/residente-codigo",{accion:"listar",email:acc.email,sesion:acc.sesion});
+      if(r.ok) setRemoto({solicitudes:(r.solicitudes||[]).map(normReq),tareas:(r.tareas||[]).map(normTask)});
+      else if(r.status===401){ setAcceso(null); setAcc(null); }
+      else setErrRem(r.error||"No se pudieron cargar tus solicitudes.");
+    }catch(_){ setErrRem("No se pudieron cargar tus solicitudes. Revisa tu conexión."); }
+    setCargando(false);
+  };
+  useEffect(()=>{ if(invitado&&acc) cargar(); },[acc]);
+  const reqs=invitado?(remoto?remoto.solicitudes:[]):reqsApp;
+  const tasks=invitado?(remoto?remoto.tareas:[]):tasksApp;
   const email=(session?.email||(acc&&acc.email)||"").trim().toLowerCase();
   const hoy=new Date(); hoy.setHours(0,0,0,0);
 
@@ -2040,6 +2095,12 @@ function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
     return new Date(t.dueDate)<hoy;
   });
 
+  if(invitado&&acc&&!remoto) return(
+    <div style={{...card,textAlign:"center",padding:24}}>
+      {cargando?<div style={{fontSize:13,color:"#64748b"}}>Cargando tus solicitudes...</div>
+        :<><div style={{...alrt("error"),textAlign:"left"}}>{errRem||"No se pudieron cargar tus solicitudes."}</div><button style={BP(true)} onClick={cargar}>Reintentar</button></>}
+    </div>
+  );
   if(invitado&&!acc) return(
     <div>
       <div style={{textAlign:"center",marginBottom:14}}><button style={BP(false)} onClick={onNew}>🚨 Reportar una incidencia</button></div>

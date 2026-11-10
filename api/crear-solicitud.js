@@ -3,7 +3,15 @@ import nodeCrypto from "node:crypto";
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
-const PRIVATE_KEY = (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
+// La clave se reconstruye en formato estándar: tolera comillas, "\n" escritos como texto,
+// saltos de línea de Windows o la clave pegada en una sola línea.
+const PRIVATE_KEY = (() => {
+  const raw = String(process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
+  const m = /-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY-----/.exec(raw);
+  if (!m) return raw.trim();
+  const b64 = m[1].replace(/\\[rn]/g, "").replace(/[^A-Za-z0-9+/=]/g, "");
+  return "-----BEGIN PRIVATE KEY-----\n" + (b64.match(/.{1,64}/g) || []).join("\n") + "\n-----END PRIVATE KEY-----\n";
+})();
 const FS = () => `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
 // ── Token de acceso a Firestore con la cuenta de servicio ───────────────────

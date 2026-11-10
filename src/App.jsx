@@ -530,7 +530,8 @@ export default function App(){
   const [inventory,setInv]=useState([]);
   const [mant,setMant]=useState([]);
   const [cats,setCats]=useState(Object.entries(DEF_CATS).map(([name,subs],i)=>({id:"cat"+i,name,subs,active:true,order:i})));
-  const [towers,setTowers]=useState([{id:"t1",name:"A",label:"Torre A",active:true},{id:"t2",name:"B",label:"Torre B",active:true},{id:"t3",name:"C",label:"Torre C",active:true},{id:"t4",name:"Comun",label:"Area Comun",active:true}]);
+  // Torres del condominio. Se usan tal cual cuando no se puede leer la configuración (residente sin sesión)
+  const [towers,setTowers]=useState([...["1036","1038","1052","1054","1060","1061","1080","1081"].map(n=>({id:"t"+n,name:n,label:"Torre "+n,active:true})),{id:"t4",name:"Comun",label:"Área común",active:true}]);
   const [equipos,setEquipos]=useState(EQUIP_TIPOS.map(eq=>({...eq,active:false})));
   const [certs,setCerts]=useState([]);
   const [usuarios,setUsuarios]=useState([]);

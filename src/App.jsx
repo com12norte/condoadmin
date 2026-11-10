@@ -153,7 +153,9 @@ const PERMS = {
 };
 const can = (role,action) => (PERMS[role]||[]).includes(action);
 const fmt = d => { try { return new Date(d).toLocaleString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); } catch(_){ return ""; }};
-const fmtD = d => { try { return new Date(d).toLocaleDateString("es-CL"); } catch(_){ return ""; }};
+// Las fechas sin hora ("2026-11-05") se interpretan como día local; si no, en Chile se mostraban un día antes
+const parseF = d => { const m=typeof d==="string"&&/^(\d{4})-(\d{2})-(\d{2})$/.exec(d); return m?new Date(+m[1],+m[2]-1,+m[3]):new Date(d); };
+const fmtD = d => { try { return parseF(d).toLocaleDateString("es-CL"); } catch(_){ return ""; }};
 const uid = () => Math.random().toString(36).slice(2,9);
 const genCode = (arr,pfx) => {
   const nums = (arr||[]).map(r => { const n = parseInt((r.id||r.code||"").replace(pfx,"").replace(/\D/g,""),10); return isNaN(n)?0:n; });
@@ -178,6 +180,19 @@ const normReq = r => ({comments:[],history:[],attachmentsInitial:[],assignedTo:"
 const normTask = t => ({comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...(t||{})});
 const normMant = m => ({history:[],comments:[],documents:[],...(m||{})});
 const normInsp = i => { const b=i||{}; return {...b,items:mkItems(b.items)}; };
+// ── Helpers de análisis (compartidos por Dashboard y Reportes) ──────────────
+const esAbierta = r => !["Cerrada","Rechazada"].includes(r.status);
+const fechaCierre = r => { const h=[...(r.history||[])].reverse().find(x=>x.to==="Cerrada"); return h&&h.date?h.date:null; };
+const diasCierre = r => { const f=fechaCierre(r); if(!f||!r.createdAt) return null; const d=(new Date(f)-new Date(r.createdAt))/86400000; return isNaN(d)||d<0?null:d; };
+// Promedio solo sobre las solicitudes que tienen fecha de cierre registrada
+const promDias = list => { const ds=list.map(diasCierre).filter(d=>d!==null); return ds.length?Math.round(ds.reduce((a,b)=>a+b,0)/ds.length*10)/10:null; };
+const fmtDias = d => d===null?"---":(d<10?String(d).replace(".",","):String(Math.round(d)))+(d===1?" día":" días");
+const diasAbierta = r => { const d=Math.floor((Date.now()-new Date(r.createdAt))/86400000); return isNaN(d)||d<0?0:d; };
+const mesKey = d => { const x=new Date(d); return isNaN(x)?"":x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0"); };
+const ultMeses = n => { const b=new Date(), out=[]; for(let i=n-1;i>=0;i--){ const d=new Date(b.getFullYear(),b.getMonth()-i,1); out.push({key:mesKey(d),label:d.toLocaleString("es-CL",{month:"short",year:"2-digit"})}); } return out; };
+const tareaPend = t => !!t.dueDate&&!(t.informe||"").trim()&&t.status!=="Completada"&&t.status!=="Cancelada";
+const diffDue = t => { const h=new Date(); h.setHours(0,0,0,0); return Math.ceil((parseF(t.dueDate)-h)/86400000); };
+const ordPrioridad = (a,b) => (PRIORITIES.indexOf(a.priority)-PRIORITIES.indexOf(b.priority))||(new Date(a.createdAt)-new Date(b.createdAt));
 
 // ── Styles ─────────────────────────────────────────────────────────────────
 const bdg = (c,bg) => ({display:"inline-flex",alignItems:"center",padding:"2px 6px",borderRadius:99,fontSize:10,fontWeight:600,color:c,background:bg,whiteSpace:"nowrap"});
@@ -215,7 +230,7 @@ function PBadge({p}){return <span style={{...bdg(PC[p]||"#64748b",PB[p]||"#f9faf
 function MBadge({m}){const st=getMantStatus(m);const dot=st==="Vigente"?"✓":st==="Por vencer"?"!":st==="Vencida"?"✗":"~";return <span style={bdg(MANT_SC[st]||"#64748b",MANT_SB[st]||"#f9fafb")}>{dot} {st}</span>;}
 function IR({l,v}){return <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f8fafc",fontSize:12}}><span style={{color:"#64748b"}}>{l}</span><span style={{fontWeight:600}}>{v==null?"---":String(v)}</span></div>;}
 function Empty({msg}){return <div style={{textAlign:"center",padding:"40px 20px",color:"#94a3b8",fontSize:13}}>{msg}</div>;}
-function Kpi({value,label,color,mob}){return <div style={{...kpi,borderTop:"3px solid "+color}}><div style={{fontSize:mob?18:24,fontWeight:700,color}}>{value}</div><div style={{fontSize:11,color:"#64748b",marginTop:3}}>{label}</div></div>;}
+function Kpi({value,label,color,mob,onClick}){return <div onClick={onClick} title={onClick?"Ver detalle":undefined} style={{...kpi,borderTop:"3px solid "+color,cursor:onClick?"pointer":"default"}}><div style={{fontSize:mob?18:24,fontWeight:700,color}}>{value}</div><div style={{fontSize:11,color:"#64748b",marginTop:3}}>{label}{onClick?" ›":""}</div></div>;}
 function Grid({cols,mob,children}){return <div style={{display:"grid",gridTemplateColumns:"repeat("+(mob?2:cols)+",1fr)",gap:12,marginBottom:16}}>{children}</div>;}
 function Tabs({tabs,active,onChange,accent}){
   const ac=accent||"#3b82f6";
@@ -245,8 +260,10 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
       )}
       <nav style={{padding:"6px 0",flex:1}}>
         {navItems.map(n=>(
-          <button key={n.id} onClick={()=>navTo(n.id)} style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",cursor:"pointer",fontSize:13,color:isAct(n.id)?"#fff":"#94a3b8",background:isAct(n.id)?"#1e3a5f":"transparent",borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",borderTop:"none",borderRight:"none",borderBottom:"none",fontWeight:isAct(n.id)?600:400,outline:"none"}}>
-            {n.label}
+          <button key={n.id} onClick={()=>navTo(n.id)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:mob?"12px 14px":"10px 14px",cursor:"pointer",fontSize:13,color:isAct(n.id)?"#fff":"#94a3b8",background:isAct(n.id)?"#1e3a5f":"transparent",borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",borderTop:"none",borderRight:"none",borderBottom:"none",fontWeight:isAct(n.id)?600:400,outline:"none"}}>
+            <span style={{width:20,textAlign:"center",fontSize:15}}>{n.icon}</span>
+            <span style={{flex:1}}>{n.label}</span>
+            {n.badge>0&&<span title={n.badgeTitle} style={{background:n.badgeRed?"#ef4444":"#334155",color:"#fff",borderRadius:99,fontSize:10,fontWeight:700,padding:"1px 7px"}}>{n.badge}</span>}
           </button>
         ))}
       </nav>
@@ -426,7 +443,11 @@ export default function App(){
   const [navOpen,setNavOpen]=useState(false);
 
   const er=session?(viewAs||session.rol):"Residente";
-  const showToast=(msg,type)=>{setToast({msg,type:type||"success"});setTimeout(()=>setToast(null),3200);};
+  const toastT=useRef(null);
+  const showToast=(msg,type)=>{clearTimeout(toastT.current);setToast({msg,type:type||"success"});toastT.current=setTimeout(()=>setToast(null),type==="error"?6000:3200);};
+  const [dataLoading,setDataLoading]=useState(false);
+  const [listTab,setListTab]=useState("abiertas");
+  const goList=t=>{setListTab(t);setView("requests");};
 
   const handleLogin=user=>{
     setSession(user);
@@ -441,6 +462,7 @@ export default function App(){
   useEffect(()=>{
     if(!session) return;
     (async()=>{
+      setDataLoading(true);
       try{
         const [rR,rT,rI,rM,rIn,rE,rCfg,rU]=await Promise.all([
           dbGet("solicitudes"),
@@ -469,14 +491,15 @@ export default function App(){
             if(cfg.certs) setCerts(cfg.certs);
           }
         }
-      }catch(ex){console.error("load error",ex);}
+      }catch(ex){console.error("load error",ex);showToast("No se pudieron cargar los datos. Revisa tu conexión y vuelve a entrar.","error");}
+      finally{setDataLoading(false);}
     })();
   },[session]);
 
   // Los recordatorios diarios los maneja el cron de GitHub Actions (api/cron-recordatorios.js)
   // No se envían correos desde el frontend para evitar duplicados al abrir la app.
 
-  const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(_){}};
+  const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(ex){console.error("persist error",table,ex);showToast("No se pudo guardar el cambio. Revisa tu conexión e intenta de nuevo.","error");}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};
 
   const mkDB=(setter,table)=>updater=>setter(prev=>{
@@ -523,12 +546,18 @@ export default function App(){
   const respList=usuarios.length?[...usuarios.filter(u=>u.active&&u.rol!=="Residente").map(u=>u.nombre),"Sin asignar"]:["Sin asignar"];
   const respAssign=usuarios.length?usuarios.filter(u=>u.active&&u.rol!=="Residente").map(u=>u.nombre):[];
 
+  const _reqIds=new Set(reqs.map(r=>r.id));
+  const nAbiertas=reqs.filter(esAbierta).length;
+  const nOrdVenc=tasks.filter(t=>_reqIds.has(t.requestId)&&tareaPend(t)&&diffDue(t)<0).length;
+  const nMantVenc=mant.filter(m=>getMantStatus(m)==="Vencida").length;
   const navItems=[
-    {id:"dashboard",label:"Dashboard"},
-    {id:"mis_reqs",label:"Mis Solicitudes"},
-    {id:"requests",label:"Solicitudes"},{id:"tasks",label:"Órdenes"},
-    {id:"misolicitudes",label:"Mis Órdenes"},{id:"inspections",label:"Novedades"},{id:"inventory",label:"Inventario"},
-    {id:"mantencion",label:"Mantención"},{id:"emails",label:"Correos"},{id:"reports",label:"Reportes"},{id:"config",label:"Config"},
+    {id:"dashboard",label:"Inicio",icon:"🏠"},
+    {id:"mis_reqs",label:"Mis Solicitudes",icon:"📋"},
+    {id:"requests",label:"Solicitudes",icon:"📋",badge:nAbiertas,badgeTitle:"Solicitudes abiertas"},
+    {id:"tasks",label:"Órdenes de trabajo",icon:"🛠️",badge:nOrdVenc,badgeRed:true,badgeTitle:"Órdenes vencidas sin informe"},
+    {id:"misolicitudes",label:"Mis Órdenes",icon:"✅"},{id:"inspections",label:"Novedades",icon:"📝"},{id:"inventory",label:"Inventario",icon:"📦"},
+    {id:"mantencion",label:"Mantención",icon:"🔧",badge:nMantVenc,badgeRed:true,badgeTitle:"Mantenciones vencidas"},
+    {id:"emails",label:"Correos enviados",icon:"✉️"},{id:"reports",label:"Reportes",icon:"📊"},{id:"config",label:"Configuración",icon:"⚙️"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
     if(n.id==="emails"&&!can(er,"viewEmails")) return false;
@@ -550,7 +579,7 @@ export default function App(){
     if(!session) return;
     const onPop=ev=>{
       ev.preventDefault();
-      if(view==="detail"){ setView("requests"); setSelReq(null); }
+      if(view==="detail"){ setView(er==="Residente"?"mis_reqs":"requests"); setSelReq(null); }
       else if(view!=="dashboard"){ setView("dashboard"); }
       // Siempre empujar estado para evitar salir
       window.history.pushState(null,"",window.location.href);
@@ -575,7 +604,7 @@ export default function App(){
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}}>
             <div style={{minWidth:0}}>
-              <div style={{fontWeight:700,fontSize:mob?15:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{view==="detail"?"Detalle":(navItems.find(n=>n.id===view)||{label:view}).label}</div>
+              <div style={{fontWeight:700,fontSize:mob?15:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{view==="detail"?(selReq?"Solicitud "+selReq.code:"Detalle"):(navItems.find(n=>n.id===view)||{label:view}).label}</div>
               {!mob&&<div style={{color:"#64748b",fontSize:11,marginTop:1}}>{new Date().toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>}
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
@@ -583,12 +612,13 @@ export default function App(){
               {!mob&&<span style={{...bdg("#fff",viewAs?"#7c3aed":"#1e3a5f"),fontSize:12,padding:"5px 10px"}}>{er}</span>}
             </div>
           </div>
-          <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+          <div style={{flex:1,overflowY:"auto",padding:mob?"12px":"16px"}}>
+            {dataLoading&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,fontSize:13,color:"#1d4ed8"}}><div style={{width:16,height:16,border:"3px solid #bfdbfe",borderTop:"3px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Cargando información...<style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>}
             {view==="dashboard"&&er==="Residente"&&<ResidenteReqs reqs={reqs} tasks={tasks} session={session} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
-            {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq} setReqs={setReqsDB} showToast={showToast}/>}
-            {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session}/>}
-            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView("requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
-            {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign}/>}
+            {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq} setReqs={setReqsDB} showToast={showToast} goList={goList}/>}
+            {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session} tab={listTab} setTab={setListTab}/>}
+            {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView(er==="Residente"?"mis_reqs":"requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
+            {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign} onOpen={openReq}/>}
             {view==="misolicitudes"&&<MisSolicitudes tasks={tasks} reqs={reqs} session={session} role={er} onOpen={openReq} mob={mob}/>}
             {view==="mis_reqs"&&<ResidenteReqs reqs={reqs} tasks={tasks} session={session} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
             {view==="provider"&&<ProviderDash role={er} mob={mob} reqs={reqs} session={session}/>}
@@ -601,274 +631,175 @@ export default function App(){
           </div>
         </div>
       </div>
-      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>{setShowNew(false);setView("requests");}} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
-      {toast&&<div style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260}}>{toast.msg}</div>}
+      {showNew&&<NewReqModal role={er} reqs={reqs} setReqs={setReqsDB} addEmail={addEmail} showToast={showToast} onClose={()=>setShowNew(false)} onOpen={openReq} cats={cats} towers={towers} session={session} usuarios={usuarios}/>}
+      {toast&&<div role="status" onClick={()=>setToast(null)} style={{...alrt(toast.type),position:"fixed",bottom:20,right:16,left:mob?16:"auto",zIndex:2000,boxShadow:"0 4px 12px rgba(0,0,0,.15)",minWidth:mob?undefined:260,cursor:"pointer",fontSize:13,marginBottom:0}}>{toast.type==="error"?"⚠ ":"✓ "}{toast.msg}</div>}
     </div>
   );
 }
 
+// ── Ayudas visuales de estado ──────────────────────────────────────────────
+const PASOS=["Ingresada","En revision","Asignada","En proceso","Resuelta","Cerrada"];
+const PASO_LBL={Ingresada:"Ingresada","En revision":"En revisión",Asignada:"Asignada","En proceso":"En proceso",Resuelta:"Resuelta",Cerrada:"Cerrada"};
+// Barra de avance: muestra de un vistazo en qué etapa va la solicitud
+function Pasos({status,mob}){
+  if(status==="Rechazada") return <div style={{...alrt("error"),marginBottom:12}}>Esta solicitud fue <strong>rechazada</strong>.</div>;
+  const idx=Math.max(0,PASOS.indexOf(status));
+  return(
+    <div style={{...card,padding:mob?"10px 8px":"12px 16px",display:"flex",alignItems:"flex-start"}}>
+      {PASOS.map((p,i)=>{
+        const hecho=i<idx||status==="Cerrada", actual=i===idx&&status!=="Cerrada";
+        const col=hecho?"#10b981":actual?"#3b82f6":"#cbd5e1";
+        return(
+          <div key={p} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative",minWidth:0}}>
+            {i>0&&<div style={{position:"absolute",top:mob?9:11,right:"50%",width:"100%",height:2,background:i<=idx?"#10b981":"#e2e8f0"}}/>}
+            <div style={{width:mob?20:24,height:mob?20:24,borderRadius:"50%",background:hecho||actual?col:"#fff",border:"2px solid "+col,color:"#fff",fontSize:mob?10:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",zIndex:1,boxShadow:actual?"0 0 0 4px #dbeafe":"none"}}>{hecho?"✓":actual?i+1:""}</div>
+            <div style={{fontSize:mob?9:11,marginTop:4,textAlign:"center",color:actual?"#1d4ed8":hecho?"#475569":"#94a3b8",fontWeight:actual?700:400,lineHeight:1.2}}>{PASO_LBL[p]}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+// Explica en palabras simples qué pasa con la solicitud y qué viene ahora
+const sigPaso=(r,role,nPend)=>{
+  const sinAs=!r.assignedTo||r.assignedTo==="Sin asignar";
+  if(role==="Residente") return ({
+    Ingresada:"Recibimos tu solicitud. La administración la revisará pronto.",
+    "En revision":"La administración está revisando tu solicitud.",
+    Asignada:"Tu solicitud ya tiene un responsable"+(sinAs?"":": "+r.assignedTo)+".",
+    "En proceso":"Se está trabajando en la solución.",
+    Resuelta:"El trabajo fue realizado. Falta la revisión final de la administración.",
+    Cerrada:"Solicitud cerrada. Si el problema continúa, ingresa una nueva solicitud.",
+    Rechazada:"La solicitud fue rechazada. Revisa los comentarios para conocer el motivo.",
+  })[r.status]||null;
+  if(!esAbierta(r)) return null;
+  if(can(role,"assign")&&sinAs) return "Siguiente paso: asigna un responsable.";
+  if(can(role,"closeCases")&&r.status==="Resuelta") return "Siguiente paso: revisa el trabajo y cierra la solicitud.";
+  if(nPend>0) return "Hay "+nPend+" orden"+(nPend>1?"es":"")+" de trabajo sin informe de cierre.";
+  if(can(role,"createTask")&&r.status==="Asignada") return "Siguiente paso: crea una orden de trabajo para "+r.assignedTo+".";
+  return null;
+};
+
 // ── Dashboard ──────────────────────────────────────────────────────────────
-function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,deleteTask,deleteReq}){
-  const emerg=reqs.filter(r=>r.priority==="Emergencia"&&!["Cerrada","Rechazada"].includes(r.status));
+function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,deleteTask,deleteReq,goList}){
+  const abiertas=reqs.filter(esAbierta).sort(ordPrioridad);
+  const emerg=abiertas.filter(r=>r.priority==="Emergencia");
+  const sinAsignar=abiertas.filter(r=>!r.assignedTo||r.assignedTo==="Sin asignar");
   const recent=[...reqs].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,5);
   const byCat=Object.keys(DEF_CATS).map(c=>({c,n:reqs.filter(r=>r.category===c).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n).slice(0,6);
   const mv=mant.filter(m=>getMantStatus(m)==="Vencida").length;
   const mp=mant.filter(m=>getMantStatus(m)==="Por vencer").length;
   const isAnalyst=role==="Administrador"||role==="Administrador Edificio"||role==="Comite";
+  const puedeCerrar=can(role,"closeCases")&&!!setReqs;
   const [closingId,setClosingId]=useState(null);
   const [closeNote,setCloseNote]=useState("");
+  const [verTodas,setVerTodas]=useState(false);
+  const [verVenc,setVerVenc]=useState(false);
 
   const quickClose=(r)=>{
-    if(!closeNote.trim()){return;}
-    const upd={...r,status:"Cerrada",history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Cerrada desde dashboard",from:r.status,to:"Cerrada",note:closeNote}]};
+    if(!closeNote.trim()){showToast("Escribe una nota de cierre","error");return;}
+    const upd={...r,status:"Cerrada",history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Cerrada desde dashboard",from:r.status,to:"Cerrada",note:closeNote.trim()}]};
     setReqs(p=>p.map(x=>x.id===r.id?upd:x));
     showToast("Solicitud "+r.code+" cerrada");
     setClosingId(null); setCloseNote("");
   };
 
-  // ── Cálculos para análisis ──
-  const cerradas=reqs.filter(r=>r.status==="Cerrada");
-  const avgResolucion=cerradas.length?Math.round(cerradas.reduce((s,r)=>{
-    const hist=r.history||[];
-    const cierre=hist.find(h=>h.to==="Cerrada");
-    if(!cierre||!r.createdAt) return s;
-    return s+(new Date(cierre.date)-new Date(r.createdAt))/86400000;
-  },0)/cerradas.length):null;
+  const avgResolucion=promDias(reqs.filter(r=>r.status==="Cerrada"));
+  const tareasVencidas=tasks.filter(t=>tareaPend(t)&&diffDue(t)<0).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const tareasPorVencer=tasks.filter(t=>tareaPend(t)&&diffDue(t)>=0&&diffDue(t)<=3).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const listaVenc=verVenc?tareasVencidas:tareasVencidas.slice(0,5);
+  const listaAb=verTodas?abiertas:abiertas.slice(0,8);
 
-  const avgAsignacion=reqs.filter(r=>r.assignedTo!=="Sin asignar").length?Math.round(reqs.filter(r=>{
-    const h=r.history||[];
-    return h.some(x=>x.to==="Asignada");
-  }).reduce((s,r)=>{
-    const h=(r.history||[]).find(x=>x.to==="Asignada");
-    if(!h||!r.createdAt) return s;
-    return s+(new Date(h.date)-new Date(r.createdAt))/3600000;
-  },0)/Math.max(reqs.filter(r=>{const h=r.history||[];return h.some(x=>x.to==="Asignada");}).length,1)):null;
-
-  const hoy=new Date(); hoy.setHours(0,0,0,0);
-  const tareasVencidas=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<0);
-  const tareasPorVencer=tasks.filter(t=>t.dueDate&&!t.informe?.trim()&&t.status!=="Completada"&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)>=0&&Math.ceil((new Date(t.dueDate)-hoy)/86400000)<=3);
-
-  // Por responsable
-  const respStats={};
-  tasks.forEach(t=>{
-    const r=t.responsible||"Sin asignar";
-    if(!respStats[r]) respStats[r]={total:0,completadas:0,dias:[]};
-    respStats[r].total++;
-    if(t.status==="Completada"){
-      respStats[r].completadas++;
-      if(t.dueDate&&t.createdAt){const d=(new Date(t.dueDate)-new Date(t.createdAt))/86400000;if(d>=0)respStats[r].dias.push(d);}
-    }
-  });
-  const respArr=Object.entries(respStats).sort((a,b)=>b[1].total-a[1].total).slice(0,5);
-
-  // Tendencia mensual (últimos 6 meses)
-  const meses=[];
-  for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);meses.push({key:d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"),label:d.toLocaleString("es-CL",{month:"short",year:"2-digit"})});}
-  const tendencia=meses.map(m=>({
-    label:m.label,
-    creadas:reqs.filter(r=>r.createdAt&&r.createdAt.startsWith(m.key)).length,
-    cerradas:reqs.filter(r=>{const h=(r.history||[]).find(x=>x.to==="Cerrada");return h&&h.date&&h.date.startsWith(m.key);}).length,
-  }));
-  const maxTend=Math.max(...tendencia.map(m=>Math.max(m.creadas,m.cerradas)),1);
-
-  // Por categoría con tiempo promedio
-  const catStats=Object.keys(DEF_CATS).map(c=>{
-    const rCat=reqs.filter(r=>r.category===c);
-    const rCerradas=rCat.filter(r=>r.status==="Cerrada");
-    const avgDias=rCerradas.length?Math.round(rCerradas.reduce((s,r)=>{
-      const h=(r.history||[]).find(x=>x.to==="Cerrada");
-      if(!h||!r.createdAt) return s;
-      return s+(new Date(h.date)-new Date(r.createdAt))/86400000;
-    },0)/rCerradas.length):null;
-    return {c,total:rCat.length,cerradas:rCerradas.length,avgDias};
-  }).filter(x=>x.total>0).sort((a,b)=>b.total-a.total).slice(0,8);
-  const maxCatTotal=Math.max(...catStats.map(x=>x.total),1);
+  const filaOrden=(t,borde,badge)=>{
+    const req=reqs.find(r=>r.id===t.requestId);
+    return(
+      <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid "+borde,flexWrap:"wrap",gap:8}}>
+        <div style={{cursor:req?"pointer":"default",minWidth:0,flex:1}} onClick={()=>req&&onOpen(req)} title={req?"Abrir solicitud "+req.code:""}>
+          <div style={{fontSize:12,fontWeight:600}}>{t.title}</div>
+          <div style={{fontSize:11,color:"#64748b"}}>{req?<span style={{color:"#3b82f6",fontWeight:600}}>{req.code}</span>:"—"} · 👤 {t.responsible||"Sin responsable"} · 📅 {fmtD(t.dueDate)}</div>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {badge}
+          {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden?"))deleteTask(t.id);}}>🗑</button>}
+        </div>
+      </div>
+    );
+  };
 
   return(
     <div>
       {emerg.map(em=>(
         <div key={em.id} style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",cursor:"pointer",display:"flex",alignItems:"center",gap:10}} onClick={()=>onOpen(em)}>
           <span style={{fontWeight:700,color:"#dc2626"}}>⚠</span>
-          <div style={{flex:1}}><strong style={{color:"#dc2626"}}>EMERGENCIA: {em.code}</strong><div style={{fontSize:12,color:"#ef4444"}}>{em.category}</div></div>
+          <div style={{flex:1}}><strong style={{color:"#dc2626"}}>EMERGENCIA: {em.code}</strong><div style={{fontSize:12,color:"#ef4444"}}>{em.category} · abierta hace {diasAbierta(em)} día(s)</div></div>
         </div>
       ))}
-      {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>{mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
+      {(mv>0||mp>0)&&<div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#92400e"}}>!</span><strong style={{color:"#92400e"}}>Mantenciones: {mv>0?mv+" vencida(s)":""}{mv>0&&mp>0?" / ":""}{mp>0?mp+" por vencer":""}</strong></div>}
 
       {/* KPIs unificados */}
-      <Grid cols={mob?2:4} mob={mob}>
-        <Kpi value={reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length} label="Solicitudes abiertas" color="#3b82f6" mob={mob}/>
-        <Kpi value={reqs.filter(r=>r.priority==="Emergencia"&&!["Cerrada","Rechazada"].includes(r.status)).length} label="Emergencias activas" color="#ef4444" mob={mob}/>
-        <Kpi value={reqs.filter(r=>r.assignedTo==="Sin asignar"&&!["Cerrada","Rechazada"].includes(r.status)).length} label="Sin asignar" color="#f59e0b" mob={mob}/>
-        <Kpi value={avgResolucion!==null?avgResolucion+" días":"---"} label="Prom. resolución" color="#10b981" mob={mob}/>
+      <Grid cols={4} mob={mob}>
+        <Kpi value={abiertas.length} label="Solicitudes abiertas" color="#3b82f6" mob={mob} onClick={goList&&(()=>goList("abiertas"))}/>
+        <Kpi value={emerg.length} label="Emergencias activas" color="#ef4444" mob={mob} onClick={goList&&(()=>goList("emergencias"))}/>
+        <Kpi value={sinAsignar.length} label="Sin asignar" color="#f59e0b" mob={mob} onClick={goList&&(()=>goList("sinasignar"))}/>
+        <Kpi value={fmtDias(avgResolucion)} label="Prom. resolución" color="#10b981" mob={mob}/>
       </Grid>
 
-      {/* Alertas órdenes vencidas */}
+      {/* Órdenes vencidas sin informe */}
       {tareasVencidas.length>0&&(
         <div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",marginBottom:12}}>
           <div style={{fontWeight:700,color:"#dc2626",fontSize:13,marginBottom:8}}>⚠ Órdenes vencidas sin informe ({tareasVencidas.length})</div>
-          {tareasVencidas.slice(0,5).map(t=>{
-            const req=reqs.find(r=>r.id===t.requestId);
-            const dias=Math.abs(Math.ceil((new Date(t.dueDate)-hoy)/86400000));
-            return(
-              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fca5a5",flexWrap:"wrap",gap:8}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:600,color:"#991b1b"}}>{t.title}</div>
-                  <div style={{fontSize:11,color:"#64748b"}}>{req?.code||"—"} · 👤 {t.responsible}</div>
-                </div>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <span style={bdg("#ef4444","#fef2f2")}>{dias} día(s) vencida</span>
-                  {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden?"))deleteTask(t.id);}}>🗑</button>}
-                </div>
-              </div>
-            );
-          })}
+          {listaVenc.map(t=>filaOrden(t,"#fca5a5",<span style={bdg("#ef4444","#fff")}>{Math.abs(diffDue(t))} día(s) vencida</span>))}
+          {tareasVencidas.length>5&&<button style={{...BS(true),marginTop:8,fontSize:11}} onClick={()=>setVerVenc(v=>!v)}>{verVenc?"Ver menos":"Ver las "+tareasVencidas.length}</button>}
         </div>
       )}
 
-      {/* Próximas a vencer */}
+      {/* Órdenes por vencer */}
       {tareasPorVencer.length>0&&(
         <div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",marginBottom:12}}>
-          <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⏰ Órdenes por vencer (3 días) ({tareasPorVencer.length})</div>
-          {tareasPorVencer.map(t=>{
-            const req=reqs.find(r=>r.id===t.requestId);
-            const dias=Math.ceil((new Date(t.dueDate)-hoy)/86400000);
-            return(
-              <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #fde68a",flexWrap:"wrap",gap:8}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:600}}>{t.title}</div>
-                  <div style={{fontSize:11,color:"#64748b"}}>{req?.code||"—"} · 👤 {t.responsible}</div>
-                </div>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <span style={bdg("#92400e","#fffbeb")}>{dias===0?"Hoy":dias+" día(s)"}</span>
-                  {can(role,"manageConfig")&&deleteTask&&<button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden?"))deleteTask(t.id);}}>🗑</button>}
-                </div>
-              </div>
-            );
-          })}
+          <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⏰ Órdenes por vencer en 3 días ({tareasPorVencer.length})</div>
+          {tareasPorVencer.map(t=>filaOrden(t,"#fde68a",<span style={bdg("#92400e","#fff")}>{diffDue(t)===0?"Vence hoy":diffDue(t)+" día(s)"}</span>))}
         </div>
       )}
 
+      {/* Solicitudes abiertas: lo que hay que resolver, ordenado por prioridad y antigüedad */}
       {isAnalyst&&(
-        <>
-          {/* Tendencia mensual */}
-          <div style={card}>
-            <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📈 Tendencia mensual (últimos 6 meses)</div>
-            <div style={{display:"flex",gap:4,alignItems:"flex-end",height:100}}>
-              {tendencia.map(m=>(
-                <div key={m.label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                  <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:80}}>
-                    <div title={"Creadas: "+m.creadas} style={{flex:1,background:"#3b82f6",borderRadius:"3px 3px 0 0",height:Math.round((m.creadas/maxTend)*76)+4}}/>
-                    <div title={"Cerradas: "+m.cerradas} style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",height:Math.round((m.cerradas/maxTend)*76)+4}}/>
-                  </div>
-                  <div style={{fontSize:9,color:"#94a3b8",textAlign:"center"}}>{m.label}</div>
-                  <div style={{fontSize:9,color:"#64748b"}}>{m.creadas}/{m.cerradas}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:12,marginTop:8,justifyContent:"center"}}>
-              <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#3b82f6",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Creadas</span></div>
-              <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{width:10,height:10,background:"#10b981",borderRadius:2}}/><span style={{fontSize:11,color:"#64748b"}}>Cerradas</span></div>
-            </div>
+        <div style={card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+            <div style={{fontWeight:700,fontSize:13}}>📋 Solicitudes abiertas ({abiertas.length})</div>
+            {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
           </div>
-
-          <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
-            {/* Por categoría con tiempo */}
-            <div style={card}>
-              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>📂 Solicitudes por categoría</div>
-              {catStats.length===0?<Empty msg="Sin datos"/>:catStats.map(x=>(
-                <div key={x.c} style={{marginBottom:10}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130,fontWeight:500}}>{x.c}</span>
-                    <div style={{display:"flex",gap:6,flexShrink:0}}>
-                      <span style={{fontWeight:700}}>{x.total}</span>
-                      {x.avgDias!==null&&<span style={bdg("#64748b","#f1f5f9")}>{x.avgDias}d prom.</span>}
-                    </div>
+          <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>Ordenadas por prioridad y antigüedad. Los gráficos y tendencias están en Reportes.</div>
+          {abiertas.length===0?<Empty msg="No hay solicitudes abiertas 🎉"/>:listaAb.map(r=>{
+            const da=diasAbierta(r);
+            const sinAs=!r.assignedTo||r.assignedTo==="Sin asignar";
+            return(
+              <div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
+                  <div style={{minWidth:0}}>
+                    <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span>
+                    <span style={{fontSize:11,color:"#64748b",marginLeft:6}}>{r.category}</span>
+                    <div style={{fontSize:11,color:sinAs?"#d97706":"#94a3b8",fontWeight:sinAs?600:400}}>👤 {sinAs?"Sin asignar":r.assignedTo} · <span style={{color:da>30?"#ef4444":da>7?"#d97706":"#94a3b8",fontWeight:da>7?600:400}}>{da===0?"hoy":"hace "+da+" día"+(da===1?"":"s")}</span></div>
                   </div>
-                  <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
-                    <div style={{height:6,background:"#6366f1",borderRadius:99,width:(x.total/maxCatTotal*100)+"%"}}/>
+                  <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end",flexShrink:0}}>
+                    <PBadge p={r.priority}/><SBadge s={r.status}/>
                   </div>
                 </div>
-              ))}
-            </div>
-
-            {/* Por responsable */}
-            <div style={card}>
-              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>👤 Carga por responsable</div>
-              {respArr.length===0?<Empty msg="Sin datos"/>:respArr.map(([resp,st])=>{
-                const pct=st.total>0?Math.round(st.completadas/st.total*100):0;
-                const avgDias=st.dias.length?Math.round(st.dias.reduce((s,d)=>s+d,0)/st.dias.length):null;
-                return(
-                  <div key={resp} style={{marginBottom:12}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
-                      <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{resp}</span>
-                      <div style={{display:"flex",gap:4,flexShrink:0}}>
-                        <span style={bdg("#10b981","#f0fdf4")}>{st.completadas}/{st.total}</span>
-                        {avgDias!==null&&<span style={bdg("#64748b","#f1f5f9")}>{avgDias}d prom.</span>}
-                      </div>
+                {puedeCerrar&&(
+                  closingId===r.id?(
+                    <div style={{marginTop:6,display:"flex",gap:6}}>
+                      <input style={{...inp,flex:1,fontSize:12,padding:"5px 8px"}} placeholder="Nota de cierre (obligatoria)..." value={closeNote} onChange={ev=>setCloseNote(ev.target.value)} onKeyDown={ev=>{if(ev.key==="Enter")quickClose(r);if(ev.key==="Escape"){setClosingId(null);setCloseNote("");}}} autoFocus/>
+                      <button style={BP(true)} onClick={()=>quickClose(r)}>✓ Cerrar</button>
+                      <button style={BS(true)} onClick={()=>{setClosingId(null);setCloseNote("");}}>✕</button>
                     </div>
-                    <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
-                      <div style={{height:6,background:pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444",borderRadius:99,width:pct+"%"}}/>
-                    </div>
-                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{pct}% completadas</div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Por prioridad */}
-            <div style={card}>
-              <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>🚨 Solicitudes por prioridad</div>
-              {PRIORITIES.map(p=>{
-                const n=reqs.filter(r=>r.priority===p).length;
-                const pct=reqs.length?Math.round(n/reqs.length*100):0;
-                return(
-                  <div key={p} style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                    <PBadge p={p}/>
-                    <div style={{flex:1}}>
-                      <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
-                        <div style={{height:6,background:PC[p],borderRadius:99,width:pct+"%"}}/>
-                      </div>
-                    </div>
-                    <span style={{fontWeight:700,fontSize:12,minWidth:20,textAlign:"right"}}>{n}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Solicitudes recientes con cierre rápido */}
-            <div style={card}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{fontWeight:700,fontSize:13}}>🕐 Solicitudes recientes</div>
-                {can(role,"create")&&<button style={BP(true)} onClick={onNew}>+ Nueva</button>}
+                  ):(
+                    <button style={{...BS(true),marginTop:4,fontSize:11}} onClick={()=>{setClosingId(r.id);setCloseNote("");}}>✓ Cerrar</button>
+                  )
+                )}
               </div>
-              {recent.length===0?<Empty msg="Sin solicitudes"/>:recent.map(r=>(
-                <div key={r.id} style={{padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:8,cursor:"pointer"}} onClick={()=>onOpen(r)}>
-                    <div style={{minWidth:0}}>
-                      <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span>
-                      <span style={{fontSize:11,color:"#64748b",marginLeft:6}}>{r.category}</span>
-                      <div style={{fontSize:11,color:"#94a3b8"}}>👤 {r.assignedTo||"Sin asignar"}</div>
-                    </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end",flexShrink:0}}>
-                      <PBadge p={r.priority}/><SBadge s={r.status}/>
-                    </div>
-                  </div>
-                  {can(role,"closeCases")&&!["Cerrada","Rechazada"].includes(r.status)&&(
-                    closingId===r.id?(
-                      <div style={{marginTop:6,display:"flex",gap:6}}>
-                        <input style={{...inp,flex:1,fontSize:12,padding:"5px 8px"}} placeholder="Nota de cierre..." value={closeNote} onChange={ev=>setCloseNote(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&quickClose(r)} autoFocus/>
-                        <button style={BP(true)} onClick={()=>quickClose(r)}>✓</button>
-                        <button style={BS(true)} onClick={()=>{setClosingId(null);setCloseNote("");}}>✕</button>
-                      </div>
-                    ):(
-                      <button style={{...BS(true),marginTop:4,fontSize:11}} onClick={ev=>{ev.stopPropagation();setClosingId(r.id);setCloseNote("");}}>✓ Cerrar</button>
-                    )
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
+            );
+          })}
+          {abiertas.length>8&&<button style={{...BS(true),marginTop:10,fontSize:11}} onClick={()=>setVerTodas(v=>!v)}>{verTodas?"Ver menos":"Ver las "+abiertas.length}</button>}
+        </div>
       )}
 
       {/* Dashboard básico para otros roles */}
@@ -902,93 +833,134 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,dele
 }
 
 // ── ReqList ────────────────────────────────────────────────────────────────
-function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towers,respList,session}){
-  const [fi,setFi]=useState({status:"",priority:"",tower:"",responsible:"",proveedor:"",q:""});
+function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towers,respList,session,tab,setTab}){
+  const FI0={status:"",priority:"",tower:"",responsible:"",proveedor:"",q:""};
+  const [fi,setFi]=useState(FI0);
   const [sort,setSort]=useState("date");
+  const [tabLocal,setTabLocal]=useState("abiertas");
+  const tabAct=tab||tabLocal;
+  const cambiarTab=t=>{(setTab||setTabLocal)(t);};
   const actTowers=(towers||[]).filter(t=>t.active).map(t=>t.name);
   const base=role==="Residente"?reqs.filter(r=>r.requesterEmail===session?.email):reqs;
+  const sinAsig=r=>!r.assignedTo||r.assignedTo==="Sin asignar";
+  // Pestañas rápidas: lo normal es trabajar sobre lo que sigue abierto
+  const TABS=[
+    {id:"abiertas",label:"Abiertas",f:esAbierta},
+    {id:"sinasignar",label:"Sin asignar",f:r=>esAbierta(r)&&sinAsig(r)},
+    {id:"emergencias",label:"Emergencias",f:r=>esAbierta(r)&&r.priority==="Emergencia"},
+    {id:"cerradas",label:"Cerradas",f:r=>!esAbierta(r)},
+    {id:"todas",label:"Todas",f:()=>true},
+  ];
+  const tabDef=TABS.find(t=>t.id===tabAct)||TABS[0];
 
   // Listas únicas para filtros
   const respOptions=[...new Set(base.map(r=>r.assignedTo).filter(x=>x&&x!=="Sin asignar"))].sort();
   const provOptions=[...new Set(base.map(r=>r.proveedor).filter(Boolean))].sort();
+  const hayFiltros=Object.values(fi).some(Boolean);
+  const q=fi.q.trim().toLowerCase();
 
   const visible=base.filter(r=>{
+    if(!tabDef.f(r)) return false;
     if(fi.status&&r.status!==fi.status) return false;
     if(fi.priority&&r.priority!==fi.priority) return false;
     if(fi.tower&&r.tower!==fi.tower) return false;
     if(fi.responsible&&r.assignedTo!==fi.responsible) return false;
     if(fi.proveedor&&r.proveedor!==fi.proveedor) return false;
-    if(fi.q&&!(r.code+" "+r.requesterName+" "+r.category).toLowerCase().includes(fi.q.toLowerCase())) return false;
+    if(q&&![r.code,r.requesterName,r.category,r.subcategory,r.description,r.unit,r.assignedTo,r.proveedor].filter(Boolean).join(" ").toLowerCase().includes(q)) return false;
     return true;
-  }).sort((a,b)=>sort==="priority"?PRIORITIES.indexOf(a.priority)-PRIORITIES.indexOf(b.priority):new Date(b.createdAt)-new Date(a.createdAt));
+  }).sort((a,b)=>sort==="priority"?ordPrioridad(a,b):new Date(b.createdAt)-new Date(a.createdAt));
 
   const quickSt=(r,ns)=>{
     if(!can(role,"changeStatus")){showToast("Sin permisos","error");return;}
     const upd={...r,status:ns,history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Estado cambiado",from:r.status,to:ns}]};
     setReqs(p=>p.map(x=>x.id===r.id?upd:x));
-    showToast("Estado actualizado");
+    showToast(r.code+" ahora está: "+ns);
   };
+  const antig=r=>{const d=diasAbierta(r);return d===0?"hoy":"hace "+d+" día"+(d===1?"":"s");};
+  const corta=(t,n)=>!t?"":t.length>n?t.slice(0,n)+"…":t;
 
   return(
     <div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+        {TABS.map(t=>{
+          const n=base.filter(t.f).length, on=tabAct===t.id;
+          const rojo=t.id==="emergencias"&&n>0, amar=t.id==="sinasignar"&&n>0;
+          const col=rojo?"#dc2626":amar?"#d97706":"#3b82f6";
+          return <button key={t.id} onClick={()=>cambiarTab(t.id)} style={{padding:mob?"8px 12px":"6px 12px",borderRadius:99,fontSize:12,cursor:"pointer",border:"1px solid "+(on?col:"#e2e8f0"),background:on?col:"#fff",color:on?"#fff":(rojo||amar?col:"#475569"),fontWeight:on||rojo||amar?600:400}}>{t.label} <span style={{opacity:.85}}>({n})</span></button>;
+        })}
+      </div>
       <div style={{...card,padding:12,marginBottom:12}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
-          <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
+          <input style={{...inp,flex:"2 1 180px",minWidth:140}} placeholder="🔍 Buscar por código, nombre, depto o descripción..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
           {[["status","Estado",STATUSES],["priority","Prioridad",PRIORITIES],["tower","Torre",actTowers]].map(([k,l,opts])=>(
-            <select key={k} style={{...sel,flex:1}} value={fi[k]} onChange={ev=>setFi(p=>({...p,[k]:ev.target.value}))}>
-              <option value="">...{l}</option>
+            <select key={k} style={{...sel,flex:"1 1 110px",color:fi[k]?"#1e293b":"#94a3b8"}} value={fi[k]} onChange={ev=>{const v=ev.target.value;setFi(p=>({...p,[k]:v}));if(k==="status"&&v)cambiarTab("todas");}}>
+              <option value="">{l}: todos</option>
               {opts.map(o=><option key={o}>{o}</option>)}
             </select>
           ))}
-          <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
-            <option value="">...Responsable</option>
+          <select style={{...sel,flex:"1 1 110px",color:fi.responsible?"#1e293b":"#94a3b8"}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}>
+            <option value="">Responsable: todos</option>
             {respOptions.map(o=><option key={o}>{o}</option>)}
           </select>
-          <select style={{...sel,flex:1}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
-            <option value="">...Proveedor</option>
-            {provOptions.map(o=><option key={o}>{o}</option>)}
-          </select>
+          {provOptions.length>0&&(
+            <select style={{...sel,flex:"1 1 110px",color:fi.proveedor?"#1e293b":"#94a3b8"}} value={fi.proveedor} onChange={ev=>setFi(p=>({...p,proveedor:ev.target.value}))}>
+              <option value="">Proveedor: todos</option>
+              {provOptions.map(o=><option key={o}>{o}</option>)}
+            </select>
+          )}
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <button style={sort==="date"?BP(true):BS(true)} onClick={()=>setSort("date")}>Fecha</button>
-          <button style={sort==="priority"?BP(true):BS(true)} onClick={()=>setSort("priority")}>Prioridad</button>
-          <span style={{marginLeft:"auto",fontSize:11,color:"#64748b"}}>{visible.length} solicitudes</span>
+          <span style={{fontSize:11,color:"#94a3b8"}}>Ordenar:</span>
+          <button style={sort==="date"?BP(true):BS(true)} onClick={()=>setSort("date")}>Más recientes</button>
+          <button style={sort==="priority"?BP(true):BS(true)} onClick={()=>setSort("priority")}>Más urgentes</button>
+          {hayFiltros&&<button style={BG(true)} onClick={()=>setFi(FI0)}>✕ Limpiar filtros</button>}
+          <span style={{marginLeft:"auto",fontSize:11,color:"#64748b"}}>{visible.length} solicitud{visible.length===1?"":"es"}</span>
         </div>
       </div>
-      {visible.length===0?<Empty msg="Sin solicitudes"/>:mob?(
+      {visible.length===0?(
+        <div style={{...card,textAlign:"center",padding:"32px 16px"}}>
+          <div style={{fontSize:13,color:"#64748b",marginBottom:hayFiltros?10:0}}>{hayFiltros?"Ninguna solicitud coincide con la búsqueda o los filtros.":tabAct==="abiertas"?"No hay solicitudes abiertas 🎉":tabAct==="sinasignar"?"Todas las solicitudes abiertas tienen responsable ✓":tabAct==="emergencias"?"No hay emergencias activas ✓":"Sin solicitudes"}</div>
+          {hayFiltros&&<button style={BS(true)} onClick={()=>setFi(FI0)}>Limpiar filtros</button>}
+        </div>
+      ):mob?(
         <div>{visible.map(r=>(
           <div key={r.id} style={{...card,padding:12,marginBottom:8,cursor:"pointer",borderLeft:"4px solid "+(PC[r.priority]||"#e2e8f0")}} onClick={()=>onOpen(r)}>
             <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-              <div style={{minWidth:0}}><span style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{r.code}</span><div style={{fontSize:12}}>{r.requesterName}</div><div style={{fontSize:11,color:"#64748b"}}>{r.category}</div></div>
-              <div style={{display:"flex",flexDirection:"column",gap:4}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
+              <div style={{minWidth:0}}>
+                <span style={{fontWeight:700,color:"#3b82f6",fontSize:13}}>{r.code}</span><span style={{fontSize:11,color:"#64748b",marginLeft:6}}>{r.category}</span>
+                {r.description&&<div style={{fontSize:12,color:"#334155",marginTop:2}}>{corta(r.description,70)}</div>}
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{r.requesterName||"—"}{r.unit?" · "+(r.tower&&r.tower!=="Comun"?r.tower+"/":"")+r.unit:""} · {antig(r)}</div>
+                <div style={{fontSize:11,color:sinAsig(r)&&esAbierta(r)?"#d97706":"#94a3b8",fontWeight:sinAsig(r)&&esAbierta(r)?600:400}}>👤 {sinAsig(r)?"Sin asignar":r.assignedTo}</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
             </div>
           </div>
         ))}</div>
       ):(
-        <div style={card}>
+        <div style={{...card,overflowX:"auto"}}>
           <table style={tbl}>
-            <thead><tr>{["","ID","Solicitante","Categoria","Torre","Prioridad","Estado","Responsable","Fecha",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
+            <thead><tr>{["","Código","Solicitante","Solicitud","Ubicación","Prioridad","Estado","Responsable","Proveedor","Ingreso",""].map((h,i)=><th key={i} style={thS}>{h}</th>)}</tr></thead>
             <tbody>{visible.map(r=>(
-              <tr key={r.id} style={{background:r.priority==="Emergencia"?"#fef2f2":"",cursor:"pointer"}} onClick={()=>onOpen(r)}>
+              <tr key={r.id} style={{background:r.priority==="Emergencia"&&esAbierta(r)?"#fef2f2":"",cursor:"pointer"}} onClick={()=>onOpen(r)} title="Abrir solicitud">
                 <td style={tdS}>{r.priority==="Emergencia"?"⚠":""}</td>
                 <td style={tdS}><span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span></td>
                 <td style={tdS}><div>{r.requesterName}</div><div style={{fontSize:10,color:"#94a3b8"}}>{r.requesterEmail}</div></td>
-                <td style={tdS}>{r.category}</td>
-                <td style={tdS}>{r.tower}/{r.unit}</td>
+                <td style={{...tdS,maxWidth:240}}><div>{r.category}</div>{r.description&&<div style={{fontSize:10,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.description}>{corta(r.description,60)}</div>}</td>
+                <td style={tdS}>{r.tower}{r.unit?"/"+r.unit:""}</td>
                 <td style={tdS}><PBadge p={r.priority}/></td>
                 <td style={tdS}><SBadge s={r.status}/></td>
-                <td style={tdS}>{r.assignedTo}</td>
+                <td style={{...tdS,color:sinAsig(r)&&esAbierta(r)?"#d97706":undefined,fontWeight:sinAsig(r)&&esAbierta(r)?600:400}}>{r.assignedTo}</td>
                 <td style={tdS}>{r.proveedor||"—"}</td>
-                <td style={tdS}><span style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</span></td>
+                <td style={tdS}><div style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</div>{esAbierta(r)&&<div style={{fontSize:10,color:diasAbierta(r)>30?"#ef4444":diasAbierta(r)>7?"#d97706":"#94a3b8"}}>{antig(r)}</div>}</td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
                     {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-                      <select style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
+                      <select title="Cambiar estado" style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
                         {STATUSES.map(s=><option key={s}>{s}</option>)}
                       </select>
                     )}
                     {can(role,"manageConfig")&&(
-                      <button style={BD(true)} onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"?"))deleteReq(r.id);}}>🗑</button>
+                      <button style={BD(true)} title="Eliminar solicitud" onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"? Esta acción no se puede deshacer."))deleteReq(r.id);}}>🗑</button>
                     )}
                   </div>
                 </td>
@@ -1041,7 +1013,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   };
   const addCmt=()=>{
     if(!comment.trim()) return;
-    upd({comments:[...safeComments,{id:"c"+uid(),user:role,date:new Date().toISOString(),text:comment}]});
+    upd({comments:[...safeComments,{id:"c"+uid(),user:session?.nombre&&session.nombre!==role?session.nombre+" ("+role+")":role,date:new Date().toISOString(),text:comment.trim()}]});
     setComment(""); showToast("Comentario agregado");
   };
   const closeFinal=()=>{
@@ -1053,11 +1025,11 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 
   const isProv=role==="Proveedor";
   const tabs=[
-    ...(isProv?[]:[{id:"info",label:"Info"}]),
+    ...(isProv?[]:[{id:"info",label:"Información"}]),
     ...(isProv?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
     {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
     {id:"informe",label:"Informe OT"},
-    ...(isProv?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
+    ...(isProv||role==="Residente"?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
   ];
 
   return(
@@ -1076,7 +1048,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               <div><label style={lbl}>Estado</label>
               <div style={{display:"flex",gap:6}}>
                 <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
-                <button style={BP(true)} onClick={applyStatus}>OK</button>
+                <button style={BP(true)} onClick={applyStatus} disabled={ns===r.status} title={ns===r.status?"Elige un estado distinto":""}>Cambiar</button>
               </div></div>
             )}
             {can(role,"assign")&&(
@@ -1094,15 +1066,17 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                   const val=document.getElementById("prov-input").value.trim();
                   upd({proveedor:val||null});
                   showToast("Proveedor actualizado");
-                }}>OK</button>
+                }}>Guardar</button>
               </div></div>
             )}
-            {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden</button>}
-            {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>Cerrar</button>}
-            <button style={BS(true)} onClick={()=>setShowEv("avance")}>Evidencia</button>
+            {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden de trabajo</button>}
+            {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
+            <button style={BS(true)} onClick={()=>setShowEv("avance")}>📷 Subir evidencia</button>
           </div>
         </div>
       )}
+      {!isProv&&<Pasos status={r.status} mob={mob}/>}
+      {(()=>{const msg=sigPaso(r,role,myTasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada"&&!(t.informe||"").trim()).length);return msg?<div style={{...alrt("info"),marginBottom:12,fontSize:13}}>💡 {msg}</div>:null;})()}
       <Tabs tabs={tabs} active={tab} onChange={setTab}/>
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
@@ -1133,6 +1107,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               <div key={i} style={{paddingLeft:16,paddingBottom:14,borderLeft:"2px solid #e2e8f0",marginLeft:4}}>
                 <div style={{fontSize:13,fontWeight:600}}>{h.action}</div>
                 {h.from&&h.to&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}><SBadge s={h.from}/> → <SBadge s={h.to}/></div>}
+                {h.note&&<div style={{fontSize:12,color:"#374151",marginTop:3,fontStyle:"italic"}}>“{h.note}”</div>}
                 <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{fmt(h.date)} - {h.user}</div>
               </div>
             ))}</div>
@@ -1490,114 +1465,174 @@ function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
 }
 
 // ── NewReqModal ────────────────────────────────────────────────────────────
+// Datos de contacto del residente recordados en este dispositivo (para no volver a escribirlos)
+const RES_LS="ca_residente";
+const getResLS=()=>{ try{ return JSON.parse(localStorage.getItem(RES_LS)||"{}")||{}; }catch(_){ return {}; } };
+const setResLS=d=>{ try{ localStorage.setItem(RES_LS,JSON.stringify(d)); }catch(_){} };
+const PRIO_HELP={
+  Baja:"Puede esperar. No afecta el uso normal.",
+  Media:"Molesta, pero se puede seguir usando.",
+  Alta:"Impide el uso normal o puede empeorar pronto.",
+  Emergencia:"Riesgo para personas o daño grave (fuga de gas o agua, corte eléctrico general, ascensor detenido con personas).",
+};
+const MAX_FOTOS=6;
+
 function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
+  const mob=useMob();
   const actCats=cats.filter(c=>c.active);
   const actTowers=towers.filter(t=>t.active);
   const initCat=actCats[0]||{name:"",subs:[""]};
   const initTower=actTowers[0]||{name:""};
   const isAdmin=role==="Administrador"||role==="Administrador Edificio";
+  const esResidente=role==="Residente";
   const [tipo,setTipo]=useState(isAdmin?"Administrativo":"Incidencia");
   const adminCatList=Object.keys(ADMIN_CATS);
   const [adminCat,setAdminCat]=useState(adminCatList[0]);
   const [adminSub,setAdminSub]=useState(ADMIN_CATS[adminCatList[0]][0]);
-  const [f,setF]=useState({requesterName:session?.nombre||"",requesterEmail:session?.email||"",requesterPhone:"",tower:initTower.name,unit:"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:false,affectedTowers:[]});
+  const [f,setF]=useState(()=>{
+    const rec=esResidente?getResLS():{};
+    const torreOk=rec.tower&&actTowers.some(t=>t.name===rec.tower);
+    return {requesterName:session?.nombre&&session.id!=="guest"?session.nombre:(rec.requesterName||""),requesterEmail:session?.email||rec.requesterEmail||"",requesterPhone:rec.requesterPhone||"",tower:torreOk?rec.tower:initTower.name,unit:rec.unit||"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:true,affectedTowers:[]};
+  });
 
   const isAreaComun=f.tower==="Comun";
   const [errs,setErrs]=useState({});
-  const [prevs,setPrevs]=useState([]);
-  const [rawFiles,setRawFiles]=useState([]);
+  const [prevs,setPrevs]=useState([]); // {id,name,url,file}
   const [done,setDone]=useState(null);
   const [saving,setSaving]=useState(false);
   const fileRef=useRef();
-  const setFld=(k,v)=>setF(p=>({...p,[k]:v}));
+  const boxRef=useRef();
+  // Al editar un campo se borra su error, para que el rojo desaparezca apenas se corrige
+  const setFld=(k,v)=>{setF(p=>({...p,[k]:v}));setErrs(p=>{if(!p[k])return p;const n={...p};delete n[k];return n;});};
+  const inpM=mob?{...inp,fontSize:16,padding:"10px"}:inp;   // 16px evita el zoom automático en iPhone
+  const selM=mob?{...sel,fontSize:16,padding:"10px"}:sel;
+  const errTxt=k=>errs[k]?<div style={{color:"#ef4444",fontSize:11,marginTop:2}}>{errs[k]}</div>:null;
+  const bErr=k=>errs[k]?{borderColor:"#ef4444",background:"#fef2f2"}:{};
+  const secT=t=><div style={{gridColumn:"1/-1",fontSize:12,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:.4,margin:"6px 0 8px",paddingBottom:4,borderBottom:"1px solid #f1f5f9"}}>{t}</div>;
 
   const validate=()=>{
     const err={};
     if(tipo==="Incidencia"){
-      if(!f.requesterName) err.requesterName="Requerido";
-      if(!f.requesterEmail||!/\S+@\S+\.\S+/.test(f.requesterEmail)) err.requesterEmail="Email inválido";
-      if(!f.unit) err.unit="Requerido";
+      if(!f.unit.trim()) err.unit=isAreaComun?"Indica el lugar (ej: piscina, hall)":"Indica el número de departamento o unidad";
+      if(!f.requesterName.trim()) err.requesterName="Escribe tu nombre";
+      if(!/^\S+@\S+\.\S+$/.test(f.requesterEmail.trim())) err.requesterEmail="Escribe un correo válido (ej: nombre@gmail.com)";
     }
-    if(!f.description||f.description.length<10) err.description="Min. 10 caracteres";
-    if(!f.confirm) err.confirm="Debe confirmar";
+    if(f.description.trim().length<10) err.description="Cuéntanos un poco más (mínimo 10 caracteres)";
     setErrs(err);
-    return !Object.keys(err).length;
+    const ok=!Object.keys(err).length;
+    // Lleva la pantalla al primer campo con error
+    if(!ok) setTimeout(()=>{const el=boxRef.current&&boxRef.current.querySelector("[data-err='1']");if(el){el.scrollIntoView({behavior:"smooth",block:"center"});const i=el.querySelector("input,textarea");if(i)i.focus({preventScroll:true});}},50);
+    return ok;
   };
 
-  const handleFiles=ev=>Array.from(ev.target.files).forEach(fi=>{
-    const rd=new FileReader();
-    rd.onload=e2=>setPrevs(p=>[...p,{name:fi.name,url:e2.target.result}]);
-    rd.readAsDataURL(fi);
-    setRawFiles(p=>[...p,fi]);
-  });
+  const handleFiles=ev=>{
+    const files=Array.from(ev.target.files||[]);
+    ev.target.value=""; // permite volver a elegir la misma foto
+    let libres=MAX_FOTOS-prevs.length;
+    files.forEach(fi=>{
+      if(!fi.type.startsWith("image/")){showToast(fi.name+" no es una imagen","error");return;}
+      if(libres<=0){showToast("Máximo "+MAX_FOTOS+" fotos","error");return;}
+      libres--;
+      const id=uid();
+      const rd=new FileReader();
+      rd.onload=e2=>setPrevs(p=>p.length>=MAX_FOTOS?p:[...p,{id,name:fi.name,url:e2.target.result,file:fi}]);
+      rd.readAsDataURL(fi);
+    });
+  };
 
   const submit=async()=>{
-    if(!validate()) return;
+    if(saving||!validate()) return;
     setSaving(true);
-    const code=genCode(reqs,"SOL-"); const now=new Date().toISOString();
-    const attachmentsInitial=await Promise.all(prevs.map(async(pv,i)=>{
-      const path=code+"/inicial/"+uid()+"_"+pv.name; let url=pv.url;
-      try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
-      return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:f.requesterName,preview:url,comment:""};
-    }));
-    const nr=normReq({id:code,code,createdAt:now,...f,
-      category:tipo==="Administrativo"?adminCat:f.category,
-      subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
-      affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
-      status:"Ingresada",assignedTo:"Sin asignar",
-      history:[{date:now,user:f.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
-      attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
-    setReqs(p=>[nr,...p]);
-    // Mail al solicitante
-    if(f.requesterEmail&&f.requesterEmail.includes("@")){
-      console.log("Enviando mail a solicitante:", f.requesterEmail);
-      addEmail({requestId:code,date:now,to:f.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
-    }
-    // Mail a administradores
     try{
-      const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
-      console.log("Admins a notificar:", admins.map(u=>u.email));
-      admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+f.requesterName+"\nCategoría: "+(tipo==="Administrativo"?adminCat:f.category)+"\nPrioridad: "+f.priority+"\n\nIngrese al sistema para gestionar."}));
-    }catch(ex){console.warn("Error notificando admins",ex);}
-    setDone(nr); showToast("Solicitud "+code+" creada"); setSaving(false);
+      const code=genCode(reqs,"SOL-"); const now=new Date().toISOString();
+      const datos={...f,requesterName:f.requesterName.trim(),requesterEmail:f.requesterEmail.trim().toLowerCase(),requesterPhone:f.requesterPhone.trim(),unit:f.unit.trim(),description:f.description.trim()};
+      const attachmentsInitial=await Promise.all(prevs.map(async pv=>{
+        const path=code+"/inicial/"+uid()+"_"+pv.name; let url=pv.url;
+        try{if(pv.file)url=await uploadImg(pv.file,path);}catch(_){}
+        return{id:"a"+uid(),requestId:code,type:"inicial",name:pv.name,date:now,user:datos.requesterName,preview:url,comment:""};
+      }));
+      const categoria=tipo==="Administrativo"?adminCat:f.category;
+      const nr=normReq({id:code,code,createdAt:now,...datos,
+        category:categoria,
+        subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
+        affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
+        status:"Ingresada",assignedTo:"Sin asignar",
+        history:[{date:now,user:datos.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
+        attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
+      setReqs(p=>[nr,...p]);
+      if(esResidente) setResLS({requesterName:datos.requesterName,requesterEmail:datos.requesterEmail,requesterPhone:datos.requesterPhone,tower:f.tower,unit:isAreaComun?(getResLS().unit||""):datos.unit});
+      // Mail al solicitante
+      if(datos.requesterEmail.includes("@")){
+        addEmail({requestId:code,date:now,to:datos.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
+      }
+      // Mail a administradores
+      try{
+        const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
+        admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+datos.requesterName+"\nCategoría: "+categoria+"\nPrioridad: "+f.priority+"\n\nIngrese al sistema para gestionar."}));
+      }catch(ex){console.warn("Error notificando admins",ex);}
+      setDone(nr); showToast("Solicitud "+code+" creada");
+    }catch(ex){
+      console.error("Error creando solicitud",ex);
+      showToast("No se pudo enviar la solicitud. Intenta de nuevo.","error");
+    }finally{
+      setSaving(false);
+    }
   };
 
+  const hayCambios=f.description.trim().length>0||prevs.length>0;
+  const cerrar=()=>{ if(saving) return; if(hayCambios&&!window.confirm("¿Salir sin enviar? Se perderá lo que escribiste.")) return; onClose(); };
+  const otra=()=>{ setDone(null); setPrevs([]); setErrs({}); setF(p=>({...p,description:"",priority:"Media",accessPermission:false,affectedTowers:[]})); };
+
   const curCat=actCats.find(c=>c.name===f.category);
+  const descLen=f.description.trim().length;
 
   if(done) return(
     <div style={MSt}>
       <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:420,padding:"24px",marginTop:16,textAlign:"center"}}>
         <div style={{fontSize:48,marginBottom:8}}>✅</div>
-        <h3 style={{margin:"0 0 6px"}}>Solicitud registrada</h3>
-        <div style={{...bdg("#10b981","#f0fdf4"),fontSize:15,padding:"5px 14px",display:"inline-flex",marginBottom:20}}>{done.code}</div>
-        <div style={{display:"flex",gap:8,justifyContent:"center"}}>
-          <button style={BP(true)} onClick={()=>{onClose();onOpen(done);}}>Ver detalle</button>
+        <h3 style={{margin:"0 0 6px"}}>Solicitud recibida</h3>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:8}}>Tu código de seguimiento es</div>
+        <div style={{...bdg("#10b981","#f0fdf4"),fontSize:18,padding:"6px 16px",display:"inline-flex",marginBottom:12}}>{done.code}</div>
+        <div style={{fontSize:13,color:"#475569",lineHeight:1.5,marginBottom:18,textAlign:"left",background:"#f8fafc",borderRadius:8,padding:"10px 12px"}}>
+          <div>• La administración la revisará y asignará un responsable.</div>
+          {done.requesterEmail&&<div>• Enviamos la confirmación a <strong>{done.requesterEmail}</strong>.</div>}
+          <div>• Puedes ver su avance en {esResidente?"«Mis solicitudes»":"el listado de solicitudes"} con este código.</div>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+          <button style={BP(true)} onClick={()=>{onClose();onOpen(done);}}>Ver solicitud</button>
+          <button style={BS(true)} onClick={otra}>+ Ingresar otra</button>
           <button style={BS(true)} onClick={onClose}>Cerrar</button>
         </div>
       </div>
     </div>
   );
 
+  const cols=mob?"1fr":"1fr 1fr";
   return(
     <div style={MSt}>
-      <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:680,padding:"20px",marginTop:16,marginBottom:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}><h3 style={{margin:0,fontSize:15}}>Nueva solicitud</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
+      <div ref={boxRef} style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:680,padding:mob?"16px 14px":"20px",marginTop:mob?4:16,marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+          <div>
+            <h3 style={{margin:0,fontSize:16}}>{isAdmin?"Nueva solicitud":"Reportar incidencia"}</h3>
+            {!isAdmin&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>Toma menos de un minuto. Los campos con * son obligatorios.</div>}
+          </div>
+          <button style={BG(true)} onClick={cerrar} aria-label="Cerrar">✕</button>
+        </div>
         {isAdmin&&(
           <div style={{display:"flex",gap:10,marginBottom:16}}>
             {["Administrativo","Incidencia"].map(tp=>{
               const isActive=tipo===tp;
               const color=tp==="Administrativo"?"#6366f1":"#ef4444";
-              return <button key={tp} onClick={()=>setTipo(tp)} style={{flex:1,padding:"12px",borderRadius:10,border:"2px solid "+(isActive?color:"#e2e8f0"),background:isActive?(tp==="Administrativo"?"#eef2ff":"#fef2f2"):"#f9fafb",color:isActive?color:"#6b7280",fontWeight:isActive?700:400,cursor:"pointer",fontSize:14}}>{tp==="Administrativo"?"📋 Administrativo":"🚨 Incidencia"}</button>;
+              return <button key={tp} onClick={()=>{setTipo(tp);setErrs({});}} style={{flex:1,padding:"12px",borderRadius:10,border:"2px solid "+(isActive?color:"#e2e8f0"),background:isActive?(tp==="Administrativo"?"#eef2ff":"#fef2f2"):"#f9fafb",color:isActive?color:"#6b7280",fontWeight:isActive?700:400,cursor:"pointer",fontSize:14}}>{tp==="Administrativo"?"📋 Administrativo":"🚨 Incidencia"}</button>;
             })}
           </div>
         )}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:cols,columnGap:10}}>
           {tipo==="Incidencia"&&(
             <>
-              {[["requesterName","Nombre *","text"],["requesterEmail","Correo *","email"],["requesterPhone","Teléfono","text"]].map(([k,lb,tp])=>(
-                <div key={k} style={fg}><label style={lbl}>{lb}</label><input type={tp} style={{...inp,borderColor:errs[k]?"#ef4444":""}} value={f[k]} onChange={ev=>setFld(k,ev.target.value)}/>{errs[k]&&<div style={{color:"#ef4444",fontSize:10}}>{errs[k]}</div>}</div>
-              ))}
-              <div style={fg}><label style={lbl}>Torre</label><select style={sel} value={f.tower} onChange={ev=>{setFld("tower",ev.target.value);setFld("affectedTowers",[]);}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+              {secT("📍 ¿Dónde ocurre?")}
+              <div style={fg}><label style={lbl}>Torre / sector</label><select style={selM} value={f.tower} onChange={ev=>{const v=ev.target.value;setF(p=>({...p,tower:v,affectedTowers:[]}));}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+              <div style={fg} data-err={errs.unit?"1":"0"}><label style={lbl}>{isAreaComun?"Lugar *":"Departamento / unidad *"}</label><input style={{...inpM,...bErr("unit")}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder={isAreaComun?"ej: piscina, hall de acceso, estacionamiento -1":"ej: 401, Bodega 2"}/>{errTxt("unit")}</div>
 
               {/* Si es Area Común: selector de torres afectadas */}
               {isAreaComun&&(
@@ -1621,61 +1656,75 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
                       );
                     })}
                   </div>
-                  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>
-                    {f.affectedTowers.length===0?"Afecta a todas las torres":("Afecta a: "+f.affectedTowers.join(", "))}
-                  </div>
                 </div>
               )}
-              <div style={fg}><label style={lbl}>Unidad / Piso *</label><input style={{...inp,borderColor:errs.unit?"#ef4444":""}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: 401, Piso 4, Bodega 2"/>{errs.unit&&<div style={{color:"#ef4444",fontSize:10}}>{errs.unit}</div>}</div>
-              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={f.category} onChange={ev=>{const c=actCats.find(x=>x.name===ev.target.value);setFld("category",ev.target.value);setFld("subcategory",c?.subs[0]||"");}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
-              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
+
+              {secT("📝 ¿Qué ocurre?")}
+              <div style={fg}><label style={lbl}>Tipo de problema</label><select style={selM} value={f.category} onChange={ev=>{const v=ev.target.value;const c=actCats.find(x=>x.name===v);setF(p=>({...p,category:v,subcategory:c?.subs[0]||""}));}}>{actCats.map(c=><option key={c.id}>{c.name}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Detalle</label><select style={selM} value={f.subcategory} onChange={ev=>setFld("subcategory",ev.target.value)}>{(curCat?.subs||[]).map(s=><option key={s}>{s}</option>)}</select></div>
             </>
           )}
           {isAdmin&&tipo==="Administrativo"&&(
             <>
-              <div style={fg}><label style={lbl}>Categoría</label><select style={sel} value={adminCat} onChange={ev=>{setAdminCat(ev.target.value);setAdminSub(ADMIN_CATS[ev.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
-              <div style={fg}><label style={lbl}>Subcategoría</label><select style={sel} value={adminSub} onChange={ev=>setAdminSub(ev.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Categoría</label><select style={selM} value={adminCat} onChange={ev=>{setAdminCat(ev.target.value);setAdminSub(ADMIN_CATS[ev.target.value][0]);}}>{adminCatList.map(c=><option key={c}>{c}</option>)}</select></div>
+              <div style={fg}><label style={lbl}>Subcategoría</label><select style={selM} value={adminSub} onChange={ev=>setAdminSub(ev.target.value)}>{(ADMIN_CATS[adminCat]||[]).map(s=><option key={s}>{s}</option>)}</select></div>
             </>
           )}
-          <div style={{...fg,gridColumn:"1/-1"}}>
+          <div style={{...fg,gridColumn:"1/-1"}} data-err={errs.description?"1":"0"}>
             <label style={lbl}>Descripción *</label>
-            <textarea style={{...inp,height:tipo==="Administrativo"?120:80,resize:"vertical",borderColor:errs.description?"#ef4444":""}} value={f.description} onChange={ev=>setFld("description",ev.target.value)} placeholder={tipo==="Administrativo"?"Detalle administrativo...":"Describa el problema..."}/>
-            {errs.description&&<div style={{color:"#ef4444",fontSize:10}}>{errs.description}</div>}
+            <textarea style={{...inpM,height:tipo==="Administrativo"?120:96,resize:"vertical",fontFamily:"inherit",...bErr("description")}} value={f.description} onChange={ev=>setFld("description",ev.target.value)} placeholder={tipo==="Administrativo"?"Detalle administrativo...":"Ej: Hay una filtración en el techo del baño desde ayer, gotea cuando el vecino de arriba usa la ducha."}/>
+            {errTxt("description")||(tipo==="Incidencia"&&<div style={{fontSize:11,color:descLen>=10?"#10b981":"#94a3b8",marginTop:2}}>{descLen>=10?"✓ Suficiente detalle":"Qué pasa, desde cuándo y dónde exactamente."}</div>)}
           </div>
-          <div style={fg}><label style={lbl}>Prioridad</label><select style={{...sel,color:PC[f.priority]}} value={f.priority} onChange={ev=>setFld("priority",ev.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+
+          <div style={{...fg,gridColumn:"1/-1"}}>
+            <label style={lbl}>¿Qué tan urgente es?</label>
+            <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:6}}>
+              {[...PRIORITIES].reverse().map(p=>{
+                const on=f.priority===p;
+                return <button key={p} type="button" onClick={()=>setFld("priority",p)} style={{padding:mob?"10px 6px":"8px 6px",borderRadius:8,cursor:"pointer",fontSize:13,border:"2px solid "+(on?PC[p]:"#e2e8f0"),background:on?(PB[p]||"#f9fafb"):"#fff",color:on?PC[p]:"#64748b",fontWeight:on?700:500}}>{p==="Emergencia"?"⚠ ":""}{p}</button>;
+              })}
+            </div>
+            <div style={{fontSize:11,color:f.priority==="Emergencia"?"#dc2626":"#64748b",marginTop:5,fontWeight:f.priority==="Emergencia"?600:400}}>{PRIO_HELP[f.priority]}</div>
+          </div>
+
           {tipo==="Incidencia"&&(
             <>
               <div style={{...fg,gridColumn:"1/-1"}}>
-                <label style={lbl}>Imágenes (opcional)</label>
+                <label style={lbl}>Fotos <span style={{fontWeight:400,color:"#94a3b8"}}>(opcional, ayudan a resolver más rápido)</span></label>
                 <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
-                <div style={{border:"2px dashed #d1d5db",borderRadius:8,padding:16,textAlign:"center",cursor:"pointer",marginBottom:8,background:"#f8fafc"}} onClick={()=>fileRef.current.click()}><div style={{fontSize:24,marginBottom:4}}>📷</div><div style={{fontSize:12,color:"#64748b"}}>Toca para agregar fotos</div></div>
-                {prevs.length>0&&(
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {prevs.map((pv,i)=>(
-                      <div key={i} style={{position:"relative"}}>
-                        <img src={pv.url} alt={pv.name} style={{...thumb,width:72,height:56}}/>
-                        <button onClick={()=>{setPrevs(pr=>pr.filter((_,j)=>j!==i));setRawFiles(fs=>fs.filter((_,j)=>j!==i));}} style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,cursor:"pointer",fontSize:10}}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                  {prevs.map(pv=>(
+                    <div key={pv.id} style={{position:"relative"}}>
+                      <img src={pv.url} alt={pv.name} style={{...thumb,width:76,height:60}}/>
+                      <button type="button" aria-label="Quitar foto" onClick={()=>setPrevs(pr=>pr.filter(x=>x.id!==pv.id))} style={{position:"absolute",top:-6,right:-6,background:"#ef4444",color:"#fff",border:"2px solid #fff",borderRadius:"50%",width:22,height:22,cursor:"pointer",fontSize:11,lineHeight:1,padding:0}}>✕</button>
+                    </div>
+                  ))}
+                  {prevs.length<MAX_FOTOS&&(
+                    <button type="button" onClick={()=>fileRef.current.click()} style={{border:"2px dashed #d1d5db",borderRadius:8,padding:prevs.length?"0 14px":"14px",height:prevs.length?60:"auto",flex:prevs.length?"0 0 auto":"1 1 100%",textAlign:"center",cursor:"pointer",background:"#f8fafc",color:"#64748b",fontSize:12}}>
+                      {prevs.length?"+ Agregar":<><div style={{fontSize:24,marginBottom:4}}>📷</div>Toca para tomar o elegir fotos</>}
+                    </button>
+                  )}
+                </div>
+                {prevs.length>0&&<div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>{prevs.length} de {MAX_FOTOS} fotos</div>}
               </div>
-              <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}><input type="checkbox" id="acc" checked={f.accessPermission} onChange={ev=>setFld("accessPermission",ev.target.checked)}/><label htmlFor="acc" style={{fontSize:12,cursor:"pointer"}}>Autorizo ingreso al inmueble</label></div>
+
+              {secT("👤 Tus datos de contacto")}
+              <div style={fg} data-err={errs.requesterName?"1":"0"}><label style={lbl}>Nombre *</label><input type="text" autoComplete="name" style={{...inpM,...bErr("requesterName")}} value={f.requesterName} onChange={ev=>setFld("requesterName",ev.target.value)}/>{errTxt("requesterName")}</div>
+              <div style={fg} data-err={errs.requesterEmail?"1":"0"}><label style={lbl}>Correo *</label><input type="email" inputMode="email" autoComplete="email" autoCapitalize="none" style={{...inpM,...bErr("requesterEmail")}} value={f.requesterEmail} onChange={ev=>setFld("requesterEmail",ev.target.value)} placeholder="nombre@correo.com"/>{errTxt("requesterEmail")||<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Aquí te avisaremos del avance.</div>}</div>
+              <div style={fg}><label style={lbl}>Teléfono <span style={{fontWeight:400,color:"#94a3b8"}}>(opcional)</span></label><input type="tel" inputMode="tel" autoComplete="tel" style={inpM} value={f.requesterPhone} onChange={ev=>setFld("requesterPhone",ev.target.value)} placeholder="+56 9 ..."/></div>
+              {!isAreaComun&&(
+                <label htmlFor="acc" style={{...fg,gridColumn:"1/-1",display:"flex",gap:10,alignItems:"center",cursor:"pointer",padding:"10px 12px",borderRadius:8,border:"1px solid "+(f.accessPermission?"#86efac":"#e2e8f0"),background:f.accessPermission?"#f0fdf4":"#f8fafc"}}>
+                  <input type="checkbox" id="acc" style={{width:18,height:18,flexShrink:0}} checked={f.accessPermission} onChange={ev=>setFld("accessPermission",ev.target.checked)}/>
+                  <span style={{fontSize:13}}>Autorizo el ingreso a mi departamento para revisar el problema<div style={{fontSize:11,color:"#94a3b8"}}>Si no lo marcas, coordinaremos contigo antes de entrar.</div></span>
+                </label>
+              )}
             </>
           )}
-          <div style={{...fg,gridColumn:"1/-1",display:"flex",gap:8,alignItems:"center"}}>
-            <input type="checkbox" id="conf" checked={f.confirm} onChange={ev=>setFld("confirm",ev.target.checked)}/>
-            <label htmlFor="conf" style={{fontSize:12,cursor:"pointer"}}>Confirmo que la información es correcta *</label>
-            {errs.confirm&&<span style={{color:"#ef4444",fontSize:10}}>{errs.confirm}</span>}
-          </div>
         </div>
-        {tipo==="Incidencia"&&f.priority==="Emergencia"&&<div style={{...card,background:"#fef2f2",border:"1px solid #fca5a5",display:"flex",alignItems:"center",gap:10}}><span style={{fontWeight:700,color:"#dc2626"}}>⚠</span><strong style={{color:"#dc2626",fontSize:13}}>Prioridad EMERGENCIA</strong></div>}
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
-          <button style={BS(true)} onClick={onClose}>Cancelar</button>
-          {tipo==="Administrativo"
-            ?<button style={BPu(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
-            :<button style={BP(true)} onClick={submit} disabled={saving}>{saving?"Guardando...":"Enviar"}</button>
-          }
+        {Object.keys(errs).length>0&&<div style={{...alrt("error"),marginTop:6}}>Falta completar {Object.keys(errs).length===1?"un campo":Object.keys(errs).length+" campos"}. Revisa lo marcado en rojo.</div>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10,flexDirection:mob?"column-reverse":"row"}}>
+          <button style={{...BS(!mob),...(mob?{width:"100%",justifyContent:"center"}:{})}} onClick={cerrar} disabled={saving}>Cancelar</button>
+          <button style={{...(tipo==="Administrativo"?BPu(!mob):BP(!mob)),...(mob?{width:"100%",justifyContent:"center",padding:"12px"}:{}),opacity:saving?.7:1}} onClick={submit} disabled={saving}>{saving?(prevs.length?"Subiendo fotos...":"Enviando..."):"Enviar solicitud"}</button>
         </div>
       </div>
     </div>
@@ -1683,39 +1732,62 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
 }
 
 // ── TasksView ──────────────────────────────────────────────────────────────
-function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign}){
-  const [fi,setFi]=useState({status:"",responsible:"",q:""});
+function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign,onOpen}){
+  const [fi,setFi]=useState({responsible:"",q:""});
+  const [tab,setTab]=useState("pendientes");
   const validReqIds=new Set(reqs.map(r=>r.id));
-  const visible=tasks.filter(t=>
-    validReqIds.has(t.requestId)&&
-    (!fi.status||t.status===fi.status)&&
-    (!fi.responsible||t.responsible===fi.responsible)&&
-    (!fi.q||(t.title+" "+(t.responsible||"")).toLowerCase().includes(fi.q.toLowerCase()))
-  );
+  const base=tasks.filter(t=>validReqIds.has(t.requestId));
+  const lista=t=>t.status==="Completada"||t.status==="Cancelada"||!!(t.informe||"").trim();
+  const TABS=[
+    {id:"pendientes",label:"Pendientes",f:t=>!lista(t)},
+    {id:"vencidas",label:"Vencidas",f:t=>tareaPend(t)&&diffDue(t)<0},
+    {id:"listas",label:"Completadas",f:lista},
+    {id:"todas",label:"Todas",f:()=>true},
+  ];
+  const tabDef=TABS.find(t=>t.id===tab)||TABS[0];
+  const q=fi.q.trim().toLowerCase();
+  const fin=t=>t.dueDate?parseF(t.dueDate).getTime():Infinity;
+  const visible=base.filter(t=>
+    tabDef.f(t)&&
+    (!fi.responsible||t.responsible===fi.responsible||t.ejecutor===fi.responsible)&&
+    (!q||[t.title,t.responsible,t.ejecutor,(reqs.find(r=>r.id===t.requestId)||{}).code].filter(Boolean).join(" ").toLowerCase().includes(q))
+  ).sort((a,b)=>fin(a)-fin(b));
   return(
     <div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+        {TABS.map(t=>{
+          const n=base.filter(t.f).length, on=tab===t.id, rojo=t.id==="vencidas"&&n>0;
+          const col=rojo?"#dc2626":"#3b82f6";
+          return <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:mob?"8px 12px":"6px 12px",borderRadius:99,fontSize:12,cursor:"pointer",border:"1px solid "+(on?col:"#e2e8f0"),background:on?col:"#fff",color:on?"#fff":(rojo?col:"#475569"),fontWeight:on||rojo?600:400}}>{t.label} <span style={{opacity:.85}}>({n})</span></button>;
+        })}
+      </div>
       <div style={{...card,padding:12,marginBottom:12}}>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <input style={{...inp,flex:2,minWidth:100}} placeholder="Buscar órdenes..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
-          <select style={{...sel,flex:1}} value={fi.status} onChange={ev=>setFi(p=>({...p,status:ev.target.value}))}><option value="">Todos los estados</option>{["Ingresada","En proceso","Completada"].map(s=><option key={s}>{s}</option>)}</select>
-          <select style={{...sel,flex:1}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}><option value="">Todos</option>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select>
+          <input style={{...inp,flex:"2 1 180px",minWidth:140}} placeholder="🔍 Buscar por título, persona o código..." value={fi.q} onChange={ev=>setFi(p=>({...p,q:ev.target.value}))}/>
+          <select style={{...sel,flex:"1 1 140px",color:fi.responsible?"#1e293b":"#94a3b8"}} value={fi.responsible} onChange={ev=>setFi(p=>({...p,responsible:ev.target.value}))}><option value="">Persona: todas</option>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select>
         </div>
       </div>
-      {visible.length===0?<Empty msg="Sin órdenes"/>:visible.map(t=>{
+      {visible.length===0?<Empty msg={q||fi.responsible?"Ninguna orden coincide con la búsqueda.":tab==="pendientes"?"No hay órdenes pendientes 🎉":tab==="vencidas"?"No hay órdenes vencidas ✓":"Sin órdenes"}/>:visible.map(t=>{
         const req=reqs.find(r=>r.id===t.requestId);
+        const pend=tareaPend(t), dd=pend?diffDue(t):null;
         return(
-          <div key={t.id} style={{...card,borderLeft:"4px solid "+(PC[t.priority]||"#e2e8f0"),marginBottom:8,padding:12}}>
+          <div key={t.id} onClick={()=>req&&onOpen&&onOpen(req)} title={req&&onOpen?"Abrir solicitud "+req.code:""} style={{...card,borderLeft:"4px solid "+(dd!==null&&dd<0?"#ef4444":PC[t.priority]||"#e2e8f0"),marginBottom:8,padding:12,cursor:req&&onOpen?"pointer":"default"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
               <div style={{minWidth:0}}>
-                <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
-                {req&&<div style={{fontSize:10,color:"#3b82f6"}}>{req.code}</div>}
-                <div style={{fontSize:11,color:"#64748b"}}>👤 {t.responsible}{t.ejecutor&&" · 🔧 "+t.ejecutor}</div>
-                {t.dueDate&&<div style={{fontSize:11,color:"#94a3b8"}}>📅 {fmtD(t.dueDate)}</div>}
+                <div style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:mob?"normal":"nowrap"}}>{t.title}</div>
+                {req&&<div style={{fontSize:11,color:"#3b82f6"}}>{req.code} · <span style={{color:"#94a3b8"}}>{req.category}</span></div>}
+                <div style={{fontSize:11,color:"#64748b"}}>👤 {t.responsible||"Sin responsable"}{t.ejecutor&&" · 🔧 "+t.ejecutor}</div>
+                <div style={{fontSize:11,marginTop:2,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                  <span style={{color:"#94a3b8"}}>{t.dueDate?"📅 "+fmtD(t.dueDate):"Sin fecha límite"}</span>
+                  {dd!==null&&dd<0&&<span style={bdg("#ef4444","#fef2f2")}>Vencida hace {Math.abs(dd)} día{Math.abs(dd)===1?"":"s"}</span>}
+                  {dd!==null&&dd>=0&&dd<=3&&<span style={bdg("#92400e","#fffbeb")}>{dd===0?"Vence hoy":"Vence en "+dd+" día"+(dd===1?"":"s")}</span>}
+                  {!lista(t)&&<span style={{color:"#94a3b8"}}>· falta informe</span>}
+                </div>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}>
-                <div style={{display:"flex",gap:4}}><PBadge p={t.priority}/><SBadge s={t.status}/></div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"flex-end"}}><PBadge p={t.priority}/><SBadge s={t.status}/></div>
                 {can(role,"manageConfig")&&deleteTask&&(
-                  <button style={BD(true)} onClick={()=>{if(window.confirm("¿Eliminar orden \""+t.title+"\"?"))deleteTask(t.id);}}>🗑 Eliminar</button>
+                  <button style={BD(true)} onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar orden \""+t.title+"\"? Esta acción no se puede deshacer."))deleteTask(t.id);}}>🗑 Eliminar</button>
                 )}
               </div>
             </div>
@@ -1728,12 +1800,13 @@ function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign
 
 // ── ResidenteReqs — vista del residente: sus solicitudes + órdenes vencidas sin informe ──
 function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
-  const email=session?.email||"";
+  // Si entró sin cuenta, se usa el correo con el que ingresó solicitudes antes en este dispositivo
+  const email=(session?.email||getResLS().requesterEmail||"").trim().toLowerCase();
   const hoy=new Date(); hoy.setHours(0,0,0,0);
 
-  // Solicitudes que levantó este residente (por email o si es guest muestra todas con rol Residente)
+  // Solicitudes que levantó este residente (por correo)
   const misReqs=email
-    ? reqs.filter(r=>r.requesterEmail===email)
+    ? reqs.filter(r=>(r.requesterEmail||"").trim().toLowerCase()===email)
     : reqs.filter(r=>r.requesterEmail==null||r.requesterEmail==="");
 
   // Órdenes vencidas sin informe asociadas a sus solicitudes
@@ -1780,6 +1853,7 @@ function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
                     <div style={{fontWeight:600,fontSize:13}}>{r.code} — {r.category}</div>
                     <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.description?.slice(0,80)}{r.description?.length>80?"…":""}</div>
                     <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>📅 {fmtD(r.createdAt)}</div>
+                    <div style={{fontSize:11,color:"#475569",marginTop:3}}>{sigPaso(r,"Residente",0)}</div>
                     {venc.length>0&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>⚠ {venc.length} orden{venc.length>1?"es":""} vencida{venc.length>1?"s":""}</div>}
                   </div>
                   <div style={{flexShrink:0}}><SBadge s={r.status}/></div>
@@ -2250,78 +2324,97 @@ function EmailsView({logs,setEmails,role}){
 
 // ── Reports ────────────────────────────────────────────────────────────────
 function Reports({reqs,tasks,inventory,mob}){
-  const hoy=new Date(); hoy.setHours(0,0,0,0);
-  const cerradas=reqs.filter(r=>r.status==="Cerrada");
-  const abiertas=reqs.filter(r=>!["Cerrada","Rechazada"].includes(r.status));
+  const [per,setPer]=useState("todo");
+  const PERIODOS=[{id:"30",label:"30 días"},{id:"90",label:"90 días"},{id:"365",label:"12 meses"},{id:"todo",label:"Todo"}];
+  const desde=per==="todo"?null:new Date(Date.now()-parseInt(per,10)*86400000);
+  // Solicitudes creadas dentro del período elegido
+  const rq=desde?reqs.filter(r=>r.createdAt&&new Date(r.createdAt)>=desde):reqs;
+  const cerradas=rq.filter(r=>r.status==="Cerrada");
+  const abiertas=rq.filter(esAbierta);
+  const avgGlobal=promDias(cerradas);
+  const pctCierre=rq.length?Math.round(cerradas.length/rq.length*100):0;
 
-  // Promedio días resolución global
-  const avgGlobal=cerradas.length?Math.round(cerradas.reduce((s,r)=>{
-    const h=(r.history||[]).find(x=>x.to==="Cerrada");
-    if(!h||!r.createdAt) return s;
-    return s+(new Date(h.date)-new Date(r.createdAt))/86400000;
-  },0)/cerradas.length):null;
-
-  // Tendencia últimos 6 meses
-  const meses=[];
-  for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);meses.push({key:d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"),label:d.toLocaleString("es-CL",{month:"short"})});}
-  const tendencia=meses.map(m=>({
+  // Tendencia: siempre los últimos 6 meses (no depende del filtro)
+  const tendencia=ultMeses(6).map(m=>({
     label:m.label,
-    creadas:reqs.filter(r=>r.createdAt?.startsWith(m.key)).length,
-    cerradas:reqs.filter(r=>{const h=(r.history||[]).find(x=>x.to==="Cerrada");return h?.date?.startsWith(m.key);}).length,
+    creadas:reqs.filter(r=>mesKey(r.createdAt)===m.key).length,
+    cerradas:reqs.filter(r=>{const f=r.status==="Cerrada"?fechaCierre(r):null;return f&&mesKey(f)===m.key;}).length,
   }));
   const maxTend=Math.max(...tendencia.map(m=>Math.max(m.creadas,m.cerradas)),1);
 
-  // Por categoría con tiempo promedio resolución
-  const catStats=Object.keys(DEF_CATS).map(c=>{
-    const rCat=reqs.filter(r=>r.category===c);
-    const rCerr=rCat.filter(r=>r.status==="Cerrada");
-    const avg=rCerr.length?Math.round(rCerr.reduce((s,r)=>{
-      const h=(r.history||[]).find(x=>x.to==="Cerrada");
-      if(!h||!r.createdAt) return s;
-      return s+(new Date(h.date)-new Date(r.createdAt))/86400000;
-    },0)/rCerr.length):null;
-    return {c,total:rCat.length,abiertas:rCat.filter(r=>!["Cerrada","Rechazada"].includes(r.status)).length,cerradas:rCerr.length,avg};
-  }).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+  // Por categoría (se toman de los datos, así aparecen también las categorías creadas en Configuración)
+  const catNames=[...new Set(rq.map(r=>r.category||"Sin categoría"))];
+  const catStats=catNames.map(c=>{
+    const rCat=rq.filter(r=>(r.category||"Sin categoría")===c);
+    return {c,total:rCat.length,abiertas:rCat.filter(esAbierta).length,avg:promDias(rCat.filter(r=>r.status==="Cerrada"))};
+  }).sort((a,b)=>b.total-a.total);
   const maxCat=Math.max(...catStats.map(x=>x.total),1);
 
-  // Ranking responsables: total asignadas, pendientes, prom. días cierre
+  // Responsables: solicitudes asignadas + órdenes vencidas sin informe
   const respMap={};
-  reqs.filter(r=>r.assignedTo&&r.assignedTo!=="Sin asignar").forEach(r=>{
-    const rp=r.assignedTo;
-    if(!respMap[rp]) respMap[rp]={asignadas:0,cerradas:0,pendientes:0,vencidas:0,dias:[]};
-    respMap[rp].asignadas++;
-    if(r.status==="Cerrada"){
-      respMap[rp].cerradas++;
-      const h=(r.history||[]).find(x=>x.to==="Cerrada");
-      if(h&&r.createdAt){const d=(new Date(h.date)-new Date(r.createdAt))/86400000;if(d>=0)respMap[rp].dias.push(d);}
-    } else {
-      respMap[rp].pendientes++;
-      if(r.dueDate&&new Date(r.dueDate)<hoy) respMap[rp].vencidas++;
-    }
+  const R=n=>respMap[n]||(respMap[n]={asignadas:0,cerradas:0,pendientes:0,ordVenc:0,lista:[]});
+  rq.forEach(r=>{
+    if(!r.assignedTo||r.assignedTo==="Sin asignar") return;
+    const s=R(r.assignedTo); s.asignadas++;
+    if(r.status==="Cerrada"){s.cerradas++;s.lista.push(r);}
+    else if(esAbierta(r)) s.pendientes++;
   });
-  const respArr=Object.entries(respMap).sort((a,b)=>b[1].asignadas-a[1].asignadas);
+  tasks.forEach(t=>{ if(t.responsible&&tareaPend(t)&&diffDue(t)<0) R(t.responsible).ordVenc++; });
+  const respArr=Object.entries(respMap).sort((a,b)=>(b[1].asignadas-a[1].asignadas)||(b[1].ordVenc-a[1].ordVenc));
 
-  // Solicitudes sin asignar (atención inmediata)
-  const sinAsignar=abiertas.filter(r=>!r.assignedTo||r.assignedTo==="Sin asignar").sort((a,b)=>PRIORITIES.indexOf(a.priority)-PRIORITIES.indexOf(b.priority));
+  // Órdenes de trabajo (estado actual)
+  const ordPend=tasks.filter(tareaPend);
+  const ordVenc=ordPend.filter(t=>diffDue(t)<0).length;
+  const ordPorVencer=ordPend.filter(t=>diffDue(t)>=0&&diffDue(t)<=3).length;
+  const ordComp=tasks.filter(t=>t.status==="Completada"||(t.informe||"").trim()).length;
+  const ordSinFecha=tasks.filter(t=>!t.dueDate&&!(t.informe||"").trim()&&t.status!=="Completada"&&t.status!=="Cancelada").length;
+
+  const sinAsignar=abiertas.filter(r=>!r.assignedTo||r.assignedTo==="Sin asignar").sort(ordPrioridad);
+  const stockCrit=inventory.filter(i=>i.stock<i.minStock).length;
+
+  const exportCSV=()=>{
+    const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+    const num=d=>d===null?"":String(Math.round(d*10)/10).replace(".",",");
+    const head=["Código","Fecha ingreso","Categoría","Subcategoría","Prioridad","Estado","Responsable","Fecha cierre","Días resolución","Días abierta"];
+    const rows=rq.map(r=>{const f=r.status==="Cerrada"?fechaCierre(r):null;return [r.code,fmtD(r.createdAt),r.category,r.subcategory,r.priority,r.status,r.assignedTo,f?fmtD(f):"",num(r.status==="Cerrada"?diasCierre(r):null),esAbierta(r)?diasAbierta(r):""];});
+    const csv="﻿"+[head,...rows].map(l=>l.map(esc).join(";")).join("\r\n");
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+    a.download="solicitudes_"+new Date().toISOString().slice(0,10)+".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  };
 
   return(
     <div>
+      {/* Filtro de período + exportar */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:12}}>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+          {PERIODOS.map(p=>(
+            <button key={p.id} onClick={()=>setPer(p.id)} style={{padding:"5px 12px",borderRadius:99,fontSize:12,cursor:"pointer",border:"1px solid "+(per===p.id?"#6366f1":"#e2e8f0"),background:per===p.id?"#6366f1":"#fff",color:per===p.id?"#fff":"#64748b",fontWeight:per===p.id?600:400}}>{p.label}</button>
+          ))}
+        </div>
+        <button style={BS(true)} onClick={exportCSV} disabled={!rq.length}>⬇ Exportar Excel (CSV)</button>
+      </div>
+
       {/* KPIs resumen */}
-      <Grid cols={mob?2:4} mob={mob}>
-        <Kpi value={reqs.length} label="Total solicitudes" color="#6366f1" mob={mob}/>
-        <Kpi value={abiertas.length} label="Abiertas" color="#3b82f6" mob={mob}/>
-        <Kpi value={cerradas.length} label="Cerradas" color="#10b981" mob={mob}/>
-        <Kpi value={avgGlobal!==null?avgGlobal+" días":"---"} label="Prom. resolución" color="#f97316" mob={mob}/>
+      <Grid cols={4} mob={mob}>
+        <Kpi value={rq.length} label={per==="todo"?"Total solicitudes":"Solicitudes ingresadas"} color="#6366f1" mob={mob}/>
+        <Kpi value={abiertas.length} label="Siguen abiertas" color="#3b82f6" mob={mob}/>
+        <Kpi value={cerradas.length+" ("+pctCierre+"%)"} label="Cerradas" color="#10b981" mob={mob}/>
+        <Kpi value={fmtDias(avgGlobal)} label="Prom. resolución" color="#f97316" mob={mob}/>
       </Grid>
+
+      {rq.length===0&&<div style={card}><Empty msg="No hay solicitudes en este período"/></div>}
 
       {/* Sin asignar */}
       {sinAsignar.length>0&&(
         <div style={{...card,background:"#fffbeb",border:"1px solid #fde68a",marginBottom:12}}>
           <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:8}}>⚠ {sinAsignar.length} solicitud{sinAsignar.length>1?"es":""} sin asignar</div>
           {sinAsignar.slice(0,5).map(r=>(
-            <div key={r.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #fde68a",fontSize:12}}>
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #fde68a",fontSize:12}}>
               <span style={{fontWeight:600,color:"#3b82f6"}}>{r.code}</span>
-              <span style={{color:"#64748b",flex:1,marginLeft:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.category}</span>
+              <span style={{color:"#64748b",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.category} · hace {diasAbierta(r)} día(s)</span>
               <PBadge p={r.priority}/>
             </div>
           ))}
@@ -2332,15 +2425,15 @@ function Reports({reqs,tasks,inventory,mob}){
       {/* Tendencia mensual */}
       <div style={{...card,marginBottom:12}}>
         <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📈 Tendencia mensual (últimos 6 meses)</div>
-        <div style={{display:"flex",gap:4,alignItems:"flex-end",height:110}}>
+        <div style={{display:"flex",gap:4,alignItems:"flex-end",height:118}}>
           {tendencia.map(m=>(
             <div key={m.label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
               <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:80}}>
-                <div title={"Creadas: "+m.creadas} style={{flex:1,background:"#3b82f6",borderRadius:"3px 3px 0 0",minHeight:2,height:Math.round((m.creadas/maxTend)*78)+2}}/>
-                <div title={"Cerradas: "+m.cerradas} style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",minHeight:2,height:Math.round((m.cerradas/maxTend)*78)+2}}/>
+                <div title={"Creadas: "+m.creadas} style={{flex:1,background:"#3b82f6",borderRadius:"3px 3px 0 0",height:m.creadas?Math.max(3,Math.round(m.creadas/maxTend*80)):1}}/>
+                <div title={"Cerradas: "+m.cerradas} style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",height:m.cerradas?Math.max(3,Math.round(m.cerradas/maxTend*80)):1}}/>
               </div>
+              <div style={{fontSize:10,color:"#64748b",fontWeight:600}}>{m.creadas} / {m.cerradas}</div>
               <div style={{fontSize:9,color:"#94a3b8"}}>{m.label}</div>
-              <div style={{fontSize:9,color:"#64748b"}}>{m.creadas}/{m.cerradas}</div>
             </div>
           ))}
         </div>
@@ -2356,12 +2449,12 @@ function Reports({reqs,tasks,inventory,mob}){
           <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>📂 Por categoría</div>
           {catStats.length===0?<Empty msg="Sin datos"/>:catStats.map(x=>(
             <div key={x.c} style={{marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
-                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130,fontWeight:500}}>{x.c}</span>
-                <div style={{display:"flex",gap:4,flexShrink:0}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:6,fontSize:11,marginBottom:3}}>
+                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,fontWeight:500}}>{x.c}</span>
+                <div style={{display:"flex",gap:4,flexShrink:0,alignItems:"center"}}>
                   <span style={{fontWeight:700}}>{x.total}</span>
-                  {x.avg!==null&&<span style={bdg("#64748b","#f1f5f9")}>{x.avg}d prom.</span>}
-                  {x.abiertas>0&&<span style={bdg("#f59e0b","#fffbeb")}>{x.abiertas} abiertas</span>}
+                  {x.avg!==null&&<span style={bdg("#64748b","#f1f5f9")}>{fmtDias(x.avg)} prom.</span>}
+                  {x.abiertas>0&&<span style={bdg("#d97706","#fffbeb")}>{x.abiertas} abierta{x.abiertas>1?"s":""}</span>}
                 </div>
               </div>
               <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
@@ -2371,26 +2464,26 @@ function Reports({reqs,tasks,inventory,mob}){
           ))}
         </div>
 
-        {/* Ranking responsables */}
+        {/* Responsables */}
         <div style={card}>
-          <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>👤 Ranking responsables</div>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>👤 Desempeño por responsable</div>
           {respArr.length===0?<Empty msg="Sin datos"/>:respArr.map(([resp,st])=>{
             const pct=st.asignadas>0?Math.round(st.cerradas/st.asignadas*100):0;
-            const avg=st.dias.length?Math.round(st.dias.reduce((a,b)=>a+b,0)/st.dias.length):null;
+            const avg=promDias(st.lista);
             return(
               <div key={resp} style={{marginBottom:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
-                  <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{resp}</span>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6,fontSize:11,marginBottom:3}}>
+                  <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{resp}</span>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
                     <span style={bdg("#10b981","#f0fdf4")}>{st.cerradas}/{st.asignadas}</span>
-                    {avg!==null&&<span style={bdg("#64748b","#f1f5f9")}>{avg}d prom.</span>}
-                    {st.vencidas>0&&<span style={bdg("#ef4444","#fef2f2")}>{st.vencidas} venc.</span>}
+                    {avg!==null&&<span style={bdg("#64748b","#f1f5f9")}>{fmtDias(avg)} prom.</span>}
+                    {st.ordVenc>0&&<span style={bdg("#ef4444","#fef2f2")}>{st.ordVenc} orden{st.ordVenc>1?"es":""} venc.</span>}
                   </div>
                 </div>
                 <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
                   <div style={{height:6,background:pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444",borderRadius:99,width:pct+"%"}}/>
                 </div>
-                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{pct}% cerradas · {st.pendientes} pendiente{st.pendientes!==1?"s":""}</div>
+                <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{st.asignadas>0?pct+"% cerradas · "+st.pendientes+" pendiente"+(st.pendientes!==1?"s":""):"Solo órdenes de trabajo"}</div>
               </div>
             );
           })}
@@ -2400,11 +2493,11 @@ function Reports({reqs,tasks,inventory,mob}){
         <div style={card}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>📊 Por estado</div>
           {STATUSES.map(s=>{
-            const c=reqs.filter(r=>r.status===s).length;
-            const pct=reqs.length?Math.round(c/reqs.length*100):0;
+            const c=rq.filter(r=>r.status===s).length;
+            const pct=rq.length?Math.round(c/rq.length*100):0;
             return c>0?(
               <div key={s} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                <SBadge s={s}/>
+                <div style={{width:92,flexShrink:0}}><SBadge s={s}/></div>
                 <div style={{flex:1,height:5,background:"#f1f5f9",borderRadius:99}}>
                   <div style={{height:5,background:SC[s]||"#94a3b8",borderRadius:99,width:pct+"%"}}/>
                 </div>
@@ -2418,11 +2511,11 @@ function Reports({reqs,tasks,inventory,mob}){
         <div style={card}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>🚨 Por prioridad</div>
           {PRIORITIES.map(p=>{
-            const n=reqs.filter(r=>r.priority===p).length;
-            const pct=reqs.length?Math.round(n/reqs.length*100):0;
+            const n=rq.filter(r=>r.priority===p).length;
+            const pct=rq.length?Math.round(n/rq.length*100):0;
             return(
               <div key={p} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                <PBadge p={p}/>
+                <div style={{width:92,flexShrink:0}}><PBadge p={p}/></div>
                 <div style={{flex:1,height:5,background:"#f1f5f9",borderRadius:99}}>
                   <div style={{height:5,background:PC[p],borderRadius:99,width:pct+"%"}}/>
                 </div>
@@ -2430,9 +2523,19 @@ function Reports({reqs,tasks,inventory,mob}){
               </div>
             );
           })}
-          {inventory.filter(i=>i.stock<i.minStock).length>0&&(
-            <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #f1f5f9"}}>
-              <span style={bdg("#ef4444","#fef2f2")}>⚠ {inventory.filter(i=>i.stock<i.minStock).length} ítems con stock crítico</span>
+        </div>
+
+        {/* Órdenes de trabajo */}
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>⚙️ Órdenes de trabajo (hoy)</div>
+          <IR l="Total órdenes" v={tasks.length}/>
+          <IR l="Completadas / con informe" v={ordComp}/>
+          <IR l="Vencidas sin informe" v={ordVenc}/>
+          <IR l="Vencen en 3 días" v={ordPorVencer}/>
+          <IR l="Pendientes sin fecha límite" v={ordSinFecha}/>
+          {stockCrit>0&&(
+            <div style={{marginTop:12}}>
+              <span style={bdg("#ef4444","#fef2f2")}>⚠ {stockCrit} ítem{stockCrit>1?"s":""} con stock crítico</span>
             </div>
           )}
         </div>

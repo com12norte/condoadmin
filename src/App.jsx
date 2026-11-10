@@ -1139,9 +1139,9 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     if(!can(role,"changeStatus")){showToast("Sin permisos","error");return;}
     upd({status:dest},{action:dest==="Rechazada"?"Solicitud rechazada":"Etapa cambiada",from:r.status,to:dest,note:nota||""});
     setNs(dest);
-    const sinResp=!r.assignedTo||r.assignedTo==="Sin asignar";
-    // "Asignada" se le avisa al residente recién cuando hay responsable (ver applyAsgn)
-    const avisar=tieneCorreo(r)&&!(dest==="Asignada"&&sinResp);
+    // Al residente solo se le avisa lo importante: cuando se empieza a trabajar y si se rechaza.
+    // La asignación se avisa en applyAsgn y el cierre en mailCierre.
+    const avisar=tieneCorreo(r)&&(dest==="En proceso"||dest==="Rechazada");
     if(avisar) addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:"[CondoAdmin] Solicitud "+r.code+": "+(PASO_LBL[dest]||dest),type:"Cambio de estado",status:"Enviado",body:"Hola "+(r.requesterName||"")+",\n\nTu solicitud "+r.code+(r.category?" ("+r.category+")":"")+" "+(MSG_ETAPA[dest]||"cambió a "+dest)+"."+(nota?"\n\nMotivo: "+nota:"")+"\n\n— CondoAdmin"});
     showToast(r.code+" → "+(PASO_LBL[dest]||dest)+(avisar?" · se avisó al residente":""));
     if(PASOS.includes(dest)) setEtapa(dest);

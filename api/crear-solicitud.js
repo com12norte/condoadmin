@@ -121,8 +121,29 @@ async function avisarAdmins(token, code, d) {
   return admins.length;
 }
 
+// Diagnóstico: abrir /api/crear-solicitud en el navegador muestra qué está fallando (no muestra datos privados)
+async function diagnostico() {
+  const out = {
+    FIREBASE_PROJECT_ID: PROJECT_ID ? "ok (" + PROJECT_ID + ")" : "FALTA",
+    FIREBASE_CLIENT_EMAIL: CLIENT_EMAIL ? "ok" : "FALTA",
+    FIREBASE_PRIVATE_KEY: !PRIVATE_KEY ? "FALTA" : PRIVATE_KEY.includes("BEGIN PRIVATE KEY") ? "ok" : "MAL FORMATO (debe empezar con -----BEGIN PRIVATE KEY-----)",
+  };
+  if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) return out;
+  let token;
+  try { token = await getAccessToken(); out.conexion_google = "ok"; }
+  catch (e) { out.conexion_google = "ERROR: " + String(e.message || e).slice(0, 300); return out; }
+  for (const c of ["solicitudes", "usuarios"]) {
+    try {
+      const r = await fetch(`${FS()}/${c}?pageSize=1`, { headers: { Authorization: "Bearer " + token } });
+      out["leer_" + c] = r.ok ? "ok" : "ERROR " + r.status + ": " + (await r.text()).slice(0, 300);
+    } catch (e) { out["leer_" + c] = "ERROR: " + String(e.message || e).slice(0, 200); }
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
+  if (req.method === "GET") return res.status(200).json(await diagnostico());
   if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
   try {
     let body = req.body || {};
@@ -206,6 +227,6 @@ export default async function handler(req, res) {
     throw new Error("No se encontró un código libre");
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ ok: false, error: "No se pudo registrar la solicitud. Intenta de nuevo en unos minutos." });
+    return res.status(500).json({ ok: false, error: "No se pudo registrar la solicitud. Intenta de nuevo en unos minutos.", detalle: String((err && err.message) || err).slice(0, 300) });
   }
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps, deleteApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, deleteField, query, orderBy, where } from "firebase/firestore";
-import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
+import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // ── Firebase config ─────────────────────────────────────────────────────────
@@ -51,6 +51,33 @@ const signIn = async (email, pass) => {
   const cred = await signInWithEmailAndPassword(fbAuth, email, pass);
   return { access_token: await cred.user.getIdToken(), user: cred.user };
 };
+
+// Crea la cuenta de acceso (correo + contraseña) sin salir de la app.
+// Se usa una conexión aparte para que el administrador no pierda su propia sesión.
+// Devuelve "creada" o "existia" (si ese correo ya tenía cuenta).
+const crearCuenta = async (email, pass) => {
+  const app2 = initializeApp(firebaseConfig, "alta-" + Date.now());
+  try {
+    const a2 = getAuth(app2);
+    await createUserWithEmailAndPassword(a2, email, pass);
+    try { await signOut(a2); } catch (_) {}
+    return "creada";
+  } catch (ex) {
+    if (ex && ex.code === "auth/email-already-in-use") return "existia";
+    throw ex;
+  } finally {
+    try { await deleteApp(app2); } catch (_) {}
+  }
+};
+const claveAzar = () => { const a = new Uint32Array(4); crypto.getRandomValues(a); return Array.from(a, n => n.toString(36)).join("") + "aA1"; };
+const errCuenta = ex => ({
+  "auth/invalid-email": "El correo no es válido.",
+  "auth/weak-password": "La contraseña es muy corta (mínimo 6 caracteres).",
+  "auth/operation-not-allowed": "El ingreso con correo y contraseña está desactivado en Firebase (Authentication → Sign-in method).",
+  "auth/admin-restricted-operation": "Firebase tiene bloqueada la creación de cuentas desde la app (Authentication → Settings → User actions → permitir creación de cuentas).",
+  "auth/network-request-failed": "Sin conexión. Revisa internet e intenta de nuevo.",
+  "auth/too-many-requests": "Demasiados intentos. Espera unos minutos.",
+}[ex && ex.code] || ("No se pudo crear la cuenta: " + ((ex && ex.message) || ex)));
 
 const uploadImg = async (file, path) => {
   const r = storageRef(fbStorage, "imagenes/" + path);
@@ -335,10 +362,15 @@ function LoginScreen({onLogin}){
     if(load) return;
     setLoad(true);setErr("");
     try{
-      const auth=await signIn(email,pass);
-      const snap=await (async()=>{const {getDocs,collection,query,where}=await import("firebase/firestore");const q=query(collection(fbDb,"usuarios"),where("email","==",email),where("active","==",true));return getDocs(q);})();
-      const res={json:()=>snap.docs.map(d=>d.data())};
-      const users=await res.json();
+      const correo=email.trim();
+      const auth=await signIn(correo,pass);
+      // Se busca el usuario tal como se escribió y también en minúsculas
+      let users=[];
+      for(const e of [...new Set([correo,correo.toLowerCase()])]){
+        const snap=await getDocs(query(collection(fbDb,"usuarios"),where("email","==",e),where("active","==",true)));
+        users=snap.docs.map(d=>d.data());
+        if(users.length) break;
+      }
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
       setLoggedUser({...users[0],token:auth.access_token});
       setMode("menu_personal"); // mostrar menú de módulos
@@ -926,12 +958,6 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
     return true;
   }).sort((a,b)=>sort==="priority"?ordPrioridad(a,b):new Date(b.createdAt)-new Date(a.createdAt));
 
-  const quickSt=(r,ns)=>{
-    if(!can(role,"changeStatus")){showToast("Sin permisos","error");return;}
-    const upd={...r,status:ns,history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Estado cambiado",from:r.status,to:ns}]};
-    setReqs(p=>p.map(x=>x.id===r.id?upd:x));
-    showToast(r.code+" ahora está: "+ns);
-  };
   const antig=r=>{const d=diasAbierta(r);return d===0?"hoy":"hace "+d+" día"+(d===1?"":"s");};
   const corta=(t,n)=>!t?"":t.length>n?t.slice(0,n)+"…":t;
 
@@ -1010,11 +1036,6 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}><div style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</div>{esAbierta(r)&&<div style={{fontSize:10,color:diasAbierta(r)>30?"#ef4444":diasAbierta(r)>7?"#d97706":"#94a3b8"}}>{antig(r)}</div>}{fueraPlazo(r)&&<div style={{fontSize:10,color:"#c2410c",fontWeight:600}}>Fuera de plazo</div>}{(r.status==="Cerrada"&&evalDe(r))&&<div style={{fontSize:10,color:evalDe(r).resuelto?"#16a34a":"#c2410c",fontWeight:600}}>{evalDe(r).resuelto?"👍 Confirmada":"👎 No resuelta"}</div>}</td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
-                    {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-                      <select title="Cambiar estado (para cerrar, abre la solicitud)" style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
-                        {STATUSES.filter(s=>s!=="Cerrada").map(s=><option key={s}>{s}</option>)}
-                      </select>
-                    )}
                     {can(role,"manageConfig")&&(
                       <button style={BD(true)} title="Eliminar solicitud" onClick={ev=>{ev.stopPropagation();if(window.confirm("¿Eliminar "+r.code+"? Esta acción no se puede deshacer."))deleteReq(r.id);}}>🗑</button>
                     )}
@@ -3063,12 +3084,36 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
   const loadUsuarios=async()=>{
     try{const _uAll=await dbGet("usuarios");const list=Array.isArray(_uAll)?_uAll:[];setUsuariosLocal(list);setUsuarios(list);}catch(ex){console.error(ex);}
   };
-  const saveUsuario=async u=>{
+  // Crea el usuario completo: cuenta de acceso + ficha con su rol. Devuelve un texto de error o null.
+  const saveUsuario=async(u,acc)=>{
     try{
-      if(u.isNew){const newId="u"+Date.now();await setDoc(doc(fbDb,"usuarios",newId),{id:newId,email:u.email,nombre:u.nombre,rol:u.rol,active:true});showToast("Usuario creado");}
+      if(u.isNew){
+        let estado;
+        try{ estado=await crearCuenta(u.email,(acc&&acc.pass)||claveAzar()); }
+        catch(ex){ return errCuenta(ex); }
+        const newId="u"+Date.now();
+        await setDoc(doc(fbDb,"usuarios",newId),{id:newId,email:u.email,nombre:u.nombre,rol:u.rol,active:true});
+        let aviso="";
+        if(estado==="existia"||!acc||acc.mail){
+          try{ await sendPasswordResetEmail(fbAuth,u.email); aviso=" · se le envió un correo para crear su contraseña"; }
+          catch(_){ aviso=" · no se pudo enviar el correo; usa «Enviar acceso»"; }
+        }
+        showToast("Usuario creado"+(estado==="existia"?" (ese correo ya tenía cuenta)":"")+aviso);
+      }
       else{await setDoc(doc(fbDb,"usuarios",String(u.id)),{id:u.id,email:u.email,nombre:u.nombre,rol:u.rol,active:u.active??true},{merge:true});showToast("Actualizado");}
       loadUsuarios();setShowUF(false);setEditUser(null);
-    }catch(ex){showToast("Error: "+ex.message,"error");}
+      return null;
+    }catch(ex){ return "No se pudo guardar: "+((ex&&ex.message)||ex); }
+  };
+  // Para usuarios que no tienen cuenta o que olvidaron la clave: se asegura la cuenta y se envía el correo
+  const enviarAcceso=async u=>{
+    const email=(u.email||"").trim();
+    if(!email.includes("@")){showToast("Este usuario no tiene correo","error");return;}
+    try{
+      await crearCuenta(email,claveAzar());
+      await sendPasswordResetEmail(fbAuth,email);
+      showToast("Se envió a "+email+" un correo para crear o cambiar su contraseña");
+    }catch(ex){showToast(errCuenta(ex),"error");}
   };
   const toggleUser=async u=>{try{await setDoc(doc(fbDb,"usuarios",String(u.id)),{active:!u.active},{merge:true});loadUsuarios();}catch(_){showToast("Error","error");}};
   const deleteUser=async u=>{if(!window.confirm("¿Eliminar "+u.nombre+"?"))return;try{await deleteDoc(doc(fbDb,"usuarios",String(u.id)));loadUsuarios();showToast("Eliminado");}catch(_){showToast("Error","error");}};
@@ -3117,13 +3162,13 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
       )}
       {tab==="usuarios"&&(
         <div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuariosLocal.filter(u=>u.active).length} activos</div><button style={BP(true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
-          {showUF&&<UserForm user={editUser} onSave={saveUsuario} onClose={()=>{setShowUF(false);setEditUser(null);}}/>}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:"#64748b"}}>{usuariosLocal.filter(u=>u.active).length} activos<div style={{fontSize:11,color:"#94a3b8"}}>Aquí se crea el usuario completo, con su acceso. No hace falta entrar a Firebase.</div></div><button style={BP(true)} onClick={()=>{setEditUser(null);setShowUF(true);}}>+ Nuevo usuario</button></div>
+          {showUF&&<UserForm user={editUser} existentes={usuariosLocal} onSave={saveUsuario} onClose={()=>{setShowUF(false);setEditUser(null);}}/>}
           <div>{usuariosLocal.map(u=>(
             <div key={u.id} style={{...card,opacity:u.active?1:.6,marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
                 <div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{u.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{u.email}</div><span style={bdg("#6366f1","#eef2ff")}>{u.rol}</span></div>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button style={BS(true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={u.active?BW(true):BSu(true)} onClick={()=>toggleUser(u)}>{u.active?"Desact.":"Activar"}</button><button style={BD(true)} onClick={()=>deleteUser(u)}>Eliminar</button></div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button style={BS(true)} onClick={()=>{setEditUser(u);setShowUF(true);}}>Editar</button><button style={BS(true)} title="Envía un correo para crear o cambiar la contraseña" onClick={()=>enviarAcceso(u)}>🔑 Enviar acceso</button><button style={u.active?BW(true):BSu(true)} onClick={()=>toggleUser(u)}>{u.active?"Desactivar":"Activar"}</button><button style={BD(true)} onClick={()=>deleteUser(u)}>Eliminar</button></div>
               </div>
             </div>
           ))}</div>
@@ -3142,17 +3187,52 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
   );
 }
 
-function UserForm({user,onSave,onClose}){
+function UserForm({user,onSave,onClose,existentes}){
   const [f,setF]=useState(user?{...user,isNew:false}:{nombre:"",email:"",rol:"Residente",active:true,isNew:true});
   const [rol,setRol]=useState(user?.rol||"Residente");
+  const [pass,setPass]=useState("");
+  const [verPass,setVerPass]=useState(true);
+  const [mail,setMail]=useState(true);
+  const [err,setErr]=useState("");
+  const [busy,setBusy]=useState(false);
+  const generar=()=>{ const abc="abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"; const a=new Uint32Array(10); crypto.getRandomValues(a); setPass(Array.from(a,n=>abc[n%abc.length]).join("")); setVerPass(true); };
+  const guardar=async()=>{
+    const nombre=f.nombre.trim(), email=f.email.trim().toLowerCase();
+    if(!nombre){setErr("Escribe el nombre.");return;}
+    if(!user){
+      if(!/^\S+@\S+\.\S+$/.test(email)){setErr("Escribe un correo válido.");return;}
+      if((existentes||[]).some(u=>(u.email||"").trim().toLowerCase()===email)){setErr("Ya existe un usuario con ese correo.");return;}
+      if(pass&&pass.length<6){setErr("La contraseña debe tener al menos 6 caracteres.");return;}
+    }
+    setErr(""); setBusy(true);
+    const e=await onSave({...f,nombre,email:user?f.email:email,rol},{pass,mail:mail||!pass});
+    setBusy(false);
+    if(e) setErr(e);
+  };
   return(
     <div style={MSt}><div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:480,padding:"20px",marginTop:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={BG(true)} onClick={onClose}>✕</button></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><h3 style={{margin:0,fontSize:15}}>{user?"Editar":"Nuevo"} usuario</h3><button style={BG(true)} onClick={onClose} disabled={busy}>✕</button></div>
       <div style={fg}><label style={lbl}>Nombre *</label><input style={inp} value={f.nombre} onChange={ev=>setF(p=>({...p,nombre:ev.target.value}))}/></div>
-      <div style={fg}><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={ev=>setF(p=>({...p,email:ev.target.value}))} disabled={!!user}/></div>
+      <div style={fg}><label style={lbl}>Correo *</label><input type="email" autoCapitalize="none" style={inp} value={f.email} onChange={ev=>setF(p=>({...p,email:ev.target.value}))} disabled={!!user} placeholder="nombre@correo.com"/>{user&&<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>El correo no se puede cambiar. Si cambió, crea un usuario nuevo y desactiva este.</div>}</div>
       <div style={fg}><label style={lbl}>Rol</label><select style={sel} value={rol} onChange={ev=>{setRol(ev.target.value);setF(p=>({...p,rol:ev.target.value}));}}>{ROLES.map(r=><option key={r} value={r}>{r}</option>)}</select></div>
-      {!user&&<div style={{...alrt("info"),marginTop:8,fontSize:12}}>Recuerde crear el usuario en Supabase Authentication.</div>}
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} onClick={()=>{if(!f.nombre.trim()||!f.email.trim())return;onSave({...f,rol});}}>Guardar</button></div>
+      {!user&&(
+        <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:12,marginTop:4}}>
+          <div style={{fontWeight:600,fontSize:12,marginBottom:6}}>🔑 Acceso a la aplicación</div>
+          <label style={lbl}>Contraseña inicial <span style={{fontWeight:400,color:"#94a3b8"}}>(opcional)</span></label>
+          <div style={{display:"flex",gap:6}}>
+            <input type={verPass?"text":"password"} autoComplete="new-password" style={{...inp,flex:1}} value={pass} onChange={ev=>setPass(ev.target.value)} placeholder="Mínimo 6 caracteres"/>
+            <button type="button" style={BS(true)} onClick={generar}>Generar</button>
+            {pass&&<button type="button" style={BG(true)} onClick={()=>setVerPass(v=>!v)}>{verPass?"Ocultar":"Ver"}</button>}
+          </div>
+          <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,marginTop:10,cursor:pass?"pointer":"default",color:"#334155"}}>
+            <input type="checkbox" checked={mail||!pass} disabled={!pass} onChange={ev=>setMail(ev.target.checked)}/>
+            Enviarle un correo para que cree su propia contraseña
+          </label>
+          <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>{pass?"Entrégale esta contraseña a la persona"+(mail?"; además recibirá el correo para cambiarla.":"."):"Si no escribes una contraseña, la persona la crea desde el correo que le llegará."}</div>
+        </div>
+      )}
+      {err&&<div style={{...alrt("error"),marginTop:10}}>{err}</div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><button style={BS(true)} onClick={onClose} disabled={busy}>Cancelar</button><button style={{...BP(true),opacity:busy?.7:1}} onClick={guardar} disabled={busy}>{busy?"Guardando...":user?"Guardar":"Crear usuario"}</button></div>
     </div></div>
   );
 }

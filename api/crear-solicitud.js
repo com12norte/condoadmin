@@ -62,6 +62,9 @@ async function fsGetDoc(token, path) {
 // lo impiden), así que la guarda el servidor con la cuenta de servicio.
 // El código SOL-xxx lo genera el servidor, para que nunca se repita.
 //   POST {solicitud:{...}} -> {ok:true, code:"SOL-045"}
+//   POST {avisar:"SOL-045"} -> avisa a los administradores de una solicitud que la
+//        app ya guardó (personal o residente con sesión). Solo envía si la
+//        solicitud existe en la base y una sola vez por solicitud.
 // Usa las variables FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY.
 // ---------------------------------------------------------------------------
 
@@ -107,14 +110,15 @@ async function siguienteNumero(token) {
 // Avisa por correo a los administradores (el residente sin sesión no puede leer la lista de usuarios)
 async function avisarAdmins(token, code, d) {
   const res = await fetch(`${FS()}/usuarios?pageSize=300`, { headers: { Authorization: "Bearer " + token } });
-  if (!res.ok) return;
+  if (!res.ok) throw new Error("Firestore usuarios: " + res.status);
   const us = ((await res.json()).documents || []).map(x => aplanar(fsObj(x.fields)));
   const admins = [...new Set(us.filter(u => u.active !== false && ["Administrador", "Administrador Edificio"].includes(u.rol) && String(u.email || "").includes("@")).map(u => u.email.trim().toLowerCase()))];
-  const cuerpo = "Nueva solicitud recibida:\n\nCódigo: " + code + "\nSolicitante: " + d.requesterName + "\nUbicación: " + d.tower + " / " + d.unit + "\nCategoría: " + d.category + (d.subcategory ? " / " + d.subcategory : "") + "\nPrioridad: " + d.priority + "\n\n" + d.description + "\n\nIngrese al sistema para gestionar.";
+  const cuerpo = "Nueva solicitud recibida:\n\nCódigo: " + code + "\nSolicitante: " + d.requesterName + "\nUbicación: " + d.tower + " / " + d.unit + "\nCategoría: " + (d.category || "") + (d.subcategory ? " / " + d.subcategory : "") + "\nPrioridad: " + d.priority + "\n\n" + d.description + "\n\nIngrese al sistema para gestionar.";
   await Promise.all(admins.map(to => fetch(`${SITE_URL}/api/send-email`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ to, subject: "[CondoAdmin] Nueva solicitud " + code + (d.priority === "Emergencia" ? " ⚠ EMERGENCIA" : ""), body: cuerpo }),
   }).catch(() => {})));
+  return admins.length;
 }
 
 export default async function handler(req, res) {
@@ -123,6 +127,28 @@ export default async function handler(req, res) {
   try {
     let body = req.body || {};
     if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
+    // Aviso a administradores de una solicitud guardada por la app
+    if (body.avisar) {
+      const id = String(body.avisar);
+      if (!/^[\w.-]{1,60}$/.test(id)) return res.status(400).json({ ok: false, error: "Código no válido" });
+      if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) throw new Error("Faltan variables FIREBASE_*");
+      const token = await getAccessToken();
+      // La app guarda en segundo plano: se espera hasta ~6 s a que aparezca
+      let d = null;
+      for (let i = 0; i < 6 && !d; i++) {
+        d = aplanar(await fsGetDoc(token, "solicitudes/" + encodeURIComponent(id)));
+        if (!d) await new Promise(r => setTimeout(r, 1000));
+      }
+      if (!d) return res.status(404).json({ ok: false, error: "La solicitud no está guardada" });
+      if (d.avisoAdmins) return res.status(200).json({ ok: true, yaAvisado: true });
+      const n = await avisarAdmins(token, d.code || id, d);
+      await fetch(`${FS()}/solicitudes/${encodeURIComponent(id)}?updateMask.fieldPaths=avisoAdmins`, {
+        method: "PATCH", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: { avisoAdmins: { stringValue: new Date().toISOString() } } }),
+      });
+      return res.status(200).json({ ok: true, enviados: n });
+    }
+
     const s = body.solicitud || {};
 
     const email = txt(s.requesterEmail, 120).trim().toLowerCase();
@@ -151,7 +177,7 @@ export default async function handler(req, res) {
         tower: txt(s.tower, 60), unit: txt(s.unit, 80).trim(),
         category: txt(s.category, 80), subcategory: txt(s.subcategory, 80),
         description: desc, priority: prioridad, isUrgent: prioridad === "Emergencia",
-        prioAuto: s.prioAuto === true,
+        prioAuto: s.prioAuto === true, avisoAdmins: now,
         accessPermission: s.accessPermission === true, confirm: true,
         affectedTowers: s.affectedTowers == null ? null : txt(s.affectedTowers, 200),
         status: "Ingresada", assignedTo: "Sin asignar", dueDate: null,

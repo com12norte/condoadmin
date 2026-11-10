@@ -164,10 +164,18 @@ export default async function handler(req, res) {
       fsGet(token, "usuarios"),
     ]);
 
+    // Documentos antiguos guardados como {id, data:{...}}: lo que hay en data es lo vigente
+    const aplanar = d => {
+      if (!d || !d.data || typeof d.data !== "object" || Array.isArray(d.data)) return d;
+      const { data, ...rest } = d;
+      return { ...rest, ...data };
+    };
+    const tareas = tasks.map(aplanar);
+
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
 
     // Tareas vencidas o por vencer en 3 días, sin informe
-    const pendientes = tasks.filter(t => {
+    const pendientes = tareas.filter(t => {
       if (!t.dueDate || (t.informe || "").trim() || t.status === "Completada" || t.status === "Cancelada") return false;
       const due = new Date(t.dueDate); due.setHours(0, 0, 0, 0);
       return Math.ceil((due - hoy) / 86400000) <= 3;

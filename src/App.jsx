@@ -375,8 +375,15 @@ function LoginScreen({onLogin}){
       setLoggedUser({...users[0],token:auth.access_token});
       setMode("menu_personal"); // mostrar menú de módulos
     }catch(ex){
-      if(ex.message?.includes("rate limit")||ex.message?.includes("429")){
-        setErr("Demasiados intentos. Espera unos segundos.");
+      const c=ex&&ex.code||"";
+      if(c==="auth/invalid-credential"||c==="auth/wrong-password"||c==="auth/user-not-found"||c==="auth/invalid-email"){
+        setErr("Correo o contraseña incorrectos. Si es tu primer ingreso o la olvidaste, toca «¿Olvidaste tu contraseña?» y te llegará un correo para crearla.");
+      } else if(c==="auth/too-many-requests"||ex.message?.includes("rate limit")||ex.message?.includes("429")){
+        setErr("Demasiados intentos. Espera unos minutos e intenta de nuevo.");
+      } else if(c==="auth/network-request-failed"){
+        setErr("Sin conexión. Revisa internet e intenta de nuevo.");
+      } else if(c==="auth/user-disabled"){
+        setErr("Esta cuenta está deshabilitada. Contacta a la administración.");
       } else {
         setErr(ex.message||"Credenciales incorrectas");
       }
@@ -1138,6 +1145,11 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               </div></div>
             )}
             {can(role,"assign")&&(
+              <div><label style={lbl}>Prioridad{r.prioAuto?" (automática)":""}</label>
+                <select style={{...sel,width:130}} value={r.priority} onChange={ev=>{const p=ev.target.value;if(p===r.priority)return;upd({priority:p,isUrgent:p==="Emergencia",prioAuto:false},{action:"Prioridad cambiada",from:null,to:null,note:r.priority+" → "+p});showToast("Prioridad: "+p);}}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
+              </div>
+            )}
+            {can(role,"assign")&&(
               <div><label style={lbl}>Responsable</label>
               <div style={{display:"flex",gap:6}}>
                 <select style={{...sel,width:150}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
@@ -1583,6 +1595,34 @@ const PRIO_HELP={
   Emergencia:"Riesgo para personas o daño grave (fuga de gas o agua, corte eléctrico general, ascensor detenido con personas).",
 };
 const MAX_FOTOS=6;
+// Departamentos / unidades del condominio
+const UNIDADES=["A1","B2","C3","D4","E5","E6","F5","F6","G7","H8"];
+
+// Prioridad automática: la define el sistema según lo que se reporta
+const _norm=t=>String(t||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+const PRIO_REGLAS=[
+  // Emergencia: riesgo para personas o daño grave
+  {p:"Emergencia",cat:{Gas:["Olor a gas","Fuga"],Ascensores:["Parada emergencia"],Seguridad:["Incidente","Acceso no autorizado"]},
+   txt:["olor a gas","fuga de gas","incendio","fuego","humo","explosion","inundacion","inundado","atrapad","encerrad","electrocut","chispa","cortocircuito","herido","accidente","robo","asalto","intruso","derrumbe"]},
+  // Alta: impide el uso normal o puede empeorar pronto
+  {p:"Alta",cat:{Electricidad:["Corte de luz","Tablero electrico","Falla de circuito"],Gas:["Corte suministro"],Agua:["Corte de agua","Fuga"],Filtraciones:["Techo"],Ascensores:["Puerta defectuosa","Ruido anormal","Otro"],Citofonia:["Puerta danada","Control acceso"],Perimetral:["Porton peatonal","Porton vehicular","Cerco electrico"],Motor:["Motor porton vehicular","Motor porton peatonal","Automatismo danado","Barrera vehicular"],Seguridad:["Alarma","Camara danada"]},
+   txt:["sin luz","sin agua","sin gas","no funciona","no abre","no cierra","gotea","goteando","filtracion","se moja","no puedo salir","no puedo entrar","ascensor detenido","porton no"]},
+  // Baja: puede esperar
+  {p:"Baja",cat:{Jardines:["Poda","Dano en plantas","Riego","Sistema riego","Otro"],Aseo:["Pasillo sucio","Area comun","Otro"],Otros:["Mascotas","Ruidos molestos"],"Espacios comunes":["Sala eventos","Quincho","Gimnasio"]},txt:[]},
+];
+const PRIO_ORD={Emergencia:0,Alta:1,Media:2,Baja:3};
+// Devuelve {p, motivo}. Las palabras de la descripción pueden subir la prioridad, nunca bajarla.
+const prioAuto=(cat,sub,desc)=>{
+  const d=_norm(desc);
+  let p="Media", motivo="Prioridad estándar";
+  for(const r of PRIO_REGLAS){ const l=r.cat[cat]; if(l&&l.includes(sub)){ p=r.p; motivo="Por el tipo de problema ("+cat+" / "+sub+")"; break; } }
+  for(const r of PRIO_REGLAS){
+    if(PRIO_ORD[r.p]>=PRIO_ORD[p]) continue;
+    const w=r.txt.find(k=>d.includes(k));
+    if(w){ p=r.p; motivo="La descripción menciona «"+w+"»"; break; }
+  }
+  return {p,motivo};
+};
 
 function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,towers,session,usuarios}){
   const mob=useMob();
@@ -1599,6 +1639,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const [f,setF]=useState(()=>{
     const rec=esResidente?getResLS():{};
     const torreOk=rec.tower&&actTowers.some(t=>t.name===rec.tower);
+    if(rec.unit&&!UNIDADES.includes(rec.unit)) rec.unit="";
     return {requesterName:session?.nombre&&session.id!=="guest"?session.nombre:(rec.requesterName||""),requesterEmail:session?.email||rec.requesterEmail||"",requesterPhone:rec.requesterPhone||"",tower:torreOk?rec.tower:initTower.name,unit:rec.unit||"",category:initCat.name,subcategory:initCat.subs[0]||"",description:"",priority:"Media",accessPermission:false,confirm:true,affectedTowers:[]};
   });
 
@@ -1620,7 +1661,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const validate=()=>{
     const err={};
     if(tipo==="Incidencia"){
-      if(!f.unit.trim()) err.unit=isAreaComun?"Indica el lugar (ej: piscina, hall)":"Indica el número de departamento o unidad";
+      if(!f.unit.trim()||(!isAreaComun&&!UNIDADES.includes(f.unit))) err.unit=isAreaComun?"Indica el lugar (ej: piscina, hall)":"Selecciona tu departamento";
       if(!f.requesterName.trim()) err.requesterName="Escribe tu nombre";
       if(!/^\S+@\S+\.\S+$/.test(f.requesterEmail.trim())) err.requesterEmail="Escribe un correo válido (ej: nombre@gmail.com)";
     }
@@ -1652,7 +1693,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     setSaving(true);
     try{
       const code=genCode(reqs,"SOL-"); const now=new Date().toISOString();
-      const datos={...f,requesterName:f.requesterName.trim(),requesterEmail:f.requesterEmail.trim().toLowerCase(),requesterPhone:f.requesterPhone.trim(),unit:f.unit.trim(),description:f.description.trim()};
+      const datos={...f,priority:prioFinal,requesterName:f.requesterName.trim(),requesterEmail:f.requesterEmail.trim().toLowerCase(),requesterPhone:f.requesterPhone.trim(),unit:f.unit.trim(),description:f.description.trim()};
       const attachmentsInitial=await Promise.all(prevs.map(async pv=>{
         const path=code+"/inicial/"+uid()+"_"+pv.name; let url=pv.url;
         try{if(pv.file)url=await uploadImg(pv.file,path);}catch(_){}
@@ -1664,8 +1705,8 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
         subcategory:tipo==="Administrativo"?adminSub:f.subcategory,
         affectedTowers:isAreaComun?(f.affectedTowers.length===0?"Todas":f.affectedTowers.join(", ")):null,
         status:"Ingresada",assignedTo:"Sin asignar",
-        history:[{date:now,user:datos.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada"}],
-        attachmentsInitial,dueDate:null,isUrgent:f.priority==="Emergencia"});
+        history:[{date:now,user:datos.requesterName||role,action:"Solicitud creada",from:null,to:"Ingresada",note:tipo==="Incidencia"?"Prioridad automática: "+prioFinal+" ("+auto.motivo+")":""}],
+        prioAuto:tipo==="Incidencia",attachmentsInitial,dueDate:null,isUrgent:prioFinal==="Emergencia"});
       setReqs(p=>[nr,...p]);
       if(esResidente) setResLS({requesterName:datos.requesterName,requesterEmail:datos.requesterEmail,requesterPhone:datos.requesterPhone,tower:f.tower,unit:isAreaComun?(getResLS().unit||""):datos.unit});
       // Mail al solicitante
@@ -1675,7 +1716,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       // Mail a administradores
       try{
         const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
-        admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+datos.requesterName+"\nCategoría: "+categoria+"\nPrioridad: "+f.priority+"\n\nIngrese al sistema para gestionar."}));
+        admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+datos.requesterName+"\nCategoría: "+categoria+"\nPrioridad: "+prioFinal+"\n\nIngrese al sistema para gestionar."}));
       }catch(ex){console.warn("Error notificando admins",ex);}
       setDone(nr); showToast("Solicitud "+code+" creada");
     }catch(ex){
@@ -1691,6 +1732,9 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
   const otra=()=>{ setDone(null); setPrevs([]); setErrs({}); setF(p=>({...p,description:"",priority:"Media",accessPermission:false,affectedTowers:[]})); };
 
   const curCat=actCats.find(c=>c.name===f.category);
+  // Incidencias: la prioridad la calcula el sistema. Solicitudes administrativas: la elige el administrador.
+  const auto=prioAuto(f.category,f.subcategory,f.description);
+  const prioFinal=tipo==="Incidencia"?auto.p:f.priority;
   const descLen=f.description.trim().length;
 
   if(done) return(
@@ -1738,8 +1782,10 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
           {tipo==="Incidencia"&&(
             <>
               {secT("📍 ¿Dónde ocurre?")}
-              <div style={fg}><label style={lbl}>Torre / sector</label><select style={selM} value={f.tower} onChange={ev=>{const v=ev.target.value;setF(p=>({...p,tower:v,affectedTowers:[]}));}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
-              <div style={fg} data-err={errs.unit?"1":"0"}><label style={lbl}>{isAreaComun?"Lugar *":"Departamento / unidad *"}</label><input style={{...inpM,...bErr("unit")}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder={isAreaComun?"ej: piscina, hall de acceso, estacionamiento -1":"ej: 401, Bodega 2"}/>{errTxt("unit")}</div>
+              <div style={fg}><label style={lbl}>Torre / sector</label><select style={selM} value={f.tower} onChange={ev=>{const v=ev.target.value;setF(p=>({...p,tower:v,affectedTowers:[],unit:(v==="Comun")===(p.tower==="Comun")?p.unit:""}));}}>{actTowers.map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+              <div style={fg} data-err={errs.unit?"1":"0"}><label style={lbl}>{isAreaComun?"Lugar *":"Departamento / unidad *"}</label>{isAreaComun
+                ?<input style={{...inpM,...bErr("unit")}} value={f.unit} onChange={ev=>setFld("unit",ev.target.value)} placeholder="ej: piscina, hall de acceso, estacionamiento -1"/>
+                :<select style={{...selM,...bErr("unit"),color:f.unit?"#1e293b":"#94a3b8"}} value={UNIDADES.includes(f.unit)?f.unit:""} onChange={ev=>setFld("unit",ev.target.value)}><option value="">Selecciona…</option>{UNIDADES.map(u=><option key={u} value={u} style={{color:"#1e293b"}}>{u}</option>)}</select>}{errTxt("unit")}</div>
 
               {/* Si es Area Común: selector de torres afectadas */}
               {isAreaComun&&(
@@ -1783,16 +1829,25 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
             {errTxt("description")||(tipo==="Incidencia"&&<div style={{fontSize:11,color:descLen>=10?"#10b981":"#94a3b8",marginTop:2}}>{descLen>=10?"✓ Suficiente detalle":"Qué pasa, desde cuándo y dónde exactamente."}</div>)}
           </div>
 
-          <div style={{...fg,gridColumn:"1/-1"}}>
-            <label style={lbl}>¿Qué tan urgente es?</label>
-            <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:6}}>
-              {[...PRIORITIES].reverse().map(p=>{
-                const on=f.priority===p;
-                return <button key={p} type="button" onClick={()=>setFld("priority",p)} style={{padding:mob?"10px 6px":"8px 6px",borderRadius:8,cursor:"pointer",fontSize:13,border:"2px solid "+(on?PC[p]:"#e2e8f0"),background:on?(PB[p]||"#f9fafb"):"#fff",color:on?PC[p]:"#64748b",fontWeight:on?700:500}}>{p==="Emergencia"?"⚠ ":""}{p}</button>;
-              })}
+          {tipo==="Incidencia"?(
+            <div style={{...fg,gridColumn:"1/-1"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"10px 12px",borderRadius:8,background:PB[auto.p]||"#f8fafc",border:"1px solid #e2e8f0"}}>
+                <span style={{fontSize:12,color:"#475569"}}>Prioridad asignada automáticamente:</span>
+                <PBadge p={auto.p}/>
+                <span style={{fontSize:11,color:"#64748b",flexBasis:"100%"}}>{auto.motivo}. {PRIO_HELP[auto.p]}</span>
+              </div>
             </div>
-            <div style={{fontSize:11,color:f.priority==="Emergencia"?"#dc2626":"#64748b",marginTop:5,fontWeight:f.priority==="Emergencia"?600:400}}>{PRIO_HELP[f.priority]}</div>
-          </div>
+          ):(
+            <div style={{...fg,gridColumn:"1/-1"}}>
+              <label style={lbl}>Prioridad</label>
+              <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:6}}>
+                {[...PRIORITIES].reverse().map(p=>{
+                  const on=f.priority===p;
+                  return <button key={p} type="button" onClick={()=>setFld("priority",p)} style={{padding:mob?"10px 6px":"8px 6px",borderRadius:8,cursor:"pointer",fontSize:13,border:"2px solid "+(on?PC[p]:"#e2e8f0"),background:on?(PB[p]||"#f9fafb"):"#fff",color:on?PC[p]:"#64748b",fontWeight:on?700:500}}>{p==="Emergencia"?"⚠ ":""}{p}</button>;
+                })}
+              </div>
+            </div>
+          )}
 
           {tipo==="Incidencia"&&(
             <>

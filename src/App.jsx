@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, orderBy, where } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, deleteField, query, orderBy, where } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -193,6 +193,39 @@ const ultMeses = n => { const b=new Date(), out=[]; for(let i=n-1;i>=0;i--){ con
 const tareaPend = t => !!t.dueDate&&!(t.informe||"").trim()&&t.status!=="Completada"&&t.status!=="Cancelada";
 const diffDue = t => { const h=new Date(); h.setHours(0,0,0,0); return Math.ceil((parseF(t.dueDate)-h)/86400000); };
 const ordPrioridad = (a,b) => (PRIORITIES.indexOf(a.priority)-PRIORITIES.indexOf(b.priority))||(new Date(a.createdAt)-new Date(b.createdAt));
+// ── Plazos (SLA), asignación, cierre y evaluación ───────────────────────────
+const SLA_H = {Emergencia:4,Alta:24,Media:72,Baja:168};   // horas para resolver según prioridad
+const slaTxt = p => { const h=SLA_H[p]; return h==null?"—":h<48?h+" h":(h/24)+" días"; };
+const venceSLA = r => { const h=SLA_H[r.priority], c=new Date(r.createdAt); return h==null||isNaN(c)?null:new Date(c.getTime()+h*3600000); };
+// Cerradas: true/false según si se cerró dentro del plazo (null si no hay fecha de cierre)
+const enPlazo = r => { const v=venceSLA(r), f=fechaCierre(r); return r.status!=="Cerrada"||!v||!f?null:new Date(f)<=v; };
+// Abiertas que ya pasaron su plazo
+const fueraPlazo = r => { const v=venceSLA(r); return esAbierta(r)&&!!v&&Date.now()>v.getTime(); };
+const fechaAsig = r => { const h=(r.history||[]).find(x=>x.to==="Asignada"||/^Asignada a /.test(x.action||"")); return h&&h.date?h.date:null; };
+const horasAsignar = r => { const f=fechaAsig(r); if(!f||!r.createdAt) return null; const h=(new Date(f)-new Date(r.createdAt))/3600000; return isNaN(h)||h<0?null:h; };
+const promNum = a => { const x=a.filter(v=>v!==null&&v!==undefined); return x.length?x.reduce((s,v)=>s+v,0)/x.length:null; };
+const num1 = n => String(Math.round(n*10)/10).replace(".",",");
+const fmtHoras = h => h===null?"---":h<1?Math.max(1,Math.round(h*60))+" min":h<48?num1(h)+" h":num1(h/24)+" días";
+const atrasoTxt = r => { const v=venceSLA(r); return v?fmtHoras((Date.now()-v.getTime())/3600000):""; };
+const pct = (a,b) => b?Math.round(a/b*100):null;
+// Regla única de cierre: siempre con nota; la foto es opcional. Se usa desde Inicio y desde el detalle.
+const cerrarReq = (r,nota,usuario) => { const now=new Date().toISOString(); return {...r,status:"Cerrada",closedAt:now,closeNote:nota,evalToken:uid()+uid()+uid(),history:[...(r.history||[]),{date:now,user:usuario,action:"Solicitud cerrada",from:r.status,to:"Cerrada",note:nota}]}; };
+const reabrirReq = (r,usuario,motivo) => { const now=new Date().toISOString(); return {...r,status:"En proceso",closedAt:null,history:[...(r.history||[]),{date:now,user:usuario,action:"Solicitud reabierta",from:r.status,to:"En proceso",note:motivo||""}]}; };
+// Correo de cierre al residente, con los enlaces para que confirme si quedó resuelto
+const mailCierre = (r,nota) => {
+  const base=SITE_URL+"/api/evaluar?id="+encodeURIComponent(r.id)+"&t="+encodeURIComponent(r.evalToken||"");
+  return {requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:"[CondoAdmin] Solicitud "+r.code+" cerrada",type:"Cierre",status:"Enviado",
+    body:"Hola "+(r.requesterName||"")+",\n\nTu solicitud "+r.code+(r.category?" ("+r.category+")":"")+" fue cerrada.\n\nComentario de cierre: "+nota+"\n\n¿Quedó resuelto el problema? Cuéntanos con un clic:\n\n  Sí, quedó resuelto:  "+base+"&r=si\n\n  No quedó resuelto:  "+base+"&r=no\n\nTu respuesta nos ayuda a mejorar.\n\n— CondoAdmin"};
+};
+// La respuesta del residente vale solo para el cierre actual (si se reabre y se vuelve a cerrar, se pregunta de nuevo)
+const evalDe = r => { const e=r&&r.evaluacion; return e&&typeof e.resuelto==="boolean"&&(!e.token||e.token===r.evalToken)?e:null; };
+const tieneCorreo = r => !!r.requesterEmail&&r.requesterEmail.includes("@");
+// Documentos antiguos guardados como {id, data:{...}}: se aplanan al leer (lo que hay en data es lo más reciente)
+const aplanar = d => { if(!d||!d.data||typeof d.data!=="object"||Array.isArray(d.data)) return d; const {data,...rest}=d; return {...rest,...data}; };
+// Acceso del residente verificado con código por correo (se recuerda 30 días en el dispositivo)
+const ACC_LS="ca_acceso";
+const getAcceso = () => { try{ const a=JSON.parse(localStorage.getItem(ACC_LS)||"null"); return a&&a.email&&a.hasta>Date.now()?a:null; }catch(_){ return null; } };
+const setAcceso = a => { try{ a?localStorage.setItem(ACC_LS,JSON.stringify(a)):localStorage.removeItem(ACC_LS); }catch(_){} };
 
 // ── Styles ─────────────────────────────────────────────────────────────────
 const bdg = (c,bg) => ({display:"inline-flex",alignItems:"center",padding:"2px 6px",borderRadius:99,fontSize:10,fontWeight:600,color:c,background:bg,whiteSpace:"nowrap"});
@@ -455,7 +488,7 @@ export default function App(){
     if(user.openNewReq) setShowNew(true);
     if(user.rol==="Residente") setView("mis_reqs");
   };
-  const handleLogout=()=>{setSession(null);setViewAs(null);setView("dashboard");_tok=null;};
+  const handleLogout=()=>{setAcceso(null);setSession(null);setViewAs(null);setView("dashboard");_tok=null;};
 
   useEffect(()=>{setLoading(false);},[]);
 
@@ -474,22 +507,23 @@ export default function App(){
           dbGet("config"),
           dbGet("usuarios"),
         ]);
-        if(Array.isArray(rR)) setReqs(rR.map(r=>normReq(r)).filter(Boolean));
-        if(Array.isArray(rT)) setTasks(rT.map(r=>normTask(r)).filter(Boolean));
-        if(Array.isArray(rI)) setInv(rI.filter(Boolean));
-        if(Array.isArray(rM)) setMant(rM.map(r=>normMant(r)).filter(Boolean));
-        if(Array.isArray(rIn)) setInsp(rIn.map(r=>normInsp(r)).filter(Boolean));
-        if(Array.isArray(rE)) setEmails(rE.filter(Boolean));
+        if(Array.isArray(rR)) setReqs(rR.filter(Boolean).map(r=>normReq(aplanar(r))));
+        if(Array.isArray(rT)) setTasks(rT.filter(Boolean).map(r=>normTask(aplanar(r))));
+        if(Array.isArray(rI)) setInv(rI.filter(Boolean).map(aplanar));
+        if(Array.isArray(rM)) setMant(rM.filter(Boolean).map(r=>normMant(aplanar(r))));
+        if(Array.isArray(rIn)) setInsp(rIn.filter(Boolean).map(r=>normInsp(aplanar(r))));
+        if(Array.isArray(rE)) setEmails(rE.filter(Boolean).map(aplanar).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)));
         if(Array.isArray(rU)) setUsuarios(rU);
         // config guardado como doc "main" con campos directos
         if(Array.isArray(rCfg)) {
           const cfg = rCfg.find(c=>c && (c.towers||c.cats||c.resps||c.equipos)) || rCfg[0];
-          if(cfg) {
-            if(cfg.cats) setCats(cfg.cats);
-            if(cfg.towers) setTowers(cfg.towers);
-            if(cfg.equipos) setEquipos(cfg.equipos);
-            if(cfg.certs) setCerts(cfg.certs);
-          }
+          // Los cambios hechos en Configuración se guardan en documentos propios {key,data}; tienen prioridad
+          const propio=k=>{const d=rCfg.find(c=>c&&c.key===k&&Array.isArray(c.data));return d?d.data:null;};
+          const val=k=>propio(k)||(cfg&&Array.isArray(cfg[k])?cfg[k]:null);
+          if(val("cats")) setCats(val("cats"));
+          if(val("towers")) setTowers(val("towers"));
+          if(val("equipos")) setEquipos(val("equipos"));
+          if(val("certs")) setCerts(val("certs"));
         }
       }catch(ex){console.error("load error",ex);showToast("No se pudieron cargar los datos. Revisa tu conexión y vuelve a entrar.","error");}
       finally{setDataLoading(false);}
@@ -499,7 +533,8 @@ export default function App(){
   // Los recordatorios diarios los maneja el cron de GitHub Actions (api/cron-recordatorios.js)
   // No se envían correos desde el frontend para evitar duplicados al abrir la app.
 
-  const persist=async(table,item)=>{try{await dbUpsert(table,{id:item.id,data:item});}catch(ex){console.error("persist error",table,ex);showToast("No se pudo guardar el cambio. Revisa tu conexión e intenta de nuevo.","error");}};
+  // Se guarda con los campos directos en el documento (igual que se leen) y se elimina el antiguo campo "data"
+  const persist=async(table,item)=>{if(!item||item.id==null||item.id==="")return;try{await setDoc(doc(fbDb,table,String(item.id)),{...JSON.parse(JSON.stringify(item)),data:deleteField()},{merge:true});}catch(ex){console.error("persist error",table,ex);showToast("No se pudo guardar el cambio. Revisa tu conexión e intenta de nuevo.","error");}};
   const persistCfg=async(key,data)=>{try{await dbUpsert("config",{key,data});}catch(_){}};
 
   const mkDB=(setter,table)=>updater=>setter(prev=>{
@@ -536,7 +571,7 @@ export default function App(){
   const addEmail=async log=>{
     const item={id:"e"+uid(),...log};
     setEmails(p=>[item,...p]);
-    try{await dbPost("correos",{id:item.id,request_id:item.requestId||"",data:item});}catch(_){}
+    try{await setDoc(doc(fbDb,"correos",String(item.id)),{...JSON.parse(JSON.stringify(item)),request_id:item.requestId||""},{merge:true});}catch(_){}
     // Enviar mail en background sin bloquear
     sendMail(log.to, log.subject, log.body).catch(ex=>console.warn("addEmail sendMail",ex));
   };
@@ -615,7 +650,7 @@ export default function App(){
           <div style={{flex:1,overflowY:"auto",padding:mob?"12px":"16px"}}>
             {dataLoading&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,fontSize:13,color:"#1d4ed8"}}><div style={{width:16,height:16,border:"3px solid #bfdbfe",borderTop:"3px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Cargando información...<style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>}
             {view==="dashboard"&&er==="Residente"&&<ResidenteReqs reqs={reqs} tasks={tasks} session={session} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
-            {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq} setReqs={setReqsDB} showToast={showToast} goList={goList}/>}
+            {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq} setReqs={setReqsDB} showToast={showToast} goList={goList} addEmail={addEmail} session={session}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session} tab={listTab} setTab={setListTab}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView(er==="Residente"?"mis_reqs":"requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
             {view==="tasks"&&<TasksView tasks={tasks} reqs={reqs} role={er} setTasks={setTasksDB} deleteTask={deleteTask} showToast={showToast} mob={mob} respAssign={respAssign} onOpen={openReq}/>}
@@ -669,7 +704,7 @@ const sigPaso=(r,role,nPend)=>{
     Asignada:"Tu solicitud ya tiene un responsable"+(sinAs?"":": "+r.assignedTo)+".",
     "En proceso":"Se está trabajando en la solución.",
     Resuelta:"El trabajo fue realizado. Falta la revisión final de la administración.",
-    Cerrada:"Solicitud cerrada. Si el problema continúa, ingresa una nueva solicitud.",
+    Cerrada:"Solicitud cerrada.",
     Rechazada:"La solicitud fue rechazada. Revisa los comentarios para conocer el motivo.",
   })[r.status]||null;
   if(!esAbierta(r)) return null;
@@ -681,7 +716,7 @@ const sigPaso=(r,role,nPend)=>{
 };
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
-function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,deleteTask,deleteReq,goList}){
+function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,deleteTask,deleteReq,goList,addEmail,session}){
   const abiertas=reqs.filter(esAbierta).sort(ordPrioridad);
   const emerg=abiertas.filter(r=>r.priority==="Emergencia");
   const sinAsignar=abiertas.filter(r=>!r.assignedTo||r.assignedTo==="Sin asignar");
@@ -698,13 +733,17 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,dele
 
   const quickClose=(r)=>{
     if(!closeNote.trim()){showToast("Escribe una nota de cierre","error");return;}
-    const upd={...r,status:"Cerrada",history:[...(r.history||[]),{date:new Date().toISOString(),user:role,action:"Cerrada desde dashboard",from:r.status,to:"Cerrada",note:closeNote.trim()}]};
+    const upd=cerrarReq(r,closeNote.trim(),session?.nombre||role);
     setReqs(p=>p.map(x=>x.id===r.id?upd:x));
-    showToast("Solicitud "+r.code+" cerrada");
+    if(tieneCorreo(upd)&&addEmail) addEmail(mailCierre(upd,closeNote.trim()));
+    showToast("Solicitud "+r.code+" cerrada"+(tieneCorreo(upd)?" · se avisó al residente":""));
     setClosingId(null); setCloseNote("");
   };
 
-  const avgResolucion=promDias(reqs.filter(r=>r.status==="Cerrada"));
+  const nFuera=abiertas.filter(fueraPlazo).length;
+  // Cerradas que el residente marcó como NO resueltas
+  const noResueltas=reqs.filter(r=>r.status==="Cerrada"&&evalDe(r)&&evalDe(r).resuelto===false);
+  const reabrir=r=>{ setReqs(p=>p.map(x=>x.id===r.id?reabrirReq(r,session?.nombre||role,"El residente indicó que no quedó resuelto"):x)); showToast("Solicitud "+r.code+" reabierta"); };
   const tareasVencidas=tasks.filter(t=>tareaPend(t)&&diffDue(t)<0).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
   const tareasPorVencer=tasks.filter(t=>tareaPend(t)&&diffDue(t)>=0&&diffDue(t)<=3).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
   const listaVenc=verVenc?tareasVencidas:tareasVencidas.slice(0,5);
@@ -741,8 +780,24 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,dele
         <Kpi value={abiertas.length} label="Solicitudes abiertas" color="#3b82f6" mob={mob} onClick={goList&&(()=>goList("abiertas"))}/>
         <Kpi value={emerg.length} label="Emergencias activas" color="#ef4444" mob={mob} onClick={goList&&(()=>goList("emergencias"))}/>
         <Kpi value={sinAsignar.length} label="Sin asignar" color="#f59e0b" mob={mob} onClick={goList&&(()=>goList("sinasignar"))}/>
-        <Kpi value={fmtDias(avgResolucion)} label="Prom. resolución" color="#10b981" mob={mob}/>
+        <Kpi value={nFuera} label="Fuera de plazo" color="#f97316" mob={mob} onClick={goList&&(()=>goList("fueraplazo"))}/>
       </Grid>
+
+      {/* El residente dice que no quedó resuelto */}
+      {isAnalyst&&noResueltas.length>0&&(
+        <div style={{...card,background:"#fff7ed",border:"1px solid #fdba74",marginBottom:12}}>
+          <div style={{fontWeight:700,color:"#c2410c",fontSize:13,marginBottom:8}}>👎 El residente indicó que NO quedó resuelto ({noResueltas.length})</div>
+          {noResueltas.map(r=>(
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid #fed7aa",flexWrap:"wrap"}}>
+              <div style={{cursor:"pointer",minWidth:0,flex:1}} onClick={()=>onOpen(r)}>
+                <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span><span style={{fontSize:11,color:"#64748b",marginLeft:6}}>{r.category} · {r.requesterName}</span>
+                {r.closeNote&&<div style={{fontSize:11,color:"#94a3b8"}}>Cierre: {r.closeNote}</div>}
+              </div>
+              {puedeCerrar&&<button style={BW(true)} onClick={()=>reabrir(r)}>↺ Reabrir</button>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Órdenes vencidas sin informe */}
       {tareasVencidas.length>0&&(
@@ -778,7 +833,7 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,dele
                   <div style={{minWidth:0}}>
                     <span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span>
                     <span style={{fontSize:11,color:"#64748b",marginLeft:6}}>{r.category}</span>
-                    <div style={{fontSize:11,color:sinAs?"#d97706":"#94a3b8",fontWeight:sinAs?600:400}}>👤 {sinAs?"Sin asignar":r.assignedTo} · <span style={{color:da>30?"#ef4444":da>7?"#d97706":"#94a3b8",fontWeight:da>7?600:400}}>{da===0?"hoy":"hace "+da+" día"+(da===1?"":"s")}</span></div>
+                    <div style={{fontSize:11,color:sinAs?"#d97706":"#94a3b8",fontWeight:sinAs?600:400}}>👤 {sinAs?"Sin asignar":r.assignedTo} · <span style={{color:da>30?"#ef4444":da>7?"#d97706":"#94a3b8",fontWeight:da>7?600:400}}>{da===0?"hoy":"hace "+da+" día"+(da===1?"":"s")}</span>{fueraPlazo(r)&&<span style={{...bdg("#c2410c","#fff7ed"),marginLeft:6}}>Fuera de plazo ({slaTxt(r.priority)})</span>}</div>
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-end",flexShrink:0}}>
                     <PBadge p={r.priority}/><SBadge s={r.status}/>
@@ -848,6 +903,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
     {id:"abiertas",label:"Abiertas",f:esAbierta},
     {id:"sinasignar",label:"Sin asignar",f:r=>esAbierta(r)&&sinAsig(r)},
     {id:"emergencias",label:"Emergencias",f:r=>esAbierta(r)&&r.priority==="Emergencia"},
+    {id:"fueraplazo",label:"Fuera de plazo",f:fueraPlazo},
     {id:"cerradas",label:"Cerradas",f:r=>!esAbierta(r)},
     {id:"todas",label:"Todas",f:()=>true},
   ];
@@ -884,7 +940,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
         {TABS.map(t=>{
           const n=base.filter(t.f).length, on=tabAct===t.id;
-          const rojo=t.id==="emergencias"&&n>0, amar=t.id==="sinasignar"&&n>0;
+          const rojo=t.id==="emergencias"&&n>0, amar=(t.id==="sinasignar"||t.id==="fueraplazo")&&n>0;
           const col=rojo?"#dc2626":amar?"#d97706":"#3b82f6";
           return <button key={t.id} onClick={()=>cambiarTab(t.id)} style={{padding:mob?"8px 12px":"6px 12px",borderRadius:99,fontSize:12,cursor:"pointer",border:"1px solid "+(on?col:"#e2e8f0"),background:on?col:"#fff",color:on?"#fff":(rojo||amar?col:"#475569"),fontWeight:on||rojo||amar?600:400}}>{t.label} <span style={{opacity:.85}}>({n})</span></button>;
         })}
@@ -919,7 +975,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       </div>
       {visible.length===0?(
         <div style={{...card,textAlign:"center",padding:"32px 16px"}}>
-          <div style={{fontSize:13,color:"#64748b",marginBottom:hayFiltros?10:0}}>{hayFiltros?"Ninguna solicitud coincide con la búsqueda o los filtros.":tabAct==="abiertas"?"No hay solicitudes abiertas 🎉":tabAct==="sinasignar"?"Todas las solicitudes abiertas tienen responsable ✓":tabAct==="emergencias"?"No hay emergencias activas ✓":"Sin solicitudes"}</div>
+          <div style={{fontSize:13,color:"#64748b",marginBottom:hayFiltros?10:0}}>{hayFiltros?"Ninguna solicitud coincide con la búsqueda o los filtros.":tabAct==="abiertas"?"No hay solicitudes abiertas 🎉":tabAct==="sinasignar"?"Todas las solicitudes abiertas tienen responsable ✓":tabAct==="emergencias"?"No hay emergencias activas ✓":tabAct==="fueraplazo"?"Ninguna solicitud abierta está fuera de plazo ✓":"Sin solicitudes"}</div>
           {hayFiltros&&<button style={BS(true)} onClick={()=>setFi(FI0)}>Limpiar filtros</button>}
         </div>
       ):mob?(
@@ -932,7 +988,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{r.requesterName||"—"}{r.unit?" · "+(r.tower&&r.tower!=="Comun"?r.tower+"/":"")+r.unit:""} · {antig(r)}</div>
                 <div style={{fontSize:11,color:sinAsig(r)&&esAbierta(r)?"#d97706":"#94a3b8",fontWeight:sinAsig(r)&&esAbierta(r)?600:400}}>👤 {sinAsig(r)?"Sin asignar":r.assignedTo}</div>
               </div>
-              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}><PBadge p={r.priority}/><SBadge s={r.status}/></div>
+              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}><PBadge p={r.priority}/><SBadge s={r.status}/>{fueraPlazo(r)&&<span style={bdg("#c2410c","#fff7ed")}>Fuera de plazo</span>}{(r.status==="Cerrada"&&evalDe(r))&&<span style={bdg(evalDe(r).resuelto?"#16a34a":"#c2410c",evalDe(r).resuelto?"#f0fdf4":"#fff7ed")}>{evalDe(r).resuelto?"👍":"👎 No resuelta"}</span>}</div>
             </div>
           </div>
         ))}</div>
@@ -951,12 +1007,12 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}><SBadge s={r.status}/></td>
                 <td style={{...tdS,color:sinAsig(r)&&esAbierta(r)?"#d97706":undefined,fontWeight:sinAsig(r)&&esAbierta(r)?600:400}}>{r.assignedTo}</td>
                 <td style={tdS}>{r.proveedor||"—"}</td>
-                <td style={tdS}><div style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</div>{esAbierta(r)&&<div style={{fontSize:10,color:diasAbierta(r)>30?"#ef4444":diasAbierta(r)>7?"#d97706":"#94a3b8"}}>{antig(r)}</div>}</td>
+                <td style={tdS}><div style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</div>{esAbierta(r)&&<div style={{fontSize:10,color:diasAbierta(r)>30?"#ef4444":diasAbierta(r)>7?"#d97706":"#94a3b8"}}>{antig(r)}</div>}{fueraPlazo(r)&&<div style={{fontSize:10,color:"#c2410c",fontWeight:600}}>Fuera de plazo</div>}{(r.status==="Cerrada"&&evalDe(r))&&<div style={{fontSize:10,color:evalDe(r).resuelto?"#16a34a":"#c2410c",fontWeight:600}}>{evalDe(r).resuelto?"👍 Confirmada":"👎 No resuelta"}</div>}</td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
                     {can(role,"changeStatus")&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-                      <select title="Cambiar estado" style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
-                        {STATUSES.map(s=><option key={s}>{s}</option>)}
+                      <select title="Cambiar estado (para cerrar, abre la solicitud)" style={{...sel,width:120,fontSize:11,padding:"4px 6px"}} value={r.status} onChange={ev=>quickSt(r,ev.target.value)}>
+                        {STATUSES.filter(s=>s!=="Cerrada").map(s=><option key={s}>{s}</option>)}
                       </select>
                     )}
                     {can(role,"manageConfig")&&(
@@ -995,7 +1051,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   };
   const applyStatus=()=>{
     if(ns===r.status) return;
-    if(ns==="Cerrada"){setShowCl(true);return;}
+    if(ns==="Cerrada"){ if(!can(role,"closeCases")){showToast("Solo la administración puede cerrar solicitudes","error");setNs(r.status);return;} setShowCl(true);return; }
     upd({status:ns},{action:"Estado cambiado",from:r.status,to:ns});
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
@@ -1016,11 +1072,20 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     upd({comments:[...safeComments,{id:"c"+uid(),user:session?.nombre&&session.nombre!==role?session.nombre+" ("+role+")":role,date:new Date().toISOString(),text:comment.trim()}]});
     setComment(""); showToast("Comentario agregado");
   };
-  const closeFinal=()=>{
-    const closure=atts.filter(a=>a.requestId===r.id&&a.type==="cierre");
-    if(!closure.length){showToast("Cargue evidencia de cierre","error");return false;}
-    upd({status:"Cerrada"},{action:"Caso cerrado",from:"Resuelta",to:"Cerrada"});
-    showToast("Solicitud cerrada"); setShowCl(false); return true;
+  const usuario=session?.nombre&&session.nombre!==role?session.nombre:role;
+  const closeFinal=(nota)=>{
+    const c=cerrarReq(r,nota,usuario);
+    setReqs(p=>p.map(x=>x.id===r.id?c:x)); setSelReq(c); setNs("Cerrada");
+    if(tieneCorreo(c)) addEmail(mailCierre(c,nota));
+    showToast("Solicitud cerrada"+(tieneCorreo(c)?" · se avisó al residente":"")); setShowCl(false); return true;
+  };
+  const reabrir=()=>{
+    const c=reabrirReq(r,usuario,evalDe(r)&&evalDe(r).resuelto===false?"El residente indicó que no quedó resuelto":"");
+    setReqs(p=>p.map(x=>x.id===r.id?c:x)); setSelReq(c); setNs(c.status); showToast("Solicitud reabierta");
+  };
+  const evaluar=ok=>{
+    upd({evaluacion:{resuelto:ok,date:new Date().toISOString(),via:"app",token:r.evalToken||""}},{action:ok?"El residente confirmó que quedó resuelto":"El residente indicó que NO quedó resuelto",from:null,to:null});
+    showToast(ok?"¡Gracias por confirmar!":"Gracias. Avisamos a la administración.");
   };
 
   const isProv=role==="Proveedor";
@@ -1070,18 +1135,32 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               </div></div>
             )}
             {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden de trabajo</button>}
-            {can(role,"closeCases")&&r.status==="Resuelta"&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
+            {can(role,"closeCases")&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
             <button style={BS(true)} onClick={()=>setShowEv("avance")}>📷 Subir evidencia</button>
           </div>
         </div>
       )}
       {!isProv&&<Pasos status={r.status} mob={mob}/>}
+      {r.status==="Cerrada"&&!isProv&&(
+        <div style={{...card,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",background:evalDe(r)?(evalDe(r).resuelto?"#f0fdf4":"#fff7ed"):"#fff",borderColor:evalDe(r)?(evalDe(r).resuelto?"#86efac":"#fdba74"):"#e2e8f0"}}>
+          <div style={{flex:1,minWidth:180,fontSize:13}}>
+            {r.closeNote&&<div style={{marginBottom:4}}><strong>Cierre:</strong> {r.closeNote}</div>}
+            {evalDe(r)
+              ? <div style={{fontWeight:600,color:evalDe(r).resuelto?"#16a34a":"#c2410c"}}>{evalDe(r).resuelto?"👍 El residente confirmó que quedó resuelto":"👎 El residente indicó que NO quedó resuelto"} <span style={{fontWeight:400,color:"#94a3b8",fontSize:11}}>· {fmtD(evalDe(r).date)}</span></div>
+              : role==="Residente"
+                ? <div style={{fontWeight:600}}>¿Quedó resuelto tu problema?</div>
+                : <div style={{color:"#94a3b8",fontSize:12}}>{!r.evalToken?"Cerrada antes de que existiera la confirmación del residente.":tieneCorreo(r)?"Esperando que el residente confirme si quedó resuelto.":"Sin correo de contacto: no se pidió confirmación al residente."}</div>}
+          </div>
+          {role==="Residente"&&!(r.status==="Cerrada"&&evalDe(r))&&<><button style={BSu(false)} onClick={()=>evaluar(true)}>👍 Sí</button><button style={BW(false)} onClick={()=>evaluar(false)}>👎 No</button></>}
+          {can(role,"closeCases")&&<button style={BS(true)} onClick={reabrir}>↺ Reabrir</button>}
+        </div>
+      )}
       {(()=>{const msg=sigPaso(r,role,myTasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada"&&!(t.informe||"").trim()).length);return msg?<div style={{...alrt("info"),marginBottom:12,fontSize:13}}>💡 {msg}</div>:null;})()}
       <Tabs tabs={tabs} active={tab} onChange={setTab}/>
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
           <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Solicitante</div><IR l="Nombre" v={r.requesterName}/><IR l="Correo" v={r.requesterEmail}/><IR l="Telefono" v={r.requesterPhone}/><IR l="Torre" v={r.tower}/><IR l="Unidad" v={r.unit}/>{r.affectedTowers&&<IR l="Torres afectadas" v={r.affectedTowers}/>}</div>
-          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/></div>
+          <div style={card}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Caso</div><IR l="Categoria" v={(r.category||"")+" / "+(r.subcategory||"")}/><IR l="Responsable" v={r.assignedTo}/><IR l="Proveedor" v={r.proveedor||"—"}/><IR l="Creacion" v={fmt(r.createdAt)}/><IR l={"Plazo ("+slaTxt(r.priority)+")"} v={(()=>{const v=venceSLA(r);if(!v)return "—";if(r.status==="Cerrada"){const e=enPlazo(r);return e===null?"—":e?"✓ Cerrada dentro de plazo":"Cerrada fuera de plazo";}if(r.status==="Rechazada")return "—";return fueraPlazo(r)?"⚠ Vencido hace "+atrasoTxt(r):"Vence "+fmt(v);})()}/>{fechaAsig(r)&&<IR l="Tiempo hasta asignar" v={fmtHoras(horasAsignar(r))}/>}</div>
           <div style={{...card,gridColumn:"1/-1"}}><div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Descripcion</div><p style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:0}}>{r.description||"Sin descripcion."}</p></div>
           <div style={{...card,gridColumn:"1/-1"}}>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Comentarios ({safeComments.length})</div>
@@ -1446,17 +1525,24 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
 function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
   const closure=atts.filter(a=>a.requestId===req.id&&a.type==="cierre");
   const [showEv,setShowEv]=useState(false);
+  const [nota,setNota]=useState("");
+  const [err,setErr]=useState(false);
+  const confirmar=()=>{ if(!nota.trim()){setErr(true);return;} onConfirm(nota.trim()); };
   return(
     <div style={MSt}>
-      <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:440,padding:"20px",marginTop:16}}>
-        <h3 style={{margin:"0 0 10px",fontSize:14}}>Cerrar solicitud {req.code}</h3>
-        {closure.length===0
-          ?<div><div style={alrt("error")}>Cargue al menos una imagen de cierre.</div><button style={BP(true)} onClick={()=>setShowEv(true)}>Cargar evidencia</button></div>
-          :<div><div style={alrt("success")}>{closure.length} imagen(es) de cierre.</div><p style={{fontSize:13}}>¿Confirmar cierre definitivo?</p></div>
-        }
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+      <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:460,padding:"20px",marginTop:16}}>
+        <h3 style={{margin:"0 0 4px",fontSize:15}}>Cerrar solicitud {req.code}</h3>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>{tieneCorreo(req)?"Se avisará a "+req.requesterEmail+" y se le preguntará si quedó resuelto.":"Esta solicitud no tiene correo de contacto; no se enviará aviso."}</div>
+        <label style={lbl}>¿Qué se hizo? *</label>
+        <textarea autoFocus style={{...inp,height:80,resize:"vertical",fontFamily:"inherit",...(err?{borderColor:"#ef4444",background:"#fef2f2"}:{})}} value={nota} onChange={ev=>{setNota(ev.target.value);setErr(false);}} placeholder="Ej: Se cambió el flexible del lavamanos y se probó sin filtraciones."/>
+        {err&&<div style={{color:"#ef4444",fontSize:11,marginTop:2}}>Escribe una nota de cierre. El residente la verá en el correo.</div>}
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10}}>
+          <button style={BS(true)} onClick={()=>setShowEv(true)}>📷 Agregar foto de cierre</button>
+          <span style={{fontSize:11,color:"#94a3b8"}}>{closure.length>0?closure.length+" foto(s) agregada(s)":"Opcional"}</span>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}>
           <button style={BS(true)} onClick={onClose}>Cancelar</button>
-          {closure.length>0&&<button style={BSu(true)} onClick={onConfirm}>Confirmar</button>}
+          <button style={BSu(true)} onClick={confirmar}>✓ Cerrar solicitud</button>
         </div>
       </div>
       {showEv&&<EvidModal type="cierre" requestId={req.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(false)}/>}
@@ -1799,15 +1885,76 @@ function TasksView({tasks,reqs,role,setTasks,deleteTask,showToast,mob,respAssign
 }
 
 // ── ResidenteReqs — vista del residente: sus solicitudes + órdenes vencidas sin informe ──
+// Verificación del correo del residente: pide un código de 6 dígitos enviado por correo
+function AccesoResidente({onOk}){
+  const [email,setEmail]=useState(()=>getResLS().requesterEmail||"");
+  const [paso,setPaso]=useState(1);
+  const [codigo,setCodigo]=useState("");
+  const [msg,setMsg]=useState(null);   // {t:"error"|"info",m}
+  const [busy,setBusy]=useState(false);
+  const llamar=async body=>{
+    const res=await fetch(SITE_URL+"/api/residente-codigo",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    let j={}; try{ j=await res.json(); }catch(_){}
+    return {ok:res.ok&&j.ok,error:j.error};
+  };
+  const enviar=async()=>{
+    const e=email.trim().toLowerCase();
+    if(!/^\S+@\S+\.\S+$/.test(e)){setMsg({t:"error",m:"Escribe un correo válido."});return;}
+    setBusy(true); setMsg(null);
+    try{
+      const r=await llamar({accion:"enviar",email:e});
+      if(r.ok){setPaso(2);setCodigo("");setMsg({t:"info",m:"Te enviamos un código de 6 dígitos a "+e+". Revisa también la carpeta de spam."});}
+      else setMsg({t:"error",m:r.error||"No se pudo enviar el código. Intenta de nuevo en unos minutos."});
+    }catch(_){setMsg({t:"error",m:"No se pudo enviar el código. Revisa tu conexión."});}
+    setBusy(false);
+  };
+  const verificar=async()=>{
+    const c=codigo.replace(/\D/g,"");
+    if(c.length!==6){setMsg({t:"error",m:"El código tiene 6 dígitos."});return;}
+    setBusy(true); setMsg(null);
+    try{
+      const e=email.trim().toLowerCase();
+      const r=await llamar({accion:"verificar",email:e,codigo:c});
+      if(r.ok){const a={email:e,hasta:Date.now()+30*86400000};setAcceso(a);onOk(a);}
+      else setMsg({t:"error",m:r.error||"Código incorrecto."});
+    }catch(_){setMsg({t:"error",m:"No se pudo verificar. Revisa tu conexión."});}
+    setBusy(false);
+  };
+  return(
+    <div style={{...card,maxWidth:420,margin:"0 auto 12px",padding:18}}>
+      <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>🔒 Ver mis solicitudes</div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Para proteger tus datos, confirma que el correo es tuyo. Solo se pide una vez en este dispositivo.</div>
+      {msg&&<div style={alrt(msg.t)}>{msg.m}</div>}
+      {paso===1?(
+        <>
+          <label style={lbl}>Correo con el que ingresaste tus solicitudes</label>
+          <input type="email" inputMode="email" autoComplete="email" autoCapitalize="none" style={{...inp,fontSize:16,padding:10,marginBottom:10}} value={email} onChange={ev=>setEmail(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&enviar()} placeholder="nombre@correo.com"/>
+          <button style={{...BP(false),width:"100%",justifyContent:"center",opacity:busy?.7:1}} onClick={enviar} disabled={busy}>{busy?"Enviando...":"Enviarme el código"}</button>
+        </>
+      ):(
+        <>
+          <label style={lbl}>Código de 6 dígitos</label>
+          <input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus style={{...inp,fontSize:22,padding:10,marginBottom:10,textAlign:"center",letterSpacing:6}} value={codigo} onChange={ev=>setCodigo(ev.target.value.replace(/\D/g,""))} onKeyDown={ev=>ev.key==="Enter"&&verificar()} placeholder="······"/>
+          <button style={{...BP(false),width:"100%",justifyContent:"center",opacity:busy?.7:1}} onClick={verificar} disabled={busy}>{busy?"Verificando...":"Entrar"}</button>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
+            <button style={BG(true)} onClick={()=>{setPaso(1);setMsg(null);}} disabled={busy}>← Cambiar correo</button>
+            <button style={BG(true)} onClick={enviar} disabled={busy}>Reenviar código</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
-  // Si entró sin cuenta, se usa el correo con el que ingresó solicitudes antes en este dispositivo
-  const email=(session?.email||getResLS().requesterEmail||"").trim().toLowerCase();
+  // Quien entra sin cuenta debe confirmar su correo con un código antes de ver solicitudes
+  const [acc,setAcc]=useState(getAcceso);
+  const invitado=!session?.email;
+  const email=(session?.email||(acc&&acc.email)||"").trim().toLowerCase();
   const hoy=new Date(); hoy.setHours(0,0,0,0);
 
   // Solicitudes que levantó este residente (por correo)
-  const misReqs=email
-    ? reqs.filter(r=>(r.requesterEmail||"").trim().toLowerCase()===email)
-    : reqs.filter(r=>r.requesterEmail==null||r.requesterEmail==="");
+  const misReqs=email?reqs.filter(r=>(r.requesterEmail||"").trim().toLowerCase()===email):[];
 
   // Órdenes vencidas sin informe asociadas a sus solicitudes
   const misReqIds=new Set(misReqs.map(r=>r.id));
@@ -1816,6 +1963,13 @@ function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
     if(!misReqIds.has(t.requestId)) return false;
     return new Date(t.dueDate)<hoy;
   });
+
+  if(invitado&&!acc) return(
+    <div>
+      <div style={{textAlign:"center",marginBottom:14}}><button style={BP(false)} onClick={onNew}>🚨 Reportar una incidencia</button></div>
+      <AccesoResidente onOk={setAcc}/>
+    </div>
+  );
 
   return(
     <div>
@@ -1840,6 +1994,7 @@ function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
         <div style={{fontWeight:700,fontSize:15}}>Mis solicitudes ({misReqs.length})</div>
         <button style={BP(true)} onClick={onNew}>+ Nueva</button>
       </div>
+      {invitado&&<div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Solicitudes de {email} · <span style={{color:"#3b82f6",cursor:"pointer"}} onClick={()=>{setAcceso(null);setAcc(null);}}>usar otro correo</span></div>}
 
       {misReqs.length===0
         ? <Empty msg="Aún no tienes solicitudes. Usa el botón + Nueva para reportar una incidencia."/>
@@ -1854,6 +2009,7 @@ function ResidenteReqs({reqs,tasks,session,onOpen,onNew,mob}){
                     <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.description?.slice(0,80)}{r.description?.length>80?"…":""}</div>
                     <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>📅 {fmtD(r.createdAt)}</div>
                     <div style={{fontSize:11,color:"#475569",marginTop:3}}>{sigPaso(r,"Residente",0)}</div>
+                    {r.status==="Cerrada"&&!evalDe(r)&&<div style={{fontSize:11,color:"#1d4ed8",fontWeight:600,marginTop:2}}>Toca para decirnos si quedó resuelto →</div>}
                     {venc.length>0&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>⚠ {venc.length} orden{venc.length>1?"es":""} vencida{venc.length>1?"s":""}</div>}
                   </div>
                   <div style={{flexShrink:0}}><SBadge s={r.status}/></div>
@@ -2334,6 +2490,23 @@ function Reports({reqs,tasks,inventory,mob}){
   const avgGlobal=promDias(cerradas);
   const pctCierre=rq.length?Math.round(cerradas.length/rq.length*100):0;
 
+  // Cumplimiento de plazos: cerradas dentro del plazo de su prioridad
+  const conPlazo=cerradas.filter(r=>enPlazo(r)!==null);
+  const nEnPlazo=conPlazo.filter(r=>enPlazo(r)).length;
+  const pctPlazo=pct(nEnPlazo,conPlazo.length);
+  const abFuera=abiertas.filter(fueraPlazo);
+  const slaPrio=PRIORITIES.map(p=>{
+    const c=conPlazo.filter(r=>r.priority===p);
+    return {p,total:c.length,ok:c.filter(r=>enPlazo(r)).length,fuera:abFuera.filter(r=>r.priority===p).length};
+  });
+  // Tiempo hasta asignar responsable
+  const hAsig=promNum(rq.map(horasAsignar));
+  const nAsig=rq.filter(r=>horasAsignar(r)!==null).length;
+  // Evaluación del residente
+  const evaluadas=cerradas.filter(r=>evalDe(r));
+  const nSi=evaluadas.filter(r=>evalDe(r).resuelto).length;
+  const pctSi=pct(nSi,evaluadas.length);
+
   // Tendencia: siempre los últimos 6 meses (no depende del filtro)
   const tendencia=ultMeses(6).map(m=>({
     label:m.label,
@@ -2375,8 +2548,8 @@ function Reports({reqs,tasks,inventory,mob}){
   const exportCSV=()=>{
     const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
     const num=d=>d===null?"":String(Math.round(d*10)/10).replace(".",",");
-    const head=["Código","Fecha ingreso","Categoría","Subcategoría","Prioridad","Estado","Responsable","Fecha cierre","Días resolución","Días abierta"];
-    const rows=rq.map(r=>{const f=r.status==="Cerrada"?fechaCierre(r):null;return [r.code,fmtD(r.createdAt),r.category,r.subcategory,r.priority,r.status,r.assignedTo,f?fmtD(f):"",num(r.status==="Cerrada"?diasCierre(r):null),esAbierta(r)?diasAbierta(r):""];});
+    const head=["Código","Fecha ingreso","Categoría","Subcategoría","Prioridad","Estado","Responsable","Fecha cierre","Días resolución","Días abierta","Plazo","Dentro de plazo","Horas hasta asignar","Residente confirma"];
+    const rows=rq.map(r=>{const f=r.status==="Cerrada"?fechaCierre(r):null;return [r.code,fmtD(r.createdAt),r.category,r.subcategory,r.priority,r.status,r.assignedTo,f?fmtD(f):"",num(r.status==="Cerrada"?diasCierre(r):null),esAbierta(r)?diasAbierta(r):"",slaTxt(r.priority),r.status==="Cerrada"?(enPlazo(r)===null?"":enPlazo(r)?"Sí":"No"):(fueraPlazo(r)?"No (abierta)":""),num(horasAsignar(r)),r.status==="Cerrada"&&evalDe(r)?(evalDe(r).resuelto?"Sí":"No"):""];});
     const csv="﻿"+[head,...rows].map(l=>l.map(esc).join(";")).join("\r\n");
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
@@ -2403,6 +2576,15 @@ function Reports({reqs,tasks,inventory,mob}){
         <Kpi value={abiertas.length} label="Siguen abiertas" color="#3b82f6" mob={mob}/>
         <Kpi value={cerradas.length+" ("+pctCierre+"%)"} label="Cerradas" color="#10b981" mob={mob}/>
         <Kpi value={fmtDias(avgGlobal)} label="Prom. resolución" color="#f97316" mob={mob}/>
+      </Grid>
+
+      {/* ¿Se cumple el objetivo? */}
+      <div style={{fontSize:12,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:.4,margin:"4px 0 8px"}}>¿Se está cumpliendo el objetivo?</div>
+      <Grid cols={4} mob={mob}>
+        <Kpi value={pctPlazo===null?"---":pctPlazo+"%"} label={"Resueltas dentro de plazo"+(conPlazo.length?" ("+nEnPlazo+" de "+conPlazo.length+")":"")} color={pctPlazo===null?"#94a3b8":pctPlazo>=80?"#10b981":pctPlazo>=50?"#f59e0b":"#ef4444"} mob={mob}/>
+        <Kpi value={abFuera.length} label="Abiertas fuera de plazo" color={abFuera.length?"#f97316":"#10b981"} mob={mob}/>
+        <Kpi value={fmtHoras(hAsig)} label={"Tiempo hasta asignar"+(nAsig?" ("+nAsig+" asignadas)":"")} color="#6366f1" mob={mob}/>
+        <Kpi value={pctSi===null?"---":pctSi+"%"} label={"Residente confirma solución"+(evaluadas.length?" ("+nSi+" de "+evaluadas.length+" respuestas)":" (sin respuestas)")} color={pctSi===null?"#94a3b8":pctSi>=80?"#10b981":pctSi>=50?"#f59e0b":"#ef4444"} mob={mob}/>
       </Grid>
 
       {rq.length===0&&<div style={card}><Empty msg="No hay solicitudes en este período"/></div>}
@@ -2520,6 +2702,29 @@ function Reports({reqs,tasks,inventory,mob}){
                   <div style={{height:5,background:PC[p],borderRadius:99,width:pct+"%"}}/>
                 </div>
                 <span style={{fontWeight:700,fontSize:12,minWidth:20,textAlign:"right"}}>{n}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Cumplimiento de plazos por prioridad */}
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:2}}>⏱ Cumplimiento de plazos</div>
+          <div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Cerradas dentro del plazo de su prioridad.</div>
+          {slaPrio.map(x=>{
+            const pc=pct(x.ok,x.total);
+            return(
+              <div key={x.p} style={{marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:6,fontSize:11,marginBottom:3,alignItems:"center"}}>
+                  <span><PBadge p={x.p}/> <span style={{color:"#94a3b8"}}>plazo {slaTxt(x.p)}</span></span>
+                  <span style={{display:"flex",gap:4,alignItems:"center"}}>
+                    <span style={{fontWeight:700}}>{pc===null?"sin cierres":pc+"% ("+x.ok+"/"+x.total+")"}</span>
+                    {x.fuera>0&&<span style={bdg("#c2410c","#fff7ed")}>{x.fuera} abierta{x.fuera>1?"s":""} atrasada{x.fuera>1?"s":""}</span>}
+                  </span>
+                </div>
+                <div style={{height:6,background:"#f1f5f9",borderRadius:99}}>
+                  <div style={{height:6,background:pc===null?"#e2e8f0":pc>=80?"#10b981":pc>=50?"#f59e0b":"#ef4444",borderRadius:99,width:(pc||0)+"%"}}/>
+                </div>
               </div>
             );
           })}
@@ -2872,7 +3077,7 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});
   const toggleTow=id=>setTowers(p=>p.map(t=>t.id===id?{...t,active:!t.active}:t));
   const saveTow=t=>{if(editTow){setTowers(p=>p.map(x=>x.id===t.id?t:x));}else{setTowers(p=>[...p,{...t,id:"t"+uid()}]);}showToast("Guardada");setShowTF(false);setEditTow(null);};
-  const sla={Emergencia:"4h",Alta:"24h",Media:"72h",Baja:"7 dias"};
+  const sla=Object.fromEntries(PRIORITIES.map(p=>[p,slaTxt(p)]));
   const cfgTabs=[{id:"cats",label:"Categorías"},{id:"towers",label:"Torres"},{id:"equipos",label:"Equipos"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"}];
   return(
     <div>
@@ -2926,7 +3131,8 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
       )}
       {tab==="sla"&&(
         <div style={card}>
-          <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>SLA por prioridad</div>
+          <div style={{fontWeight:600,fontSize:13,marginBottom:2}}>Plazo de resolución por prioridad</div>
+          <div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Con estos plazos se calcula el cumplimiento en Reportes y la marca “Fuera de plazo”.</div>
           {Object.entries(sla).map(([p,t])=>(
             <div key={p} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"center"}}><PBadge p={p}/><span style={{fontWeight:600}}>{t}</span></div>
           ))}

@@ -59,7 +59,8 @@ async function fsGetDoc(token, path) {
 // api/residente-codigo.js
 // Acceso del residente a "Mis solicitudes" con un código de 6 dígitos por correo.
 //   POST {accion:"enviar", email}            -> envía el código (vale 10 minutos)
-//   POST {accion:"verificar", email, codigo} -> {ok:true} si el código es correcto
+//   POST {accion:"verificar", email, codigo} -> {ok:true, sesion} si el código es correcto
+//   POST {accion:"listar", email, sesion}     -> {ok:true, solicitudes, vencidas} del residente
 // Solo se envía código a correos que tengan al menos una solicitud ingresada,
 // para que nadie pueda usar esto para mandar correos a terceros.
 // Usa las mismas variables de Vercel que el cron: FIREBASE_PROJECT_ID,
@@ -73,6 +74,31 @@ const MAX_INTENTOS = 5;
 const sha = s => nodeCrypto.createHash("sha256").update(s).digest("hex");
 // El código nunca se guarda en claro: se guarda una firma hecha con una clave que solo conoce el servidor
 const firma = (email, codigo) => nodeCrypto.createHmac("sha256", sha("codigo-residente|" + PRIVATE_KEY)).update(email + "|" + codigo).digest("hex");
+
+// Sesión del residente (30 días): firma del correo + vencimiento, verificable sin guardar nada
+const SESION_MS = 30 * 86400000;
+const firmaSesion = (email, hasta) => nodeCrypto.createHmac("sha256", sha("sesion-residente|" + PRIVATE_KEY)).update(email + "|" + hasta).digest("base64url");
+const crearSesion = email => { const hasta = Date.now() + SESION_MS; return { hasta, sesion: hasta + "." + firmaSesion(email, hasta) }; };
+const sesionValida = (email, sesion) => {
+  const [h, f] = String(sesion || "").split(".");
+  const hasta = parseInt(h, 10);
+  if (!hasta || hasta < Date.now() || !f) return false;
+  const a = Buffer.from(firmaSesion(email, hasta)), b = Buffer.from(f);
+  return a.length === b.length && nodeCrypto.timingSafeEqual(a, b);
+};
+
+async function listarTodo(token, coleccion) {
+  const out = []; let pageToken = "";
+  do {
+    const url = `${FS()}/${coleccion}?pageSize=300` + (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : "");
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+    if (!res.ok) throw new Error("Firestore " + coleccion + ": " + res.status + " " + (await res.text()));
+    const json = await res.json();
+    for (const d of json.documents || []) out.push({ ...aplanar(fsObj(d.fields)), _docId: d.name.split("/").pop() });
+    pageToken = json.nextPageToken || "";
+  } while (pageToken);
+  return out;
+}
 
 async function tieneSolicitudes(token, email) {
   let pageToken = "";
@@ -156,7 +182,26 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: "Código incorrecto. Revisa el correo e intenta de nuevo." });
       }
       await borrar(token, docId);
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, ...crearSesion(email) });
+    }
+
+    if (accion === "listar") {
+      if (!sesionValida(email, body.sesion)) return res.status(401).json({ ok: false, error: "Tu acceso venció. Confirma tu correo de nuevo." });
+      const sols = (await listarTodo(token, "solicitudes")).filter(s => String(s.requesterEmail || "").trim().toLowerCase() === email);
+      const ids = new Set(sols.map(s => s.id || s._docId));
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const tareas = (await listarTodo(token, "tareas")).filter(t => ids.has(t.requestId));
+      // Solo lo que el residente necesita ver de sus solicitudes
+      const CAMPOS = ["id","code","createdAt","category","subcategory","description","priority","status","tower","unit","requesterName","requesterEmail","requesterPhone","accessPermission","affectedTowers","assignedTo","closeNote","closedAt","evalToken","evaluacion","history","attachmentsInitial","prioAuto"];
+      const solicitudes = sols.map(s => {
+        const o = {}; for (const k of CAMPOS) if (s[k] !== undefined) o[k] = s[k];
+        o.id = o.id || s._docId;
+        o.history = (o.history || []).map(h => ({ date: h.date, action: h.action, from: h.from, to: h.to, note: h.note || "" }));
+        o.comments = [];
+        return o;
+      });
+      const tareasRes = tareas.map(t => ({ id: t.id || t._docId, requestId: t.requestId, title: t.title, dueDate: t.dueDate, status: t.status, informe: (t.informe || "").trim() ? "ok" : "", responsible: t.responsible }));
+      return res.status(200).json({ ok: true, solicitudes, tareas: tareasRes });
     }
 
     return res.status(400).json({ ok: false, error: "Acción no válida" });

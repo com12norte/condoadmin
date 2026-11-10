@@ -758,6 +758,25 @@ function Pasos({status,mob}){
     </div>
   );
 }
+// Barra de etapas seleccionable (personal): tocar una etapa muestra su panel
+function PasosSel({status,sel,onSel,mob}){
+  const idx=Math.max(0,PASOS.indexOf(status));
+  return(
+    <div style={{...card,padding:mob?"10px 6px":"12px 16px",display:"flex",alignItems:"flex-start",marginBottom:8}}>
+      {PASOS.map((p,i)=>{
+        const hecho=i<idx||status==="Cerrada", actual=i===idx&&status!=="Cerrada", elegido=p===sel;
+        const col=hecho?"#10b981":actual?"#3b82f6":"#cbd5e1";
+        return(
+          <button key={p} type="button" onClick={()=>onSel(p)} title={"Ver etapa "+PASO_LBL[p]} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",position:"relative",minWidth:0,background:"none",border:"none",padding:"2px 0 4px",cursor:"pointer",borderBottom:"3px solid "+(elegido?"#1e293b":"transparent")}}>
+            {i>0&&<div style={{position:"absolute",top:mob?11:13,right:"50%",width:"100%",height:2,background:i<=idx?"#10b981":"#e2e8f0"}}/>}
+            <div style={{width:mob?20:24,height:mob?20:24,borderRadius:"50%",background:hecho||actual?col:"#fff",border:"2px solid "+col,color:"#fff",fontSize:mob?10:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",zIndex:1,boxShadow:elegido?"0 0 0 4px #e2e8f0":actual?"0 0 0 4px #dbeafe":"none"}}>{hecho?"✓":actual?i+1:""}</div>
+            <div style={{fontSize:mob?9:11,marginTop:4,textAlign:"center",color:elegido?"#0f172a":actual?"#1d4ed8":hecho?"#475569":"#94a3b8",fontWeight:elegido||actual?700:400,lineHeight:1.2}}>{PASO_LBL[p]}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 // Explica en palabras simples qué pasa con la solicitud y qué viene ahora
 const sigPaso=(r,role,nPend)=>{
   const sinAs=!r.assignedTo||r.assignedTo==="Sin asignar";
@@ -1095,6 +1114,10 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
   const [tab,setTab]=useState("info");
+  const [etapa,setEtapa]=useState(PASOS.includes(r.status)?r.status:"Ingresada");
+  useEffect(()=>{ if(PASOS.includes(r.status)) setEtapa(r.status); },[r.status,r.id]);
+  const [rechazando,setRechazando]=useState(false);
+  const [motivo,setMotivo]=useState("");
 
   const upd=(ch,he)=>{
     const updated={...r,...ch,history:he?[...safeHistory,{date:new Date().toISOString(),user:role,...he}]:safeHistory};
@@ -1108,10 +1131,30 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:r.code+" Estado: "+ns,type:"Cambio de estado",status:"Enviado",body:"Cambio a: "+ns});
     showToast("Estado actualizado");
   };
+  // Mueve la solicitud a otra etapa y avisa al residente
+  const MSG_ETAPA={Ingresada:"fue recibida","En revision":"está en revisión",Asignada:"ya tiene un responsable","En proceso":"está en proceso: se está trabajando en la solución",Resuelta:"fue resuelta y está en revisión final",Rechazada:"fue rechazada"};
+  const moverA=(dest,nota)=>{
+    if(dest===r.status) return;
+    if(dest==="Cerrada"){ if(!can(role,"closeCases")){showToast("Solo la administración puede cerrar solicitudes","error");return;} setShowCl(true); return; }
+    if(!can(role,"changeStatus")){showToast("Sin permisos","error");return;}
+    upd({status:dest},{action:dest==="Rechazada"?"Solicitud rechazada":"Etapa cambiada",from:r.status,to:dest,note:nota||""});
+    setNs(dest);
+    const sinResp=!r.assignedTo||r.assignedTo==="Sin asignar";
+    // "Asignada" se le avisa al residente recién cuando hay responsable (ver applyAsgn)
+    const avisar=tieneCorreo(r)&&!(dest==="Asignada"&&sinResp);
+    if(avisar) addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:"[CondoAdmin] Solicitud "+r.code+": "+(PASO_LBL[dest]||dest),type:"Cambio de estado",status:"Enviado",body:"Hola "+(r.requesterName||"")+",\n\nTu solicitud "+r.code+(r.category?" ("+r.category+")":"")+" "+(MSG_ETAPA[dest]||"cambió a "+dest)+"."+(nota?"\n\nMotivo: "+nota:"")+"\n\n— CondoAdmin"});
+    showToast(r.code+" → "+(PASO_LBL[dest]||dest)+(avisar?" · se avisó al residente":""));
+    if(PASOS.includes(dest)) setEtapa(dest);
+  };
+  const rechazar=()=>{ if(!motivo.trim()){showToast("Escribe el motivo del rechazo","error");return;} moverA("Rechazada",motivo.trim()); setRechazando(false); setMotivo(""); };
   const applyAsgn=async()=>{
     if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
-    upd({assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:r.status,to:"Asignada"});
+    // Si la solicitud ya va más adelante, solo cambia el responsable (no retrocede)
+    const yaAvanzada=PASOS.indexOf(r.status)>PASOS.indexOf("Asignada");
+    upd(yaAvanzada?{assignedTo:asgn}:{assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:yaAvanzada?null:r.status,to:yaAvanzada?null:"Asignada"});
     showToast("Responsable asignado");
+    // Primera asignación: se avisa al residente
+    if(tieneCorreo(r)&&(!r.assignedTo||r.assignedTo==="Sin asignar")) addEmail({requestId:r.id,date:new Date().toISOString(),to:r.requesterEmail,subject:"[CondoAdmin] Solicitud "+r.code+": Asignada",type:"Cambio de estado",status:"Enviado",body:"Hola "+(r.requesterName||"")+",\n\nTu solicitud "+r.code+(r.category?" ("+r.category+")":"")+" ya tiene un responsable: "+asgn+".\n\n— CondoAdmin"});
     try{
       const _usSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",asgn),where("active","==",true)));
       const res={json:()=>_usSnap.docs.map(d=>d.data())};
@@ -1125,6 +1168,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     setComment(""); showToast("Comentario agregado");
   };
   const usuario=session?.nombre&&session.nombre!==role?session.nombre:role;
+  // Proveedores = usuarios activos con rol Proveedor; los administradores también pueden ser proveedores
+  const provs=[...new Map((usuarios||[]).filter(u=>u&&u.active!==false&&u.nombre&&["Proveedor","Administrador","Administrador Edificio"].includes(u.rol)).map(u=>[u.nombre,u])).values()].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
   const closeFinal=(nota)=>{
     const c=cerrarReq(r,nota,usuario);
     setReqs(p=>p.map(x=>x.id===r.id?c:x)); setSelReq(c); setNs("Cerrada");
@@ -1150,64 +1195,27 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   };
 
   const isProv=role==="Proveedor";
-  const tabs=[
-    ...(isProv?[]:[{id:"info",label:"Información"}]),
-    ...(isProv?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
-    {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
-    {id:"informe",label:"Informe OT"},
-    ...(isProv||role==="Residente"?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
-  ];
-
-  return(
-    <div>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
-        <button style={BS(true)} onClick={onBack}>← Volver</button>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?16:20}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
-          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.category} - Torre {r.tower}/{r.unit}</div>
-        </div>
-      </div>
-      {(can(role,"changeStatus")||can(role,"assign"))&&r.status!=="Cerrada"&&r.status!=="Rechazada"&&(
-        <div style={{...card,padding:12,marginBottom:12}}>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
-            {can(role,"changeStatus")&&(
-              <div><label style={lbl}>Estado</label>
-              <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:140}} value={ns} onChange={ev=>setNs(ev.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
-                <button style={BP(true)} onClick={applyStatus} disabled={ns===r.status} title={ns===r.status?"Elige un estado distinto":""}>Cambiar</button>
-              </div></div>
-            )}
-            {can(role,"assign")&&(
-              <div><label style={lbl}>Prioridad{r.prioAuto?" (automática)":""}</label>
-                <select style={{...sel,width:130}} value={r.priority} onChange={ev=>{const p=ev.target.value;if(p===r.priority)return;upd({priority:p,isUrgent:p==="Emergencia",prioAuto:false},{action:"Prioridad cambiada",from:null,to:null,note:r.priority+" → "+p});showToast("Prioridad: "+p);}}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
-              </div>
-            )}
-            {can(role,"assign")&&(
-              <div><label style={lbl}>Responsable</label>
-              <div style={{display:"flex",gap:6}}>
-                <select style={{...sel,width:150}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
-                <button style={BS(true)} onClick={applyAsgn}>Asignar</button>
-              </div></div>
-            )}
-            {can(role,"assign")&&(
+  const isEjecutor=isProv, nombre=session?.nombre||"", email=session?.email||"";
+  // Personal que gestiona: trabaja la solicitud por etapas
+  const staff=can(role,"changeStatus")||can(role,"assign");
+  const selectorProveedor=(
               <div><label style={lbl}>Proveedor</label>
-              <div style={{display:"flex",gap:6}}>
-                <input style={{...inp,width:150}} placeholder="Nombre proveedor..." defaultValue={r.proveedor||""} id="prov-input"/>
-                <button style={BS(true)} onClick={()=>{
-                  const val=document.getElementById("prov-input").value.trim();
-                  upd({proveedor:val||null});
-                  showToast("Proveedor actualizado");
-                }}>Guardar</button>
-              </div></div>
-            )}
-            {can(role,"createTask")&&<button style={BS(true)} onClick={()=>setShowTF(true)}>+ Orden de trabajo</button>}
-            {can(role,"closeCases")&&<button style={BSu(true)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
-            <button style={BS(true)} onClick={()=>setShowEv("avance")}>📷 Subir evidencia</button>
-          </div>
-        </div>
-      )}
-      {!isProv&&<Pasos status={r.status} mob={mob}/>}
-      {r.status==="Cerrada"&&!isProv&&(
+                <select style={{...sel,width:190}} value={r.proveedor||""} onChange={ev=>{
+                  const val=ev.target.value||null;
+                  if(val===(r.proveedor||null)) return;
+                  upd({proveedor:val},{action:val?"Proveedor asignado: "+val:"Proveedor quitado",from:null,to:null});
+                  const u=provs.find(x=>x.nombre===val);
+                  if(u&&u.email&&u.email.includes("@")) addEmail({requestId:r.id,date:new Date().toISOString(),to:u.email,subject:"[CondoAdmin] Se te asignó la solicitud "+r.code,type:"Asignacion",status:"Enviado",body:"Hola "+u.nombre+",\n\nSe te asignó como proveedor la solicitud "+r.code+".\n\nUbicación: "+(r.tower||"")+(r.unit?" / "+r.unit:"")+"\nCategoría: "+(r.category||"")+(r.subcategory?" / "+r.subcategory:"")+"\nPrioridad: "+r.priority+"\n\n"+(r.description||"")+"\n\nIngresa al sistema para ver el detalle.\n\n— CondoAdmin"});
+                  showToast(val?"Proveedor: "+val+(u&&u.email?" · se le avisó por correo":""):"Proveedor quitado");
+                }}>
+                  <option value="">Sin proveedor</option>
+                  {[["Proveedores",provs.filter(u=>u.rol==="Proveedor")],["Administradores",provs.filter(u=>u.rol!=="Proveedor")]].map(([g,l])=>l.length>0&&<optgroup key={g} label={g}>{l.map(u=><option key={u.nombre} value={u.nombre}>{u.nombre}</option>)}</optgroup>)}
+                  {r.proveedor&&!provs.some(u=>u.nombre===r.proveedor)&&<option value={r.proveedor}>{r.proveedor} (no registrado)</option>}
+                </select>
+                {provs.length===0&&<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Crea proveedores en Configuración → Usuarios</div>}
+              </div>
+  );
+  const tarjetaCierre=(
         <div style={{...card,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",background:evalDe(r)?(evalDe(r).resuelto?"#f0fdf4":"#fff7ed"):"#fff",borderColor:evalDe(r)?(evalDe(r).resuelto?"#86efac":"#fdba74"):"#e2e8f0"}}>
           <div style={{flex:1,minWidth:180,fontSize:13}}>
             {r.closeNote&&<div style={{marginBottom:4}}><strong>Cierre:</strong> {r.closeNote}</div>}
@@ -1220,8 +1228,175 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
           {role==="Residente"&&!(r.status==="Cerrada"&&evalDe(r))&&<><button style={BSu(false)} onClick={()=>evaluar(true)}>👍 Sí</button><button style={BW(false)} onClick={()=>evaluar(false)}>👎 No</button></>}
           {can(role,"closeCases")&&<button style={BS(true)} onClick={reabrir}>↺ Reabrir</button>}
         </div>
+  );
+  const fotosBloque=(type,puedeAgregar)=>{
+    const myAtt=[...(r.attachmentsInitial||[]),...atts.filter(a=>a.requestId===r.id)].filter(a=>a.type===type);
+    return(
+      <div style={{marginTop:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <div style={{fontWeight:600,fontSize:12,color:"#475569"}}>📎 {type==="inicial"?"Fotos del residente":type==="avance"?"Fotos de avance":"Fotos de cierre"} ({myAtt.length})</div>
+          {puedeAgregar&&<button style={BS(true)} onClick={()=>setShowEv(type)}>+ Agregar</button>}
+        </div>
+        {myAtt.length===0?<div style={{color:"#94a3b8",fontSize:12}}>Sin imágenes.</div>:<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{myAtt.map((a,i)=>a.preview?<a key={a.id||i} href={a.preview} target="_blank" rel="noreferrer"><img src={a.preview} alt={a.name||""} style={thumb} onError={ev=>ev.target.style.display="none"}/></a>:<span key={a.id||i} style={{fontSize:11,color:"#94a3b8"}}>{a.name}</span>)}</div>}
+      </div>
+    );
+  };
+  const tabs=staff?[
+    {id:"info",label:"Información"},
+    ...(can(role,"viewEmails")?[{id:"emails",label:"Correos ("+myEmails.length+")"}]:[]),
+    {id:"history",label:"Historial ("+safeHistory.length+")"},
+  ]:[
+    ...(isProv?[]:[{id:"info",label:"Información"}]),
+    {id:"tasks",label:"Orden de Trabajo ("+myTasks.length+")"},
+    {id:"informe",label:"Informe OT"},
+    ...(isProv||role==="Residente"?[]:[{id:"emails",label:"Correos ("+myEmails.length+")"}]),
+    ...(isProv?[]:[{id:"history",label:"Historial ("+safeHistory.length+")"}]),
+  ];
+
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+        <button style={BS(true)} onClick={onBack}>← Volver</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:700,fontSize:mob?16:20}}>{r.code}</span><PBadge p={r.priority}/><SBadge s={r.status}/></div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{r.category} - Torre {r.tower}/{r.unit}</div>
+        </div>
+      </div>
+      {/* Datos de contacto rápidos */}
+      {staff&&(
+        <div style={{fontSize:12,color:"#475569",margin:"-4px 0 12px",display:"flex",gap:10,flexWrap:"wrap"}}>
+          <span>👤 {r.requesterName||"—"}</span>
+          {r.requesterPhone&&<a href={"tel:"+r.requesterPhone} style={{color:"#3b82f6",textDecoration:"none"}}>📞 {r.requesterPhone}</a>}
+          {r.requesterEmail&&<span>✉️ {r.requesterEmail}</span>}
+          <span style={{color:fueraPlazo(r)?"#c2410c":"#64748b",fontWeight:fueraPlazo(r)?600:400}}>⏱ {r.status==="Cerrada"?(enPlazo(r)===null?"—":enPlazo(r)?"Cerrada dentro de plazo":"Cerrada fuera de plazo"):r.status==="Rechazada"?"—":fueraPlazo(r)?"Plazo vencido hace "+atrasoTxt(r):"Plazo "+slaTxt(r.priority)+": vence "+fmt(venceSLA(r))}</span>
+        </div>
       )}
-      {(()=>{const msg=sigPaso(r,role,myTasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada"&&!(t.informe||"").trim()).length);return msg?<div style={{...alrt("info"),marginBottom:12,fontSize:13}}>💡 {msg}</div>:null;})()}
+
+      {/* Barra de etapas: para el personal es seleccionable */}
+      {staff&&r.status!=="Rechazada"
+        ? <PasosSel status={r.status} sel={etapa} onSel={setEtapa} mob={mob}/>
+        : !isProv&&<Pasos status={r.status} mob={mob}/>}
+
+      {/* Panel de la etapa seleccionada */}
+      {staff&&r.status!=="Rechazada"&&(()=>{
+        const iSel=PASOS.indexOf(etapa), iAct=PASOS.indexOf(r.status);
+        const estado=r.status==="Cerrada"||iSel<iAct?"hecha":iSel===iAct?"actual":"pendiente";
+        const sig=PASOS[iSel+1];
+        const titulo={Ingresada:"Recepción de la solicitud","En revision":"Revisión",Asignada:"Asignación",["En proceso"]:"Ejecución del trabajo",Resuelta:"Trabajo terminado: revisión final",Cerrada:"Cierre"}[etapa];
+        const ayuda={
+          Ingresada:"Revisa lo que reportó el residente. Si está claro, pásala a revisión.",
+          "En revision":"Confirma el tipo de problema y la prioridad. Si no corresponde, recházala indicando el motivo.",
+          Asignada:"Elige quién se hace cargo y, si se necesita, el proveedor que hará el trabajo.",
+          "En proceso":"Crea la orden de trabajo con fecha límite y sube fotos del avance.",
+          Resuelta:"Revisa el informe de la orden y las fotos de cierre antes de cerrar.",
+          Cerrada:"Al cerrar, el residente recibe un correo con tu nota y se le pregunta si quedó resuelto.",
+        }[etapa];
+        const sinResp=!r.assignedTo||r.assignedTo==="Sin asignar";
+        // Para pasar más allá de "Asignada" se necesita responsable
+        const bloqueo=iSel>PASOS.indexOf("Asignada")&&sinResp&&estado==="pendiente"?"Primero asigna un responsable en la etapa «Asignada».":null;
+        const avanzarDesdeActual=sig&&estado==="actual";
+        return(
+          <div style={{...card,border:"2px solid "+(estado==="actual"?"#3b82f6":"#e2e8f0"),marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap",marginBottom:4}}>
+              <div style={{fontWeight:700,fontSize:15}}>{titulo}</div>
+              <span style={estado==="actual"?bdg("#1d4ed8","#dbeafe"):estado==="hecha"?bdg("#15803d","#dcfce7"):bdg("#64748b","#f1f5f9")}>{estado==="actual"?"Etapa actual":estado==="hecha"?"✓ Completada":"Pendiente"}</span>
+            </div>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>{ayuda}</div>
+
+            {etapa==="Ingresada"&&(
+              <div>
+                <div style={{fontSize:12,color:"#64748b"}}>{r.category}{r.subcategory?" / "+r.subcategory:""} · Torre {r.tower}{r.unit?" / "+r.unit:""}{r.accessPermission?" · ✓ autoriza ingreso al depto.":""}</div>
+                <p style={{fontSize:14,color:"#1e293b",lineHeight:1.6,margin:"8px 0 12px",whiteSpace:"pre-wrap"}}>{r.description||"Sin descripción."}</p>
+                {fotosBloque("inicial",false)}
+              </div>
+            )}
+
+            {etapa==="En revision"&&(
+              <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+                <div><label style={lbl}>Tipo de problema</label><div style={{fontSize:13,fontWeight:600,padding:"6px 0"}}>{r.category}{r.subcategory?" / "+r.subcategory:""}</div></div>
+                {can(role,"assign")&&(
+                  <div><label style={lbl}>Prioridad{r.prioAuto?" (automática)":""}</label>
+                    <select style={{...sel,width:140}} value={r.priority} onChange={ev=>{const p=ev.target.value;if(p===r.priority)return;upd({priority:p,isUrgent:p==="Emergencia",prioAuto:false},{action:"Prioridad cambiada",from:null,to:null,note:r.priority+" → "+p});showToast("Prioridad: "+p);}}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
+                  </div>
+                )}
+                <div style={{fontSize:12,color:"#64748b",paddingBottom:8}}>Plazo de resolución: <strong>{slaTxt(r.priority)}</strong></div>
+                {r.status!=="Cerrada"&&can(role,"changeStatus")&&(
+                  rechazando?(
+                    <div style={{flexBasis:"100%",display:"flex",gap:6,marginTop:4}}>
+                      <input autoFocus style={{...inp,flex:1}} placeholder="Motivo del rechazo (se enviará al residente)" value={motivo} onChange={ev=>setMotivo(ev.target.value)} onKeyDown={ev=>ev.key==="Enter"&&rechazar()}/>
+                      <button style={BD(true)} onClick={rechazar}>Rechazar</button>
+                      <button style={BS(true)} onClick={()=>{setRechazando(false);setMotivo("");}}>Cancelar</button>
+                    </div>
+                  ):<button style={{...BD(true),marginLeft:"auto"}} onClick={()=>setRechazando(true)}>✕ Rechazar solicitud</button>
+                )}
+              </div>
+            )}
+
+            {etapa==="Asignada"&&(
+              <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+                {can(role,"assign")&&(
+                  <div><label style={lbl}>Responsable *</label>
+                  <div style={{display:"flex",gap:6}}>
+                    <select style={{...sel,width:170}} value={asgn} onChange={ev=>setAsgn(ev.target.value)}>{respList.map(s=><option key={s}>{s}</option>)}</select>
+                    <button style={BP(true)} onClick={applyAsgn} disabled={asgn===r.assignedTo}>Asignar</button>
+                  </div>
+                  <div style={{fontSize:11,color:sinResp?"#d97706":"#16a34a",marginTop:3,fontWeight:600}}>{sinResp?"Sin responsable todavía":"Responsable: "+r.assignedTo}</div></div>
+                )}
+                {can(role,"assign")&&selectorProveedor}
+              </div>
+            )}
+
+            {etapa==="En proceso"&&(
+              <div>
+                {myTasks.length>0&&(
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>Órdenes de trabajo ({myTasks.length})</div>
+                    {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
+                  </div>
+                )}
+                {can(role,"createTask")&&r.status!=="Cerrada"&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+                {fotosBloque("avance",r.status!=="Cerrada")}
+              </div>
+            )}
+
+            {etapa==="Resuelta"&&(
+              <div>
+                {myTasks.length===0
+                  ?<div style={{...alrt("warning"),fontSize:12}}>Esta solicitud no tiene órdenes de trabajo. Puedes cerrarla igual con una nota.</div>
+                  :myTasks.map(t=>(
+                    <div key={t.id} style={{marginBottom:10}}>
+                      <div style={{fontWeight:600,fontSize:13,marginBottom:6}}>{t.title} <span style={{fontWeight:400,fontSize:11,color:(t.informe||"").trim()?"#16a34a":"#d97706"}}>· {(t.informe||"").trim()?"✓ con informe":"falta informe"}</span></div>
+                      <InformeInline task={t} setTasks={setTasks} showToast={showToast}/>
+                    </div>
+                  ))}
+                {fotosBloque("cierre",r.status!=="Cerrada")}
+              </div>
+            )}
+
+            {etapa==="Cerrada"&&(r.status==="Cerrada"?tarjetaCierre:(
+              <div style={{fontSize:13,color:"#475569"}}>{can(role,"closeCases")?"Cuando el trabajo esté listo, cierra la solicitud con una nota.":"Solo la administración puede cerrar solicitudes."}</div>
+            ))}
+
+            {/* Botones de avance */}
+            {r.status!=="Cerrada"&&can(role,"changeStatus")&&(
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap",marginTop:14,paddingTop:12,borderTop:"1px solid #f1f5f9",alignItems:"center"}}>
+                {bloqueo&&<span style={{fontSize:12,color:"#d97706",marginRight:"auto"}}>{bloqueo}</span>}
+                {estado==="hecha"&&<button style={BS(true)} onClick={()=>moverA(etapa)}>↩ Devolver la solicitud a esta etapa</button>}
+                {estado==="pendiente"&&etapa!=="Cerrada"&&<button style={BS(true)} disabled={!!bloqueo} onClick={()=>moverA(etapa)}>Mover la solicitud a esta etapa</button>}
+                {estado==="pendiente"&&etapa==="Cerrada"&&can(role,"closeCases")&&<button style={BSu(false)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
+                {avanzarDesdeActual&&(sig==="Cerrada"
+                  ?(can(role,"closeCases")&&<button style={BSu(false)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>)
+                  :<button style={BP(false)} disabled={etapa==="Asignada"&&sinResp} title={etapa==="Asignada"&&sinResp?"Asigna un responsable primero":""} onClick={()=>moverA(sig)}>Avanzar a «{PASO_LBL[sig]}» →</button>)}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Residente y otros roles: tarjeta de cierre y siguiente paso */}
+      {!staff&&r.status==="Cerrada"&&!isProv&&tarjetaCierre}
+      {!staff&&(()=>{const msg=sigPaso(r,role,myTasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada"&&!(t.informe||"").trim()).length);return msg?<div style={{...alrt("info"),marginBottom:12,fontSize:13}}>💡 {msg}</div>:null;})()}
+      {r.status==="Rechazada"&&staff&&can(role,"changeStatus")&&<div style={{marginBottom:12}}><button style={BS(true)} onClick={()=>moverA("En revision")}>↺ Volver a revisar esta solicitud</button></div>}
       <Tabs tabs={tabs} active={tab} onChange={setTab}/>
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>

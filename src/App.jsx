@@ -1752,11 +1752,8 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       if(datos.requesterEmail.includes("@")){
         addEmail({requestId:code,date:now,to:datos.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
       }
-      // Mail a administradores
-      try{
-        const admins=(usuarios||[]).filter(u=>["Administrador","Administrador Edificio"].includes(u.rol)&&u.email&&u.email.includes("@"));
-        admins.forEach(u=>addEmail({requestId:code,date:now,to:u.email,subject:"[CondoAdmin] Nueva solicitud "+code,type:"Aviso",status:"Enviado",body:"Nueva solicitud recibida:\n\nCódigo: "+code+"\nSolicitante: "+datos.requesterName+"\nCategoría: "+categoria+"\nPrioridad: "+prioFinal+"\n\nIngrese al sistema para gestionar."}));
-      }catch(ex){console.warn("Error notificando admins",ex);}
+      // Aviso a administradores: lo envía el servidor (no depende de que esta persona pueda leer la lista de usuarios)
+      if(!invitado) apiPost("/api/crear-solicitud",{avisar:code}).then(r=>{if(!r.ok)console.warn("Aviso a administradores no enviado",r);}).catch(ex=>console.warn("Aviso a administradores",ex));
       setDone(nr); showToast("Solicitud "+code+" creada");
     }catch(ex){
       console.error("Error creando solicitud",ex);

@@ -458,7 +458,7 @@ function LoginScreen({onLogin}){
         <button onClick={()=>{setMode(null);setResErr("");setResEmail("");}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
         <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div><div style={{color:"#bfdbfe",fontSize:14,marginTop:6}}>¿Qué deseas hacer?</div></div>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(5,150,105,.4)"}}>
+          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/?ir=residente","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(5,150,105,.4)"}}>
             <div style={{fontSize:36}}>🅿️</div>
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Condo Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Reserva y gestión de estacionamientos</div></div>
             <div style={{marginLeft:"auto",color:"#a7f3d0",fontSize:20}}>→</div>

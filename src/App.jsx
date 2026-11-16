@@ -246,6 +246,18 @@ const mailCierre = (r,nota) => {
 };
 // La respuesta del residente vale solo para el cierre actual (si se reabre y se vuelve a cerrar, se pregunta de nuevo)
 const evalDe = r => { const e=r&&r.evaluacion; return e&&typeof e.resuelto==="boolean"&&(!e.token||e.token===r.evalToken)?e:null; };
+// Ley 21.442 art. 18: toda solicitud debe responderse dentro de 20 días corridos.
+// Se considera respondida cuando deja "Ingresada / En revisión" (asignada, en proceso, cerrada o rechazada).
+const PLAZO_LEGAL_DIAS = 20;
+const SIN_RESPUESTA = ["Ingresada","En revision"];
+const venceLegal = r => { const c=new Date(r.createdAt); return isNaN(c)?null:new Date(c.getTime()+PLAZO_LEGAL_DIAS*86400000); };
+const fechaRespuesta = r => { if(SIN_RESPUESTA.includes(r.status)) return null; const h=(r.history||[]).find(x=>x.to&&!SIN_RESPUESTA.includes(x.to)); return h&&h.date?h.date:(r.closedAt||null); };
+const porResponder = r => SIN_RESPUESTA.includes(r.status);
+const diasLegal = r => { const v=venceLegal(r); return v?Math.ceil((v.getTime()-Date.now())/86400000):null; };
+// true/false: si se respondió dentro de 20 días (null si no hay fecha de respuesta registrada)
+const respondidaEnPlazo = r => { const f=fechaRespuesta(r), v=venceLegal(r); return !f||!v?null:new Date(f)<=v; };
+const legalTxt = r => { const d=diasLegal(r); return d===null?"":d<0?"Plazo legal vencido hace "+Math.abs(d)+" día"+(Math.abs(d)===1?"":"s"):d===0?"Responder HOY (plazo legal)":"Responder en "+d+" día"+(d===1?"":"s"); };
+const legalColor = r => { const d=diasLegal(r); return d===null?"#94a3b8":d<0?"#dc2626":d<=5?"#d97706":"#64748b"; };
 const tieneCorreo = r => !!r.requesterEmail&&r.requesterEmail.includes("@");
 // Documentos antiguos guardados como {id, data:{...}}: se aplanan al leer (lo que hay en data es lo más reciente)
 const aplanar = d => { if(!d||!d.data||typeof d.data!=="object"||Array.isArray(d.data)) return d; const {data,...rest}=d; return {...rest,...data}; };
@@ -254,6 +266,17 @@ const ACC_LS="ca_acceso";
 const getAcceso = () => { try{ const a=JSON.parse(localStorage.getItem(ACC_LS)||"null"); return a&&a.email&&a.sesion&&a.hasta>Date.now()?a:null; }catch(_){ return null; } };
 // Residente que entró por "Soy Residente" sin iniciar sesión
 const esInvitado = s => !!s&&s.id==="guest";
+// Residentes (con o sin cuenta) no leen la base directamente: el servidor les entrega solo sus datos (Ley 21.719)
+const usaServidor = s => !!s&&(s.id==="guest"||s.rol==="Residente");
+// Roles que pueden ver y gestionar todas las solicitudes (deben coincidir con las reglas de Firestore)
+const ROLES_STAFF=["Administrador","Administrador Edificio","Conserjeria","Comite","Proveedor"];
+// Copia mínima de cada usuario en roles/{correo}: las reglas de Firestore la usan para saber quién puede leer qué
+const syncRol = async u => {
+  const e=String((u&&u.email)||"").trim().toLowerCase();
+  if(!e.includes("@")) return;
+  await setDoc(doc(fbDb,"roles",e),{rol:u.rol||"",active:u.active!==false,nombre:u.nombre||""});
+};
+const quitarRol = async email => { const e=String(email||"").trim().toLowerCase(); if(e.includes("@")) await deleteDoc(doc(fbDb,"roles",e)); };
 // Las llamadas al servidor (api/) devuelven JSON {ok, error}
 const apiPost = async (ruta, body) => {
   const res=await fetch(SITE_URL+ruta,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -391,9 +414,11 @@ function LoginScreen({onLogin}){
       const auth=await signIn(correo,pass);
       // Se busca el usuario tal como se escribió y también en minúsculas
       let users=[];
-      for(const e of [...new Set([correo,correo.toLowerCase()])]){
-        const snap=await getDocs(query(collection(fbDb,"usuarios"),where("email","==",e),where("active","==",true)));
-        users=snap.docs.map(d=>d.data());
+      for(const e of [...new Set([correo.toLowerCase(),correo])]){
+        try{
+          const snap=await getDocs(query(collection(fbDb,"usuarios"),where("email","==",e),where("active","==",true)));
+          users=snap.docs.map(d=>d.data());
+        }catch(ex){ console.warn("Consulta de usuario rechazada para",e,ex&&ex.code); }
         if(users.length) break;
       }
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
@@ -441,6 +466,7 @@ function LoginScreen({onLogin}){
             <div style={{marginLeft:"auto",color:"#94a3b8",fontSize:20}}>→</div>
           </button>
         </div>
+        <div style={{textAlign:"center",marginTop:22}}><a href="/privacidad.html" target="_blank" rel="noreferrer" style={{color:"rgba(255,255,255,.7)",fontSize:12}}>🔒 Política de privacidad</a></div>
       </div>
     </div>
   );
@@ -568,12 +594,14 @@ export default function App(){
       setDataLoading(true);
       try{
         // El residente sin sesión no puede leer la base (reglas de Firebase): solo se intenta la configuración
-        const invitado=esInvitado(session);
+        const invitado=usaServidor(session);
         const tablas=invitado?["config"]:["solicitudes","tareas","inventario","mantenciones","inspecciones","correos","config","usuarios"];
         const resp=await Promise.allSettled(tablas.map(t=>dbGet(t)));
         const leido={}; const fallas=[];
         tablas.forEach((t,i)=>{ if(resp[i].status==="fulfilled") leido[t]=resp[i].value; else { fallas.push(t); console.warn("No se pudo leer",t,resp[i].reason); } });
         const rR=leido.solicitudes,rT=leido.tareas,rI=leido.inventario,rM=leido.mantenciones,rIn=leido.inspecciones,rE=leido.correos,rCfg=leido.config,rU=leido.usuarios;
+        // El administrador mantiene al día la tabla de roles que usan las reglas de seguridad
+        if(Array.isArray(rU)&&["Administrador","Administrador Edificio"].includes(session.rol)) Promise.allSettled(rU.filter(Boolean).map(syncRol)).then(rs=>{const f=rs.filter(x=>x.status==="rejected").length;if(f)console.warn("roles sin sincronizar:",f);});
         if(!invitado&&fallas.length) showToast(fallas.includes("solicitudes")?"No se pudieron cargar las solicitudes. Revisa tu conexión y vuelve a entrar.":"No se pudo cargar parte de la información ("+fallas.join(", ")+").","error");
         if(Array.isArray(rR)) setReqs(rR.filter(Boolean).map(r=>normReq(aplanar(r))));
         if(Array.isArray(rT)) setTasks(rT.filter(Boolean).map(r=>normTask(aplanar(r))));
@@ -593,7 +621,7 @@ export default function App(){
           if(val("equipos")) setEquipos(val("equipos"));
           if(val("certs")) setCerts(val("certs"));
         }
-      }catch(ex){console.error("load error",ex);if(!esInvitado(session))showToast("No se pudieron cargar los datos. Revisa tu conexión y vuelve a entrar.","error");}
+      }catch(ex){console.error("load error",ex);if(!usaServidor(session))showToast("No se pudieron cargar los datos. Revisa tu conexión y vuelve a entrar.","error");}
       finally{setDataLoading(false);}
     })();
   },[session]);
@@ -639,7 +667,7 @@ export default function App(){
   const addEmail=async log=>{
     const item={id:"e"+uid(),...log};
     setEmails(p=>[item,...p]);
-    if(!esInvitado(session)) try{await setDoc(doc(fbDb,"correos",String(item.id)),{...JSON.parse(JSON.stringify(item)),request_id:item.requestId||""},{merge:true});}catch(_){}
+    if(!usaServidor(session)) try{await setDoc(doc(fbDb,"correos",String(item.id)),{...JSON.parse(JSON.stringify(item)),request_id:item.requestId||""},{merge:true});}catch(_){}
     // Enviar mail en background sin bloquear
     sendMail(log.to, log.subject, log.body).catch(ex=>console.warn("addEmail sendMail",ex));
   };
@@ -872,6 +900,26 @@ function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,dele
         <Kpi value={nFuera} label="Fuera de plazo" color="#f97316" mob={mob} onClick={goList&&(()=>goList("fueraplazo"))}/>
       </Grid>
 
+      {/* Ley 21.442 art. 18: solicitudes por responder con plazo próximo o vencido */}
+      {isAnalyst&&(()=>{
+        const urg=reqs.filter(r=>porResponder(r)&&diasLegal(r)!==null&&diasLegal(r)<=5).sort((a,b)=>diasLegal(a)-diasLegal(b));
+        if(!urg.length) return null;
+        const venc=urg.filter(r=>diasLegal(r)<0).length;
+        return(
+          <div style={{...card,background:venc?"#fef2f2":"#fffbeb",border:"1px solid "+(venc?"#fca5a5":"#fde68a"),marginBottom:12}}>
+            <div style={{fontWeight:700,color:venc?"#dc2626":"#92400e",fontSize:13,marginBottom:2}}>⚖️ Solicitudes por responder — plazo legal de 20 días ({urg.length})</div>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Ley 21.442, art. 18. Se dan por respondidas al asignarlas, ponerlas en proceso, cerrarlas o rechazarlas.</div>
+            {urg.slice(0,8).map(r=>(
+              <div key={r.id} onClick={()=>onOpen(r)} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",borderBottom:"1px solid "+(venc?"#fecaca":"#fde68a"),cursor:"pointer",flexWrap:"wrap"}}>
+                <div style={{minWidth:0,flex:1}}><span style={{fontWeight:600,color:"#3b82f6",fontSize:12}}>{r.code}</span><span style={{fontSize:11,color:"#64748b",marginLeft:6}}>{r.category} · {r.requesterName}</span></div>
+                <span style={{fontSize:11,fontWeight:700,color:legalColor(r)}}>{legalTxt(r)}</span>
+              </div>
+            ))}
+            {urg.length>8&&goList&&<button style={{...BS(true),marginTop:8,fontSize:11}} onClick={()=>goList("porresponder")}>Ver todas</button>}
+          </div>
+        );
+      })()}
+
       {/* El residente dice que no quedó resuelto */}
       {isAnalyst&&noResueltas.length>0&&(
         <div style={{...card,background:"#fff7ed",border:"1px solid #fdba74",marginBottom:12}}>
@@ -992,6 +1040,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
     {id:"abiertas",label:"Abiertas",f:esAbierta},
     {id:"sinasignar",label:"Sin asignar",f:r=>esAbierta(r)&&sinAsig(r)},
     {id:"emergencias",label:"Emergencias",f:r=>esAbierta(r)&&r.priority==="Emergencia"},
+    {id:"porresponder",label:"Por responder",f:porResponder},
     {id:"fueraplazo",label:"Fuera de plazo",f:fueraPlazo},
     {id:"cerradas",label:"Cerradas",f:r=>!esAbierta(r)},
     {id:"todas",label:"Todas",f:()=>true},
@@ -1023,7 +1072,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
         {TABS.map(t=>{
           const n=base.filter(t.f).length, on=tabAct===t.id;
-          const rojo=t.id==="emergencias"&&n>0, amar=(t.id==="sinasignar"||t.id==="fueraplazo")&&n>0;
+          const rojo=(t.id==="emergencias"&&n>0)||(t.id==="porresponder"&&base.some(r=>porResponder(r)&&diasLegal(r)<0)), amar=(t.id==="sinasignar"||t.id==="fueraplazo"||t.id==="porresponder")&&n>0;
           const col=rojo?"#dc2626":amar?"#d97706":"#3b82f6";
           return <button key={t.id} onClick={()=>cambiarTab(t.id)} style={{padding:mob?"8px 12px":"6px 12px",borderRadius:99,fontSize:12,cursor:"pointer",border:"1px solid "+(on?col:"#e2e8f0"),background:on?col:"#fff",color:on?"#fff":(rojo||amar?col:"#475569"),fontWeight:on||rojo||amar?600:400}}>{t.label} <span style={{opacity:.85}}>({n})</span></button>;
         })}
@@ -1058,7 +1107,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
       </div>
       {visible.length===0?(
         <div style={{...card,textAlign:"center",padding:"32px 16px"}}>
-          <div style={{fontSize:13,color:"#64748b",marginBottom:hayFiltros?10:0}}>{hayFiltros?"Ninguna solicitud coincide con la búsqueda o los filtros.":tabAct==="abiertas"?"No hay solicitudes abiertas 🎉":tabAct==="sinasignar"?"Todas las solicitudes abiertas tienen responsable ✓":tabAct==="emergencias"?"No hay emergencias activas ✓":tabAct==="fueraplazo"?"Ninguna solicitud abierta está fuera de plazo ✓":"Sin solicitudes"}</div>
+          <div style={{fontSize:13,color:"#64748b",marginBottom:hayFiltros?10:0}}>{hayFiltros?"Ninguna solicitud coincide con la búsqueda o los filtros.":tabAct==="abiertas"?"No hay solicitudes abiertas 🎉":tabAct==="sinasignar"?"Todas las solicitudes abiertas tienen responsable ✓":tabAct==="emergencias"?"No hay emergencias activas ✓":tabAct==="porresponder"?"Todas las solicitudes tienen respuesta ✓":tabAct==="fueraplazo"?"Ninguna solicitud abierta está fuera de plazo ✓":"Sin solicitudes"}</div>
           {hayFiltros&&<button style={BS(true)} onClick={()=>setFi(FI0)}>Limpiar filtros</button>}
         </div>
       ):mob?(
@@ -1071,7 +1120,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{r.requesterName||"—"}{r.unit?" · "+(r.tower&&r.tower!=="Comun"?r.tower+"/":"")+r.unit:""} · {antig(r)}</div>
                 <div style={{fontSize:11,color:sinAsig(r)&&esAbierta(r)?"#d97706":"#94a3b8",fontWeight:sinAsig(r)&&esAbierta(r)?600:400}}>👤 {sinAsig(r)?"Sin asignar":r.assignedTo}</div>
               </div>
-              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}><PBadge p={r.priority}/><SBadge s={r.status}/>{fueraPlazo(r)&&<span style={bdg("#c2410c","#fff7ed")}>Fuera de plazo</span>}{(r.status==="Cerrada"&&evalDe(r))&&<span style={bdg(evalDe(r).resuelto?"#16a34a":"#c2410c",evalDe(r).resuelto?"#f0fdf4":"#fff7ed")}>{evalDe(r).resuelto?"👍":"👎 No resuelta"}</span>}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end",flexShrink:0}}><PBadge p={r.priority}/><SBadge s={r.status}/>{fueraPlazo(r)&&<span style={bdg("#c2410c","#fff7ed")}>Fuera de plazo</span>}{porResponder(r)&&diasLegal(r)!==null&&diasLegal(r)<=5&&<span style={bdg(legalColor(r),"#fff")}>⚖️ {legalTxt(r)}</span>}{(r.status==="Cerrada"&&evalDe(r))&&<span style={bdg(evalDe(r).resuelto?"#16a34a":"#c2410c",evalDe(r).resuelto?"#f0fdf4":"#fff7ed")}>{evalDe(r).resuelto?"👍":"👎 No resuelta"}</span>}</div>
             </div>
           </div>
         ))}</div>
@@ -1090,7 +1139,7 @@ function ReqList({reqs,role,onOpen,setReqs,deleteReq,showToast,addEmail,mob,towe
                 <td style={tdS}><SBadge s={r.status}/></td>
                 <td style={{...tdS,color:sinAsig(r)&&esAbierta(r)?"#d97706":undefined,fontWeight:sinAsig(r)&&esAbierta(r)?600:400}}>{r.assignedTo}</td>
                 <td style={tdS}>{r.proveedor||"—"}</td>
-                <td style={tdS}><div style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</div>{esAbierta(r)&&<div style={{fontSize:10,color:diasAbierta(r)>30?"#ef4444":diasAbierta(r)>7?"#d97706":"#94a3b8"}}>{antig(r)}</div>}{fueraPlazo(r)&&<div style={{fontSize:10,color:"#c2410c",fontWeight:600}}>Fuera de plazo</div>}{(r.status==="Cerrada"&&evalDe(r))&&<div style={{fontSize:10,color:evalDe(r).resuelto?"#16a34a":"#c2410c",fontWeight:600}}>{evalDe(r).resuelto?"👍 Confirmada":"👎 No resuelta"}</div>}</td>
+                <td style={tdS}><div style={{fontSize:11,color:"#64748b"}}>{fmtD(r.createdAt)}</div>{esAbierta(r)&&<div style={{fontSize:10,color:diasAbierta(r)>30?"#ef4444":diasAbierta(r)>7?"#d97706":"#94a3b8"}}>{antig(r)}</div>}{fueraPlazo(r)&&<div style={{fontSize:10,color:"#c2410c",fontWeight:600}}>Fuera de plazo</div>}{porResponder(r)&&diasLegal(r)!==null&&diasLegal(r)<=5&&<div style={{fontSize:10,color:legalColor(r),fontWeight:700}}>⚖️ {legalTxt(r)}</div>}{(r.status==="Cerrada"&&evalDe(r))&&<div style={{fontSize:10,color:evalDe(r).resuelto?"#16a34a":"#c2410c",fontWeight:600}}>{evalDe(r).resuelto?"👍 Confirmada":"👎 No resuelta"}</div>}</td>
                 <td style={tdS} onClick={ev=>ev.stopPropagation()}>
                   <div style={{display:"flex",gap:4}}>
                     {can(role,"manageConfig")&&(
@@ -1188,7 +1237,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
     setReqs(p=>p.map(x=>x.id===r.id?c:x)); setSelReq(c); setNs(c.status); showToast("Solicitud reabierta");
   };
   const evaluar=async ok=>{
-    if(esInvitado(session)){
+    if(usaServidor(session)){
       try{
         const res=await fetch(SITE_URL+"/api/evaluar",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({id:r.id,t:r.evalToken||"",r:ok?"si":"no"}).toString()});
         if(!res.ok) throw new Error();
@@ -1273,6 +1322,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       {staff&&(
         <div style={{fontSize:12,color:"#475569",margin:"-4px 0 12px",display:"flex",gap:10,flexWrap:"wrap"}}>
           <span>👤 {r.requesterName||"—"}</span>
+          {porResponder(r)&&<span style={{color:legalColor(r),fontWeight:700}} title="Ley 21.442, art. 18: responder dentro de 20 días corridos">⚖️ {legalTxt(r)}</span>}
           {r.requesterPhone&&<a href={"tel:"+r.requesterPhone} style={{color:"#3b82f6",textDecoration:"none"}}>📞 {r.requesterPhone}</a>}
           {r.requesterEmail&&<span>✉️ {r.requesterEmail}</span>}
           <span style={{color:fueraPlazo(r)?"#c2410c":"#64748b",fontWeight:fueraPlazo(r)?600:400}}>⏱ {r.status==="Cerrada"?(enPlazo(r)===null?"—":enPlazo(r)?"Cerrada dentro de plazo":"Cerrada fuera de plazo"):r.status==="Rechazada"?"—":fueraPlazo(r)?"Plazo vencido hace "+atrasoTxt(r):"Plazo "+slaTxt(r.priority)+": vence "+fmt(venceSLA(r))}</span>
@@ -1903,7 +1953,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
     if(saving||!validate()) return;
     setSaving(true);
     try{
-      const invitado=esInvitado(session);
+      const invitado=usaServidor(session);
       let code=invitado?"SOL-NUEVA":genCode(reqs,"SOL-"); const now=new Date().toISOString();
       const datos={...f,priority:prioFinal,requesterName:f.requesterName.trim(),requesterEmail:f.requesterEmail.trim().toLowerCase(),requesterPhone:f.requesterPhone.trim(),unit:f.unit.trim(),description:f.description.trim()};
       const attachmentsInitial=await Promise.all(prevs.map(async pv=>{
@@ -1965,7 +2015,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
           <div>• Puedes ver su avance en {esResidente?"«Mis solicitudes»":"el listado de solicitudes"} con este código.</div>
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-          {!esInvitado(session)&&<button style={BP(true)} onClick={()=>{onClose();onOpen(done);}}>Ver solicitud</button>}
+          {!usaServidor(session)&&<button style={BP(true)} onClick={()=>{onClose();onOpen(done);}}>Ver solicitud</button>}
           <button style={BS(true)} onClick={otra}>+ Ingresar otra</button>
           <button style={BS(true)} onClick={onClose}>Cerrar</button>
         </div>
@@ -2098,6 +2148,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
             </>
           )}
         </div>
+        <div style={{fontSize:11,color:"#94a3b8",marginTop:8,lineHeight:1.4}}>🔒 Usamos tus datos solo para atender esta solicitud y avisarte de su avance. Los ve la administración y quien deba resolverla. <a href="/privacidad.html" target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>Política de privacidad</a></div>
         {Object.keys(errs).length>0&&<div style={{...alrt("error"),marginTop:6}}>Falta completar {Object.keys(errs).length===1?"un campo":Object.keys(errs).length+" campos"}. Revisa lo marcado en rojo.</div>}
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10,flexDirection:mob?"column-reverse":"row"}}>
           <button style={{...BS(!mob),...(mob?{width:"100%",justifyContent:"center"}:{})}} onClick={cerrar} disabled={saving}>Cancelar</button>
@@ -2239,8 +2290,9 @@ function AccesoResidente({onOk}){
 
 function ResidenteReqs({reqs:reqsApp,tasks:tasksApp,session,onOpen,onNew,mob}){
   // Quien entra sin cuenta debe confirmar su correo con un código antes de ver solicitudes
-  const [acc,setAcc]=useState(getAcceso);
-  const invitado=!session?.email;
+  const conCuenta=!!session?.email&&!esInvitado(session);
+  const [acc,setAcc]=useState(()=>conCuenta?{email:session.email}:getAcceso());
+  const invitado=true; // siempre se trae del servidor: solo las solicitudes propias
   const [remoto,setRemoto]=useState(null);   // {solicitudes,tareas} traídas del servidor
   const [cargando,setCargando]=useState(false);
   const [errRem,setErrRem]=useState("");
@@ -2248,9 +2300,11 @@ function ResidenteReqs({reqs:reqsApp,tasks:tasksApp,session,onOpen,onNew,mob}){
     if(!acc) return;
     setCargando(true); setErrRem("");
     try{
-      const r=await apiPost("/api/residente-codigo",{accion:"listar",email:acc.email,sesion:acc.sesion});
+      const body=conCuenta?{accion:"listar",idToken:await fbAuth.currentUser?.getIdToken()}:{accion:"listar",email:acc.email,sesion:acc.sesion};
+      const r=await apiPost("/api/residente-codigo",body);
       if(r.ok) setRemoto({solicitudes:(r.solicitudes||[]).map(normReq),tareas:(r.tareas||[]).map(normTask)});
-      else if(r.status===401){ setAcceso(null); setAcc(null); }
+      else if(r.status===401&&!conCuenta){ setAcceso(null); setAcc(null); }
+      else if(r.status===401) setErrRem("Tu sesión venció. Sal y vuelve a iniciar sesión.");
       else setErrRem(r.error||"No se pudieron cargar tus solicitudes.");
     }catch(_){ setErrRem("No se pudieron cargar tus solicitudes. Revisa tu conexión."); }
     setCargando(false);
@@ -2308,7 +2362,7 @@ function ResidenteReqs({reqs:reqsApp,tasks:tasksApp,session,onOpen,onNew,mob}){
         <div style={{fontWeight:700,fontSize:15}}>Mis solicitudes ({misReqs.length})</div>
         <button style={BP(true)} onClick={onNew}>+ Nueva</button>
       </div>
-      {invitado&&<div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Solicitudes de {email} · <span style={{color:"#3b82f6",cursor:"pointer"}} onClick={()=>{setAcceso(null);setAcc(null);}}>usar otro correo</span></div>}
+      {invitado&&!conCuenta&&<div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Solicitudes de {email} · <span style={{color:"#3b82f6",cursor:"pointer"}} onClick={()=>{setAcceso(null);setAcc(null);}}>usar otro correo</span></div>}
 
       {misReqs.length===0
         ? <Empty msg="Aún no tienes solicitudes. Usa el botón + Nueva para reportar una incidencia."/>
@@ -2815,6 +2869,11 @@ function Reports({reqs,tasks,inventory,mob}){
   });
   // Tiempo hasta asignar responsable
   const hAsig=promNum(rq.map(horasAsignar));
+  // Ley 21.442 art. 18: respondidas dentro de 20 días
+  const conResp=rq.filter(r=>respondidaEnPlazo(r)!==null);
+  const nRespOk=conResp.filter(r=>respondidaEnPlazo(r)).length;
+  const pctLegal=pct(nRespOk,conResp.length);
+  const legalVenc=rq.filter(r=>porResponder(r)&&diasLegal(r)<0).length;
   const nAsig=rq.filter(r=>horasAsignar(r)!==null).length;
   // Evaluación del residente
   const evaluadas=cerradas.filter(r=>evalDe(r));
@@ -2862,8 +2921,8 @@ function Reports({reqs,tasks,inventory,mob}){
   const exportCSV=()=>{
     const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
     const num=d=>d===null?"":String(Math.round(d*10)/10).replace(".",",");
-    const head=["Código","Fecha ingreso","Categoría","Subcategoría","Prioridad","Estado","Responsable","Fecha cierre","Días resolución","Días abierta","Plazo","Dentro de plazo","Horas hasta asignar","Residente confirma"];
-    const rows=rq.map(r=>{const f=r.status==="Cerrada"?fechaCierre(r):null;return [r.code,fmtD(r.createdAt),r.category,r.subcategory,r.priority,r.status,r.assignedTo,f?fmtD(f):"",num(r.status==="Cerrada"?diasCierre(r):null),esAbierta(r)?diasAbierta(r):"",slaTxt(r.priority),r.status==="Cerrada"?(enPlazo(r)===null?"":enPlazo(r)?"Sí":"No"):(fueraPlazo(r)?"No (abierta)":""),num(horasAsignar(r)),r.status==="Cerrada"&&evalDe(r)?(evalDe(r).resuelto?"Sí":"No"):""];});
+    const head=["Código","Fecha ingreso","Categoría","Subcategoría","Prioridad","Estado","Responsable","Fecha cierre","Días resolución","Días abierta","Plazo","Dentro de plazo","Horas hasta asignar","Residente confirma","Respondida en 20 días (Ley 21.442)"];
+    const rows=rq.map(r=>{const f=r.status==="Cerrada"?fechaCierre(r):null;return [r.code,fmtD(r.createdAt),r.category,r.subcategory,r.priority,r.status,r.assignedTo,f?fmtD(f):"",num(r.status==="Cerrada"?diasCierre(r):null),esAbierta(r)?diasAbierta(r):"",slaTxt(r.priority),r.status==="Cerrada"?(enPlazo(r)===null?"":enPlazo(r)?"Sí":"No"):(fueraPlazo(r)?"No (abierta)":""),num(horasAsignar(r)),r.status==="Cerrada"&&evalDe(r)?(evalDe(r).resuelto?"Sí":"No"):"",porResponder(r)?(diasLegal(r)<0?"No (sin respuesta)":"Pendiente"):(respondidaEnPlazo(r)===null?"":respondidaEnPlazo(r)?"Sí":"No")];});
     const csv="﻿"+[head,...rows].map(l=>l.map(esc).join(";")).join("\r\n");
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
@@ -2894,6 +2953,10 @@ function Reports({reqs,tasks,inventory,mob}){
 
       {/* ¿Se cumple el objetivo? */}
       <div style={{fontSize:12,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:.4,margin:"4px 0 8px"}}>¿Se está cumpliendo el objetivo?</div>
+      <Grid cols={mob?1:2} mob={mob}>
+        <Kpi value={pctLegal===null?"---":pctLegal+"%"} label={"Respondidas dentro de 20 días · Ley 21.442 art. 18"+(conResp.length?" ("+nRespOk+" de "+conResp.length+")":"")} color={pctLegal===null?"#94a3b8":pctLegal>=95?"#10b981":pctLegal>=80?"#f59e0b":"#ef4444"} mob={mob}/>
+        <Kpi value={legalVenc} label="Sin respuesta y con plazo legal vencido" color={legalVenc?"#ef4444":"#10b981"} mob={mob}/>
+      </Grid>
       <Grid cols={4} mob={mob}>
         <Kpi value={pctPlazo===null?"---":pctPlazo+"%"} label={"Resueltas dentro de plazo"+(conPlazo.length?" ("+nEnPlazo+" de "+conPlazo.length+")":"")} color={pctPlazo===null?"#94a3b8":pctPlazo>=80?"#10b981":pctPlazo>=50?"#f59e0b":"#ef4444"} mob={mob}/>
         <Kpi value={abFuera.length} label="Abiertas fuera de plazo" color={abFuera.length?"#f97316":"#10b981"} mob={mob}/>
@@ -3386,6 +3449,7 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
         catch(ex){ return errCuenta(ex); }
         const newId="u"+Date.now();
         await setDoc(doc(fbDb,"usuarios",newId),{id:newId,email:u.email,nombre:u.nombre,rol:u.rol,active:true});
+        await syncRol({email:u.email,nombre:u.nombre,rol:u.rol,active:true});
         let aviso="";
         if(estado==="existia"||!acc||acc.mail){
           try{ await sendPasswordResetEmail(fbAuth,u.email); aviso=" · se le envió un correo para crear su contraseña"; }
@@ -3393,7 +3457,7 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
         }
         showToast("Usuario creado"+(estado==="existia"?" (ese correo ya tenía cuenta)":"")+aviso);
       }
-      else{await setDoc(doc(fbDb,"usuarios",String(u.id)),{id:u.id,email:u.email,nombre:u.nombre,rol:u.rol,active:u.active??true},{merge:true});showToast("Actualizado");}
+      else{await setDoc(doc(fbDb,"usuarios",String(u.id)),{id:u.id,email:u.email,nombre:u.nombre,rol:u.rol,active:u.active??true},{merge:true});await syncRol({...u,active:u.active??true});showToast("Actualizado");}
       loadUsuarios();setShowUF(false);setEditUser(null);
       return null;
     }catch(ex){ return "No se pudo guardar: "+((ex&&ex.message)||ex); }
@@ -3408,8 +3472,8 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
       showToast("Se envió a "+email+" un correo para crear o cambiar su contraseña");
     }catch(ex){showToast(errCuenta(ex),"error");}
   };
-  const toggleUser=async u=>{try{await setDoc(doc(fbDb,"usuarios",String(u.id)),{active:!u.active},{merge:true});loadUsuarios();}catch(_){showToast("Error","error");}};
-  const deleteUser=async u=>{if(!window.confirm("¿Eliminar "+u.nombre+"?"))return;try{await deleteDoc(doc(fbDb,"usuarios",String(u.id)));loadUsuarios();showToast("Eliminado");}catch(_){showToast("Error","error");}};
+  const toggleUser=async u=>{try{await setDoc(doc(fbDb,"usuarios",String(u.id)),{active:!u.active},{merge:true});await syncRol({...u,active:!u.active});loadUsuarios();}catch(_){showToast("Error","error");}};
+  const deleteUser=async u=>{if(!window.confirm("¿Eliminar "+u.nombre+"?"))return;try{await deleteDoc(doc(fbDb,"usuarios",String(u.id)));await quitarRol(u.email);loadUsuarios();showToast("Eliminado");}catch(_){showToast("Error","error");}};
   const toggleCat=id=>setCats(p=>p.map(c=>c.id===id?{...c,active:!c.active}:c));
   const saveCat=cat=>{if(editCat){setCats(p=>p.map(c=>c.id===cat.id?cat:c));}else{setCats(p=>[...p,{...cat,id:"cat"+uid(),order:p.length}]);}showToast("Guardada");setShowCF(false);setEditCat(null);};
   const mvCat=(idx,dir)=>setCats(p=>{const a=[...p];if(dir<0&&idx===0||dir>0&&idx>=p.length-1)return p;[a[idx+dir],a[idx]]=[a[idx],a[idx+dir]];return a.map((c,i)=>({...c,order:i}));});

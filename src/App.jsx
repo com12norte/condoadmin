@@ -591,11 +591,10 @@ export default function App(){
 
   const handleLogin=user=>{
     setSession(user);
-    if(user.token) _tok=user.token;
     if(user.openNewReq) setShowNew(true);
     if(user.rol==="Residente") setView("mis_reqs");
   };
-  const handleLogout=()=>{setAcceso(null);setSession(null);setViewAs(null);setView("dashboard");_tok=null;};
+  const handleLogout=()=>{setAcceso(null);setSession(null);setViewAs(null);setView("dashboard");};
 
   useEffect(()=>{setLoading(false);},[]);
 
@@ -845,6 +844,205 @@ const sigPaso=(r,role,nPend)=>{
   return null;
 };
 
+// ── Mis datos: derechos del titular (Ley 21.719, arts. 4 a 11) ─────────────
+const TIPOS_DER=[
+  {id:"rectificacion",label:"✏️ Corregir mis datos",ayuda:"Indica qué dato está mal y cuál es el correcto."},
+  {id:"supresion",label:"🗑️ Eliminar mis datos",ayuda:"Indica qué datos quieres que eliminemos. Los que la ley obliga a conservar (registro de copropietarios, Ley 21.442) se mantendrán y te explicaremos por qué."},
+  {id:"retiro_consentimiento",label:"♿ Retirar autorización de datos de salud",ayuda:"Dejaremos de usar los datos de discapacidad, movilidad reducida y electrodependencia de tu unidad."},
+  {id:"oposicion",label:"✋ Oponerme a un uso de mis datos",ayuda:"Indica qué uso no autorizas y por qué."},
+  {id:"otro",label:"❓ Otra consulta",ayuda:"Escribe tu consulta sobre tus datos personales."},
+];
+const etiquetaCampo=k=>({prop_nombre:"Nombre propietario",prop_rut:"RUT propietario",prop_fnac:"Fecha nacimiento propietario",prop_nac:"Nacionalidad propietario",prop_tel:"Teléfono propietario",prop_mail:"Correo propietario",conyuge_nombre:"Cónyuge o pareja",conyuge_rut:"RUT cónyuge",uso:"Uso de la unidad",resid_principal:"Residencia principal del dueño",res_nombre:"Nombre residente",res_rut:"RUT residente",res_fnac:"Fecha nacimiento residente",res_nac:"Nacionalidad residente",res_tel:"Teléfono residente",res_mail:"Correo residente",n_res:"Residentes",n_disc:"Con discapacidad",n_movred:"Con movilidad reducida",n_nohisp:"No hispanoparlantes",n_electro:"Electrodependientes",n_menores:"Menores de edad",n_adultos:"Adultos mayores",mascota:"Mascota",masc_tipo:"Tipo de mascota",masc_det:"Mascota (nombre y color)",masc_reg:"Registro Nacional de Mascotas",em_nombre:"Contacto de emergencia",em_par:"Parentesco",em_tel:"Teléfono de emergencia",consent_salud:"Autoriza datos de salud",consent_salud_fecha:"Fecha de autorización",nota:"Nota",direccion:"Dirección",depto:"Unidad",estado:"Estado del registro",anio:"Año"}[k]||k);
+// Convierte el registro (con mapas anidados) en filas etiqueta/valor
+const filasDe=(o,pre="")=>{const out=[];for(const [k,v] of Object.entries(o||{})){if(v==null||v==="")continue;if(typeof v==="object"&&!Array.isArray(v))out.push(...filasDe(v,pre));else out.push([etiquetaCampo(k),Array.isArray(v)?v.join(", "):String(v)]);}return out;};
+
+function MisDatos({session,acc,mob,showToast}){
+  const conCuenta=!!session?.email&&!esInvitado(session);
+  const [abierto,setAbierto]=useState(false);
+  const [datos,setDatos]=useState(null);
+  const [cargando,setCargando]=useState(false);
+  const [err,setErr]=useState("");
+  const [tipo,setTipo]=useState(null);
+  const [detalle,setDetalle]=useState("");
+  const [enviando,setEnviando]=useState(false);
+  const [ok,setOk]=useState("");
+  const cred=async()=>conCuenta?{idToken:await fbAuth.currentUser?.getIdToken()}:{email:acc&&acc.email,sesion:acc&&acc.sesion};
+  const cargar=async()=>{
+    setCargando(true); setErr("");
+    try{ const r=await apiPost("/api/datos",{accion:"mis_datos",...(await cred())}); if(r.ok) setDatos(r); else setErr(r.error||"No se pudieron cargar tus datos."); }
+    catch(_){ setErr("No se pudieron cargar tus datos. Revisa tu conexión."); }
+    setCargando(false);
+  };
+  const abrir=()=>{ setAbierto(a=>!a); if(!datos&&!cargando) cargar(); };
+  const descargar=()=>{
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([JSON.stringify({titular:datos.email,generado:datos.generado,registro_copropietarios:datos.registros,solicitudes:datos.solicitudes,solicitudes_de_derechos:datos.derechos},null,2)],{type:"application/json"}));
+    a.download="mis_datos_"+new Date().toISOString().slice(0,10)+".json"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  };
+  const enviar=async()=>{
+    if(detalle.trim().length<5){setErr("Cuéntanos qué necesitas.");return;}
+    setEnviando(true); setErr("");
+    try{
+      const r=await apiPost("/api/datos",{accion:"ejercer",tipo:tipo.id,detalle:detalle.trim(),...(await cred())});
+      if(r.ok){ setOk("Recibimos tu solicitud "+r.id+". Te responderemos a más tardar el "+fmtD(r.vence)+" y te llegó una confirmación por correo."); setTipo(null); setDetalle(""); cargar(); }
+      else setErr(r.error||"No se pudo enviar.");
+    }catch(_){ setErr("No se pudo enviar. Revisa tu conexión."); }
+    setEnviando(false);
+  };
+  return(
+    <div style={{...card,marginTop:14}}>
+      <div onClick={abrir} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+        <div><div style={{fontWeight:700,fontSize:14}}>🔒 Mis datos personales</div><div style={{fontSize:12,color:"#64748b"}}>Ver, descargar, corregir o pedir que eliminemos tus datos</div></div>
+        <span style={{color:"#94a3b8"}}>{abierto?"▲":"▼"}</span>
+      </div>
+      {abierto&&(
+        <div style={{marginTop:12}}>
+          {ok&&<div style={alrt("success")}>{ok}</div>}
+          {err&&<div style={alrt("error")}>{err}</div>}
+          {cargando&&<div style={{fontSize:13,color:"#64748b"}}>Cargando...</div>}
+          {datos&&(
+            <div>
+              <div style={{fontWeight:600,fontSize:13,marginBottom:6}}>Registro de copropietarios</div>
+              {datos.registros.length===0?<div style={{fontSize:12,color:"#94a3b8",marginBottom:10}}>No encontramos un registro con {datos.email}.</div>:datos.registros.map((reg,i)=>(
+                <div key={i} style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",marginBottom:10}}>{filasDe(reg).map(([l,v],j)=><IR key={j} l={l} v={v}/>)}</div>
+              ))}
+              <div style={{fontWeight:600,fontSize:13,margin:"6px 0"}}>Solicitudes ingresadas: {datos.solicitudes.length}</div>
+              {datos.derechos.length>0&&(
+                <div style={{marginTop:8}}>
+                  <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>Mis solicitudes sobre datos personales</div>
+                  {datos.derechos.map((d,i)=><div key={i} style={{fontSize:12,padding:"4px 0",borderBottom:"1px solid #f1f5f9"}}><b>{d.tipo}</b> · {fmtD(d.fecha)} · <span style={{color:d.estado==="Respondida"?"#16a34a":"#d97706"}}>{d.estado}</span>{d.respuesta&&<div style={{color:"#475569"}}>{d.respuesta}</div>}</div>)}
+                </div>
+              )}
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"12px 0"}}>
+                <button style={BS(true)} onClick={descargar}>⬇ Descargar mis datos</button>
+                <button style={BS(true)} onClick={()=>window.open("https://com12norte.github.io/administracion-edificio/copropietario.html","_blank")}>📇 Actualizar registro</button>
+              </div>
+              {!tipo?(
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{TIPOS_DER.map(t=><button key={t.id} style={BG(true)} onClick={()=>{setTipo(t);setOk("");setErr("");}}>{t.label}</button>)}</div>
+              ):(
+                <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:10}}>
+                  <div style={{fontWeight:600,fontSize:13}}>{tipo.label}</div>
+                  <div style={{fontSize:12,color:"#64748b",margin:"2px 0 6px"}}>{tipo.ayuda}</div>
+                  <textarea style={{...inp,height:80,fontFamily:"inherit",fontSize:mob?16:13}} value={detalle} onChange={ev=>setDetalle(ev.target.value)}/>
+                  <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
+                    <button style={BS(true)} onClick={()=>{setTipo(null);setDetalle("");}} disabled={enviando}>Cancelar</button>
+                    <button style={{...BP(true),opacity:enviando?.7:1}} onClick={enviar} disabled={enviando}>{enviando?"Enviando...":"Enviar solicitud"}</button>
+                  </div>
+                  <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Respondemos dentro de 30 días corridos. Es gratuito.</div>
+                </div>
+              )}
+              <div style={{fontSize:11,color:"#94a3b8",marginTop:10}}><a href="/privacidad.html" target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>Política de privacidad</a></div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bandeja de solicitudes sobre datos personales (administración) ─────────
+function DerechosAdmin({showToast}){
+  const [lista,setLista]=useState(null);
+  const [err,setErr]=useState("");
+  const [sel,setSel]=useState(null);
+  const [resp,setResp]=useState("");
+  const [busy,setBusy]=useState(false);
+  const tok=async()=>({idToken:await fbAuth.currentUser?.getIdToken()});
+  const cargar=async()=>{ setErr(""); try{ const r=await apiPost("/api/datos",{accion:"derechos",...(await tok())}); if(r.ok) setLista(r.lista); else setErr(r.error||"No se pudo cargar"); }catch(_){ setErr("No se pudo cargar"); } };
+  useEffect(()=>{cargar();},[]);
+  const responder=async estado=>{
+    setBusy(true);
+    try{ const r=await apiPost("/api/datos",{accion:"derecho_responder",id:sel.id,respuesta:resp,estado,...(await tok())});
+      if(r.ok){ showToast(estado==="En revisión"?"Marcada en revisión":"Respuesta enviada al titular"+(r.correo?"":" (el correo no salió: avísale por otro medio)")); setSel(null); setResp(""); cargar(); }
+      else showToast(r.error||"No se pudo guardar","error"); }catch(_){ showToast("No se pudo guardar","error"); }
+    setBusy(false);
+  };
+  if(err) return <div style={alrt("error")}>{err}</div>;
+  if(!lista) return <Empty msg="Cargando..."/>;
+  const pend=lista.filter(d=>d.estado==="Recibida"||d.estado==="En revisión");
+  return(
+    <div>
+      <div style={{...alrt("info"),fontSize:12}}>Solicitudes de acceso, corrección, eliminación, oposición o retiro de consentimiento (Ley 21.719). Deben responderse en <b>30 días corridos</b> (art. 11), prorrogables una vez. El titular recibe la respuesta por correo.</div>
+      {lista.length===0?<Empty msg="No hay solicitudes."/>:lista.map(d=>{
+        const dias=Math.ceil((new Date(d.vence)-Date.now())/86400000);
+        const abierta=d.estado==="Recibida"||d.estado==="En revisión";
+        return(
+          <div key={d.id} style={{...card,padding:12,marginBottom:8,borderLeft:"4px solid "+(abierta?(dias<0?"#ef4444":dias<=7?"#f59e0b":"#3b82f6"):"#10b981")}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+              <div style={{minWidth:0}}><div style={{fontWeight:700,fontSize:13}}>{d.tipoTxt}</div><div style={{fontSize:11,color:"#64748b"}}>{d.id} · {d.email} · {fmtD(d.fecha)}</div></div>
+              <div style={{textAlign:"right"}}><span style={bdg(abierta?"#1d4ed8":"#16a34a",abierta?"#dbeafe":"#f0fdf4")}>{d.estado}</span>{abierta&&<div style={{fontSize:11,fontWeight:700,color:dias<0?"#dc2626":dias<=7?"#d97706":"#64748b",marginTop:3}}>{dias<0?"Plazo vencido hace "+Math.abs(dias)+" días":"Responder en "+dias+" días"}</div>}</div>
+            </div>
+            <div style={{fontSize:13,color:"#334155",marginTop:6,whiteSpace:"pre-wrap"}}>{d.detalle}</div>
+            {d.respuesta&&<div style={{fontSize:12,color:"#16a34a",marginTop:6}}>Respuesta: {d.respuesta}</div>}
+            {abierta&&(sel&&sel.id===d.id?(
+              <div style={{marginTop:8}}>
+                <textarea style={{...inp,height:80,fontFamily:"inherit"}} value={resp} onChange={ev=>setResp(ev.target.value)} placeholder="Respuesta para el titular: qué se hizo o por qué no procede."/>
+                <div style={{display:"flex",gap:6,justifyContent:"flex-end",marginTop:6,flexWrap:"wrap"}}>
+                  <button style={BS(true)} onClick={()=>setSel(null)} disabled={busy}>Cancelar</button>
+                  <button style={BS(true)} onClick={()=>responder("En revisión")} disabled={busy}>Marcar en revisión</button>
+                  <button style={BD(true)} onClick={()=>responder("Rechazada")} disabled={busy}>No procede</button>
+                  <button style={BP(true)} onClick={()=>responder("Respondida")} disabled={busy}>Responder</button>
+                </div>
+              </div>
+            ):<button style={{...BS(true),marginTop:8}} onClick={()=>{setSel(d);setResp("");}}>Responder</button>)}
+          </div>
+        );
+      })}
+      {pend.length>0&&<div style={{fontSize:11,color:"#94a3b8"}}>{pend.length} pendiente{pend.length>1?"s":""}</div>}
+    </div>
+  );
+}
+
+// ── Listado para el plan de evacuación (privado) ───────────────────────────
+function EvacuacionLista({towers,mob}){
+  const [filas,setFilas]=useState(null);
+  const [err,setErr]=useState("");
+  useEffect(()=>{(async()=>{ try{ const r=await apiPost("/api/datos",{accion:"evacuacion",idToken:await fbAuth.currentUser?.getIdToken()}); if(r.ok) setFilas(r.filas); else setErr(r.error||"No se pudo cargar"); }catch(_){ setErr("No se pudo cargar"); } })();},[]);
+  if(err) return <div style={alrt("error")}>{err}</div>;
+  if(!filas) return <Empty msg="Cargando..."/>;
+  const nombresTorre=(towers||[]).filter(t=>t.name!=="Comun").map(t=>t.name);
+  const torreDe=f=>nombresTorre.find(n=>f.direccion.includes(n))||f.direccion||"Sin dirección";
+  const grupos={}; filas.forEach(f=>{const t=torreDe(f);(grupos[t]=grupos[t]||[]).push(f);});
+  const prior=f=>(f.discapacidad||0)+(f.movilidadReducida||0)+(f.electrodependientes||0);
+  const cols=[["residentes","Resid."],["menores","Menores"],["adultosMayores","Adultos may."],["noHispanos","No hispanos"],["discapacidad","Discap."],["movilidadReducida","Mov. red."],["electrodependientes","Electrodep."]];
+  const tot=k=>filas.reduce((s,f)=>s+(f[k]||0),0);
+  const csv=()=>{
+    const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+    const head=["Torre","Unidad",...cols.map(c=>c[1]),"Autoriza datos salud","Mascota"];
+    const rows=Object.entries(grupos).flatMap(([t,l])=>l.map(f=>[t,f.depto,...cols.map(c=>f[c[0]]==null?"":f[c[0]]),f.consentimientoSalud,f.mascota]));
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["﻿"+[head,...rows].map(r=>r.map(esc).join(";")).join("\r\n")],{type:"text/csv;charset=utf-8"}));
+    a.download="evacuacion_"+new Date().toISOString().slice(0,10)+".csv"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  };
+  return(
+    <div>
+      <div style={{...alrt("warning"),fontSize:12}}>🔒 Contiene datos de salud. Solo para el plan de evacuación: no lo publiques, no lo pegues en conserjería y entrégalo solo al prevencionista, las brigadas, Bomberos y Carabineros. No incluye nombres.</div>
+      <Grid cols={mob?2:4} mob={mob}>
+        <Kpi value={filas.length} label="Unidades registradas" color="#3b82f6" mob={mob}/>
+        <Kpi value={tot("residentes")} label="Residentes" color="#6366f1" mob={mob}/>
+        <Kpi value={tot("discapacidad")+tot("movilidadReducida")+tot("electrodependientes")} label="Requieren ayuda para evacuar" color="#ef4444" mob={mob}/>
+        <Kpi value={tot("menores")} label="Menores de edad" color="#f59e0b" mob={mob}/>
+      </Grid>
+      <div style={{display:"flex",gap:8,marginBottom:10}}><button style={BS(true)} onClick={csv}>⬇ Descargar (Excel)</button><button style={BS(true)} onClick={()=>window.print()}>🖨 Imprimir</button></div>
+      {Object.entries(grupos).sort().map(([t,l])=>(
+        <div key={t} style={{...card,overflowX:"auto"}}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Torre {t} · {l.length} unidades</div>
+          <table style={tbl}><thead><tr><th style={thS}>Unidad</th>{cols.map(c=><th key={c[0]} style={thS}>{c[1]}</th>)}<th style={thS}>Salud</th></tr></thead>
+            <tbody>{[...l].sort((a,b)=>prior(b)-prior(a)||String(a.depto).localeCompare(String(b.depto))).map((f,i)=>(
+              <tr key={i} style={{background:prior(f)>0?"#fef2f2":""}}>
+                <td style={{...tdS,fontWeight:600}}>{f.depto}</td>
+                {cols.map(c=><td key={c[0]} style={{...tdS,textAlign:"center",fontWeight:f[c[0]]>0&&["discapacidad","movilidadReducida","electrodependientes"].includes(c[0])?700:400,color:f[c[0]]>0&&["discapacidad","movilidadReducida","electrodependientes"].includes(c[0])?"#dc2626":undefined}}>{f[c[0]]==null?"—":f[c[0]]}</td>)}
+                <td style={{...tdS,fontSize:10,color:"#64748b"}}>{f.consentimientoSalud}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      ))}
+      <div style={{fontSize:11,color:"#94a3b8"}}>"—" = la unidad no autorizó el uso de datos de salud. "Sin registro" = registro anterior a la autorización separada.</div>
+    </div>
+  );
+}
+
 // ── Plan de emergencia, simulacros y brigadas (Ley 21.442 art. 40) ─────────
 const PLAN_DEF={
   puntoEncuentro:"",
@@ -924,7 +1122,8 @@ function EmergenciaView({role,showToast,mob,towers}){
       </Grid>
       <div style={{...alrt("info"),fontSize:12}}>La Ley 21.442 (art. 40) exige actualizar el plan de evacuación al menos una vez al año, con simulacros, y entregarlo a Bomberos y Carabineros. La actualización debe firmarla un ingeniero en prevención de riesgos, el presidente del comité y el administrador.</div>
 
-      <Tabs tabs={[{id:"plan",label:"Plan público"},{id:"sim",label:"Simulacros ("+sims.length+")"},{id:"brig",label:"Brigadas ("+brig.length+")"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{id:"plan",label:"Plan público"},{id:"evac",label:"Listado de evacuación 🔒"},{id:"sim",label:"Simulacros ("+sims.length+")"},{id:"brig",label:"Brigadas ("+brig.length+")"}]} active={tab} onChange={setTab}/>
+      {tab==="evac"&&<EvacuacionLista towers={towers} mob={mob}/>}
 
       {tab==="plan"&&!edit&&(
         <div style={card}>
@@ -2607,6 +2806,7 @@ function ResidenteReqs({reqs:reqsApp,tasks:tasksApp,session,onOpen,onNew,mob}){
             );
           })
       }
+      {(conCuenta||acc)&&<MisDatos session={session} acc={acc} mob={mob}/>}
     </div>
   );
 }
@@ -3701,7 +3901,7 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
   const toggleTow=id=>setTowers(p=>p.map(t=>t.id===id?{...t,active:!t.active}:t));
   const saveTow=t=>{if(editTow){setTowers(p=>p.map(x=>x.id===t.id?t:x));}else{setTowers(p=>[...p,{...t,id:"t"+uid()}]);}showToast("Guardada");setShowTF(false);setEditTow(null);};
   const sla=Object.fromEntries(PRIORITIES.map(p=>[p,slaTxt(p)]));
-  const cfgTabs=[{id:"cats",label:"Categorías"},{id:"towers",label:"Torres"},{id:"equipos",label:"Equipos"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"}];
+  const cfgTabs=[{id:"cats",label:"Categorías"},{id:"towers",label:"Torres"},{id:"equipos",label:"Equipos"},{id:"usuarios",label:"Usuarios"},{id:"sla",label:"SLA"},{id:"derechos",label:"Datos personales"}];
   return(
     <div>
       <Tabs tabs={cfgTabs} active={tab} onChange={setTab}/>
@@ -3752,6 +3952,7 @@ function ConfigView({cats,setCats,towers,setTowers,equipos,setEquipos,showToast,
           ))}</div>
         </div>
       )}
+      {tab==="derechos"&&<DerechosAdmin showToast={showToast}/>}
       {tab==="sla"&&(
         <div style={card}>
           <div style={{fontWeight:600,fontSize:13,marginBottom:2}}>Plazo de resolución por prioridad</div>

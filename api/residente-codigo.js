@@ -163,8 +163,36 @@ async function guardar(token, docId, f) {
 }
 const borrar = (token, docId) => fetch(`${FS()}/codigos_acceso/${docId}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
 
+// Páginas que pueden llamar a este servicio desde el navegador (formulario de copropietarios en GitHub Pages)
+const ORIGENES = ["https://com12norte.github.io", "https://condoadmin-rouge.vercel.app"];
+
+// Registros de copropietarios asociados a un correo (propietario o residente)
+function expandirJSON(v) {
+  if (typeof v === "string" && /^\s*[{[]/.test(v)) { try { return JSON.parse(v); } catch { return v; } }
+  return v;
+}
+async function registrosDe(token, email) {
+  const out = [];
+  for (const r of await listarTodo(token, "copropietarios")) {
+    const d = expandirJSON(r.datos) || {};
+    const prop = String(d.prop_mail || r.prop_mail || "").trim().toLowerCase();
+    const resi = String(d.res_mail || r.res_mail || "").trim().toLowerCase();
+    if (prop === email) out.push({ direccion: r.direccion || "", depto: r.depto || "", token: r.token || "", rol: "propietario" });
+    else if (resi === email) out.push({ direccion: r.direccion || "", depto: r.depto || "", rol: "residente" });
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
+  const origen = String(req.headers.origin || "");
+  if (ORIGENES.includes(origen)) {
+    res.setHeader("Access-Control-Allow-Origin", origen);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  }
+  if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Método no permitido" });
   try {
     let body = req.body || {};
@@ -190,7 +218,10 @@ export default async function handler(req, res) {
       if (previo && ahora - (previo.t || 0) < ESPERA_REENVIO_MS) {
         return res.status(429).json({ ok: false, error: "Ya te enviamos un código. Espera un minuto antes de pedir otro." });
       }
-      if (!(await tieneSolicitudes(token, email))) {
+      // Para el registro de copropietarios cualquier correo puede verificarse (también quien se registra por primera vez).
+      // Para "Mis solicitudes", solo correos con solicitudes o registro.
+      const paraRegistro = body.para === "registro";
+      if (!paraRegistro && !(await tieneSolicitudes(token, email)) && !(await registrosDe(token, email)).length) {
         return res.status(404).json({ ok: false, error: "No encontramos solicitudes ingresadas con ese correo. Revisa que esté bien escrito." });
       }
       const codigo = String(nodeCrypto.randomInt(0, 1000000)).padStart(6, "0");
@@ -200,8 +231,8 @@ export default async function handler(req, res) {
         headers: { "x-clave-interna": CLAVE_INTERNA, "Content-Type": "application/json" },
         body: JSON.stringify({
           to: email,
-          subject: "[CondoAdmin] Tu código de acceso: " + codigo,
-          body: "Tu código para ver tus solicitudes en CondoAdmin es:\n\n    " + codigo + "\n\nVale por 10 minutos. Si no lo pediste, ignora este correo.\n\n— CondoAdmin",
+          subject: (paraRegistro ? "[Edificio 12 Norte] Código para el Registro de Copropietarios: " : "[CondoAdmin] Tu código de acceso: ") + codigo,
+          body: (paraRegistro ? "Tu código para ingresar al Registro de Copropietarios del Edificio 12 Norte es:" : "Tu código para ver tus solicitudes en CondoAdmin es:") + "\n\n    " + codigo + "\n\nVale por 10 minutos. Si no lo pediste, ignora este correo.\n\n— Comunidad Edificio 12 Norte",
         }),
       });
       if (!mail.ok) {
@@ -224,6 +255,12 @@ export default async function handler(req, res) {
       }
       await borrar(token, docId);
       return res.status(200).json({ ok: true, ...crearSesion(email) });
+    }
+
+    // Registro de copropietarios: ¿este correo ya tiene una unidad registrada? (devuelve su enlace personal)
+    if (accion === "registro") {
+      if (!sesionValida(email, body.sesion)) return res.status(401).json({ ok: false, error: "Tu acceso venció. Pide un código nuevo." });
+      return res.status(200).json({ ok: true, registros: await registrosDe(token, email) });
     }
 
     if (accion === "listar") {

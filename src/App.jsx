@@ -487,9 +487,9 @@ function LoginScreen({onLogin}){
         <button onClick={()=>{setMode(null);setResErr("");setResEmail("");}} style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.3)",color:"#fff",borderRadius:8,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:24}}>← Volver</button>
         <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:48,marginBottom:12}}>🏠</div><div style={{fontWeight:700,fontSize:22,color:"#fff"}}>Soy Residente</div><div style={{color:"#bfdbfe",fontSize:14,marginTop:6}}>¿Qué deseas hacer?</div></div>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(5,150,105,.4)"}}>
+          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/?ir=residente","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(5,150,105,.4)"}}>
             <div style={{fontSize:36}}>🅿️</div>
-            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Condo Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Reserva y gestión de estacionamientos</div></div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Registra tus patentes y consulta tu estacionamiento</div></div>
             <div style={{marginLeft:"auto",color:"#a7f3d0",fontSize:20}}>→</div>
           </button>
           <button onClick={()=>onLogin({id:"guest",nombre:"Residente",email:"",rol:"Residente",token:null,openNewReq:true})} style={{background:"linear-gradient(135deg,#dc2626,#991b1b)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(220,38,38,.4)"}}>
@@ -526,7 +526,7 @@ function LoginScreen({onLogin}){
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Incidencias</div><div style={{color:"#c7d2fe",fontSize:12,marginTop:2}}>Gestión de solicitudes y órdenes</div></div>
             <div style={{marginLeft:"auto",color:"#c7d2fe",fontSize:18}}>→</div>
           </button>
-          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(5,150,105,.4)"}}>
+          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/?ir=personal","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(5,150,105,.4)"}}>
             <div style={{fontSize:32}}>🅿️</div>
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Gestión de estacionamientos</div></div>
             <div style={{marginLeft:"auto",color:"#a7f3d0",fontSize:18}}>→</div>

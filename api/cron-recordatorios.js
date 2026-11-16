@@ -191,7 +191,14 @@ export default async function handler(req, res) {
       return { ...r, vence, dias };
     }).filter(r => r.dias <= 5).sort((a, b) => a.dias - b.dias);
 
-    if (!pendientes.length && !legales.length) {
+    // Certificaciones de equipos de seguridad (Mantención → Certificaciones) vencidas o que vencen en 30 días
+    const docCerts = configDocs.map(aplanar).find(d => d && (d._id === "certs" || d.key === "certs"));
+    const certs = (docCerts && Array.isArray(docCerts.data) ? docCerts.data : []).filter(x => x && x.vencimiento).map(x => {
+      const dias = Math.ceil((new Date(x.vencimiento) - hoy) / 86400000);
+      return { ...x, dias };
+    }).filter(x => !isNaN(x.dias) && x.dias <= 30).sort((a, b) => a.dias - b.dias);
+
+    if (!pendientes.length && !legales.length && !certs.length) {
       await fsSet(token, "config", "daily_reminder_last_sent", { date: chileDateKey, sentAt: now.toISOString() });
       return res.status(200).json({ ok: true, mensaje: "Sin pendientes hoy", chileDateKey });
     }
@@ -204,7 +211,7 @@ export default async function handler(req, res) {
     const porEmail = {};
     const destino = (email, nombre) => {
       const k = String(email).trim().toLowerCase();
-      if (!porEmail[k]) porEmail[k] = { nombre, tareas: [], legales: [] };
+      if (!porEmail[k]) porEmail[k] = { nombre, tareas: [], legales: [], certs: [] };
       return porEmail[k];
     };
     const addItem = (email, nombre, tarea) => {
@@ -212,9 +219,9 @@ export default async function handler(req, res) {
       destino(email, nombre).tareas.push(tarea);
     };
     // Las solicitudes con plazo legal próximo o vencido van a los administradores
-    if (legales.length) {
+    if (legales.length || certs.length) {
       usuarios.filter(u => u.active !== false && ["Administrador", "Administrador Edificio"].includes(u.rol) && String(u.email || "").includes("@"))
-        .forEach(u => { destino(u.email, u.nombre || "").legales = legales; });
+        .forEach(u => { const d = destino(u.email, u.nombre || ""); d.legales = legales; d.certs = certs; });
     }
 
     for (const t of pendientes) {
@@ -232,13 +239,15 @@ export default async function handler(req, res) {
 
     // Un correo por persona
     const resultados = [];
-    for (const [email, { nombre, tareas, legales: leg }] of Object.entries(porEmail)) {
+    for (const [email, { nombre, tareas, legales: leg, certs: cer }] of Object.entries(porEmail)) {
       const venc = tareas.filter(t => t.esV).length;
       const legVenc = leg.filter(r => r.dias < 0).length;
       const asunto = legVenc > 0
         ? `[CondoAdmin] ⚠ ${legVenc} solicitud${legVenc > 1 ? "es" : ""} con plazo legal de respuesta vencido`
         : venc > 0
         ? `[CondoAdmin] ⚠ Tienes ${venc} orden${venc > 1 ? "es" : ""} vencida${venc > 1 ? "s" : ""} sin informe`
+        : cer.some(x => x.dias < 0)
+        ? `[CondoAdmin] ⚠ Certificaciones de seguridad vencidas`
         : leg.length && !tareas.length
         ? `[CondoAdmin] ${leg.length} solicitud${leg.length > 1 ? "es" : ""} por responder (plazo legal)`
         : `[CondoAdmin] Recordatorio: ${tareas.length} orden${tareas.length > 1 ? "es" : ""} pendiente${tareas.length > 1 ? "s" : ""} de informe`;
@@ -250,6 +259,10 @@ export default async function handler(req, res) {
       if (tareas.length) {
         const filas = tareas.map(t => `  • [${t.diasTxt}] ${t.title} (vence: ${fmtD(t.dueDate)})`).join("\n");
         cuerpo += `Órdenes pendientes de informe de cierre:\n\n${filas}\n\nIngresa al sistema y completa el informe de cada orden.\n\n`;
+      }
+      if (cer.length) {
+        const fc = cer.map(x => `  • [${x.dias < 0 ? "⚠ VENCIDA hace " + Math.abs(x.dias) + " día(s)" : x.dias === 0 ? "🔴 Vence HOY" : "🟡 Vence en " + x.dias + " día(s)"}] ${x.equipoNombre || "Equipo"}${x.torre ? " · " + x.torre : ""}${x.ubicacion ? " · " + x.ubicacion : ""} (vence ${fmtD(x.vencimiento)})`).join("\n");
+        cuerpo += `Certificaciones de equipos de seguridad (plan de emergencia, Ley 21.442 art. 40):\n\n${fc}\n\n`;
       }
       cuerpo += `— CondoAdmin`;
       resultados.push(await sendMail(email, asunto, cuerpo));

@@ -736,12 +736,14 @@ export default function App(){
 }
 
 // ── Ayudas visuales de estado ──────────────────────────────────────────────
-const PASOS=["Ingresada","En revision","Asignada","En proceso","Resuelta","Cerrada"];
-const PASO_LBL={Ingresada:"Ingresada","En revision":"En revisión",Asignada:"Asignada","En proceso":"En proceso",Resuelta:"Resuelta",Cerrada:"Cerrada"};
+// 4 etapas: Recepción (incluye la revisión), Asignada, En proceso y Cierre (incluye "Resuelta")
+const PASOS=["Ingresada","Asignada","En proceso","Cerrada"];
+const PASO_LBL={Ingresada:"Recepción","En revision":"Recepción",Asignada:"Asignada","En proceso":"En proceso",Resuelta:"Cierre",Cerrada:"Cierre"};
+const pasoDe = st => st==="En revision"?"Ingresada":st==="Resuelta"?"Cerrada":st;
 // Barra de avance: muestra de un vistazo en qué etapa va la solicitud
 function Pasos({status,mob}){
   if(status==="Rechazada") return <div style={{...alrt("error"),marginBottom:12}}>Esta solicitud fue <strong>rechazada</strong>.</div>;
-  const idx=Math.max(0,PASOS.indexOf(status));
+  const idx=Math.max(0,PASOS.indexOf(pasoDe(status)));
   return(
     <div style={{...card,padding:mob?"10px 8px":"12px 16px",display:"flex",alignItems:"flex-start"}}>
       {PASOS.map((p,i)=>{
@@ -760,7 +762,7 @@ function Pasos({status,mob}){
 }
 // Barra de etapas seleccionable (personal): tocar una etapa muestra su panel
 function PasosSel({status,sel,onSel,mob}){
-  const idx=Math.max(0,PASOS.indexOf(status));
+  const idx=Math.max(0,PASOS.indexOf(pasoDe(status)));
   return(
     <div style={{...card,padding:mob?"10px 6px":"12px 16px",display:"flex",alignItems:"flex-start",marginBottom:8}}>
       {PASOS.map((p,i)=>{
@@ -1114,8 +1116,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
   const [tab,setTab]=useState("info");
-  const [etapa,setEtapa]=useState(PASOS.includes(r.status)?r.status:"Ingresada");
-  useEffect(()=>{ if(PASOS.includes(r.status)) setEtapa(r.status); },[r.status,r.id]);
+  const [etapa,setEtapa]=useState(PASOS.includes(pasoDe(r.status))?pasoDe(r.status):"Ingresada");
+  useEffect(()=>{ if(PASOS.includes(pasoDe(r.status))) setEtapa(pasoDe(r.status)); },[r.status,r.id]);
   const [rechazando,setRechazando]=useState(false);
   const [motivo,setMotivo]=useState("");
 
@@ -1150,7 +1152,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const applyAsgn=async()=>{
     if(!asgn||asgn==="Sin asignar"){showToast("Seleccione responsable","error");return;}
     // Si la solicitud ya va más adelante, solo cambia el responsable (no retrocede)
-    const yaAvanzada=PASOS.indexOf(r.status)>PASOS.indexOf("Asignada");
+    const yaAvanzada=PASOS.indexOf(pasoDe(r.status))>PASOS.indexOf("Asignada");
     upd(yaAvanzada?{assignedTo:asgn}:{assignedTo:asgn,status:"Asignada"},{action:"Asignada a "+asgn,from:yaAvanzada?null:r.status,to:yaAvanzada?null:"Asignada"});
     showToast("Responsable asignado");
     // Primera asignación: se avisa al residente
@@ -1279,17 +1281,15 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 
       {/* Panel de la etapa seleccionada */}
       {staff&&r.status!=="Rechazada"&&(()=>{
-        const iSel=PASOS.indexOf(etapa), iAct=PASOS.indexOf(r.status);
+        const iSel=PASOS.indexOf(etapa), iAct=PASOS.indexOf(pasoDe(r.status));
         const estado=r.status==="Cerrada"||iSel<iAct?"hecha":iSel===iAct?"actual":"pendiente";
         const sig=PASOS[iSel+1];
-        const titulo={Ingresada:"Recepción de la solicitud","En revision":"Revisión",Asignada:"Asignación",["En proceso"]:"Ejecución del trabajo",Resuelta:"Trabajo terminado: revisión final",Cerrada:"Cierre"}[etapa];
+        const titulo={Ingresada:"Recepción y revisión",Asignada:"Asignación",["En proceso"]:"Ejecución del trabajo",Cerrada:"Revisión final y cierre"}[etapa];
         const ayuda={
-          Ingresada:"Revisa lo que reportó el residente. Si está claro, pásala a revisión.",
-          "En revision":"Confirma el tipo de problema y la prioridad. Si no corresponde, recházala indicando el motivo.",
+          Ingresada:"Revisa lo que reportó el residente y confirma la prioridad. Si no corresponde, recházala indicando el motivo.",
           Asignada:"Elige quién se hace cargo y, si se necesita, el proveedor que hará el trabajo.",
           "En proceso":"Crea la orden de trabajo con fecha límite y sube fotos del avance.",
-          Resuelta:"Revisa el informe de la orden y las fotos de cierre antes de cerrar.",
-          Cerrada:"Al cerrar, el residente recibe un correo con tu nota y se le pregunta si quedó resuelto.",
+          Cerrada:"Revisa el informe de la orden y las fotos de cierre, y cierra con una nota. El residente recibe un correo y se le pregunta si quedó resuelto.",
         }[etapa];
         const sinResp=!r.assignedTo||r.assignedTo==="Sin asignar";
         // Para pasar más allá de "Asignada" se necesita responsable
@@ -1311,8 +1311,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               </div>
             )}
 
-            {etapa==="En revision"&&(
-              <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+            {etapa==="Ingresada"&&(
+              <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginTop:12,paddingTop:12,borderTop:"1px solid #f1f5f9"}}>
                 <div><label style={lbl}>Tipo de problema</label><div style={{fontSize:13,fontWeight:600,padding:"6px 0"}}>{r.category}{r.subcategory?" / "+r.subcategory:""}</div></div>
                 {can(role,"assign")&&(
                   <div><label style={lbl}>Prioridad{r.prioAuto?" (automática)":""}</label>
@@ -1359,8 +1359,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               </div>
             )}
 
-            {etapa==="Resuelta"&&(
-              <div>
+            {etapa==="Cerrada"&&(
+              <div style={{marginBottom:10}}>
                 {myTasks.length===0
                   ?<div style={{...alrt("warning"),fontSize:12}}>Esta solicitud no tiene órdenes de trabajo. Puedes cerrarla igual con una nota.</div>
                   :myTasks.map(t=>(
@@ -1373,9 +1373,8 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               </div>
             )}
 
-            {etapa==="Cerrada"&&(r.status==="Cerrada"?tarjetaCierre:(
-              <div style={{fontSize:13,color:"#475569"}}>{can(role,"closeCases")?"Cuando el trabajo esté listo, cierra la solicitud con una nota.":"Solo la administración puede cerrar solicitudes."}</div>
-            ))}
+            {etapa==="Cerrada"&&r.status==="Cerrada"&&tarjetaCierre}
+            {etapa==="Cerrada"&&r.status!=="Cerrada"&&!can(role,"closeCases")&&<div style={{fontSize:12,color:"#94a3b8"}}>Solo la administración puede cerrar solicitudes.</div>}
 
             {/* Botones de avance */}
             {r.status!=="Cerrada"&&can(role,"changeStatus")&&(
@@ -1383,7 +1382,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                 {bloqueo&&<span style={{fontSize:12,color:"#d97706",marginRight:"auto"}}>{bloqueo}</span>}
                 {estado==="hecha"&&<button style={BS(true)} onClick={()=>moverA(etapa)}>↩ Devolver la solicitud a esta etapa</button>}
                 {estado==="pendiente"&&etapa!=="Cerrada"&&<button style={BS(true)} disabled={!!bloqueo} onClick={()=>moverA(etapa)}>Mover la solicitud a esta etapa</button>}
-                {estado==="pendiente"&&etapa==="Cerrada"&&can(role,"closeCases")&&<button style={BSu(false)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
+                {(estado==="pendiente"||estado==="actual")&&etapa==="Cerrada"&&can(role,"closeCases")&&<button style={BSu(false)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
                 {avanzarDesdeActual&&(sig==="Cerrada"
                   ?(can(role,"closeCases")&&<button style={BSu(false)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>)
                   :<button style={BP(false)} disabled={etapa==="Asignada"&&sinResp} title={etapa==="Asignada"&&sinResp?"Asigna un responsable primero":""} onClick={()=>moverA(sig)}>Avanzar a «{PASO_LBL[sig]}» →</button>)}
@@ -1396,7 +1395,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       {/* Residente y otros roles: tarjeta de cierre y siguiente paso */}
       {!staff&&r.status==="Cerrada"&&!isProv&&tarjetaCierre}
       {!staff&&(()=>{const msg=sigPaso(r,role,myTasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada"&&!(t.informe||"").trim()).length);return msg?<div style={{...alrt("info"),marginBottom:12,fontSize:13}}>💡 {msg}</div>:null;})()}
-      {r.status==="Rechazada"&&staff&&can(role,"changeStatus")&&<div style={{marginBottom:12}}><button style={BS(true)} onClick={()=>moverA("En revision")}>↺ Volver a revisar esta solicitud</button></div>}
+      {r.status==="Rechazada"&&staff&&can(role,"changeStatus")&&<div style={{marginBottom:12}}><button style={BS(true)} onClick={()=>moverA("Ingresada")}>↺ Volver a revisar esta solicitud</button></div>}
       <Tabs tabs={tabs} active={tab} onChange={setTab}/>
       {tab==="info"&&(
         <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>

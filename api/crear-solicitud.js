@@ -1,6 +1,8 @@
 import nodeCrypto from "node:crypto";
 
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
+// Clave para que api/send-email acepte el envío (se deriva de la clave privada; igual en todos los api/)
+const CLAVE_INTERNA = nodeCrypto.createHash("sha256").update("send-email|" + String(process.env.FIREBASE_PRIVATE_KEY || "")).digest("hex");
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
 // La clave se reconstruye en formato estándar: tolera comillas, "\n" escritos como texto,
@@ -123,7 +125,7 @@ async function avisarAdmins(token, code, d) {
   const admins = [...new Set(us.filter(u => u.active !== false && ["Administrador", "Administrador Edificio"].includes(u.rol) && String(u.email || "").includes("@")).map(u => u.email.trim().toLowerCase()))];
   const cuerpo = "Nueva solicitud recibida:\n\nCódigo: " + code + "\nSolicitante: " + d.requesterName + "\nUbicación: " + d.tower + " / " + d.unit + "\nCategoría: " + (d.category || "") + (d.subcategory ? " / " + d.subcategory : "") + "\nPrioridad: " + d.priority + "\n\n" + d.description + "\n\nIngrese al sistema para gestionar.";
   await Promise.all(admins.map(to => fetch(`${SITE_URL}/api/send-email`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "x-clave-interna": CLAVE_INTERNA, "Content-Type": "application/json" },
     body: JSON.stringify({ to, subject: "[CondoAdmin] Nueva solicitud " + code + (d.priority === "Emergencia" ? " ⚠ EMERGENCIA" : ""), body: cuerpo }),
   }).catch(() => {})));
   return admins.length;
@@ -226,6 +228,11 @@ export default async function handler(req, res) {
       });
       if (r.ok) {
         await avisarAdmins(token, code, doc).catch(e => console.warn("aviso admins", e));
+        // Confirmación al residente (desde el servidor: el residente no puede usar api/send-email)
+        await fetch(`${SITE_URL}/api/send-email`, {
+          method: "POST", headers: { "x-clave-interna": CLAVE_INTERNA, "Content-Type": "application/json" },
+          body: JSON.stringify({ to: email, subject: "[CondoAdmin] Solicitud " + code + " recibida", body: "Hola " + nombre + ",\n\nTu solicitud fue registrada con el código " + code + ".\n\nTe avisaremos por este medio cuando tenga novedades. Puedes ver su avance en «Mis solicitudes».\n\n— CondoAdmin · Edificio 12 Norte" }),
+        }).catch(e => console.warn("confirmación residente", e));
         return res.status(200).json({ ok: true, code });
       }
       // 400/409 FAILED_PRECONDITION: ese código ya existe (otra persona lo tomó recién) -> probar el siguiente

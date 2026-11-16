@@ -1,6 +1,8 @@
 import nodeCrypto from "node:crypto";
 
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
+// Clave para que api/send-email acepte el envío (se deriva de la clave privada; igual en todos los api/)
+const CLAVE_INTERNA = nodeCrypto.createHash("sha256").update("send-email|" + String(process.env.FIREBASE_PRIVATE_KEY || "")).digest("hex");
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
 // La clave se reconstruye en formato estándar: tolera comillas, "\n" escritos como texto,
@@ -198,7 +200,7 @@ async function rolDe(token, email) {
 }
 async function enviarCorreo(to, subject, body) {
   try {
-    const r = await fetch(`${SITE_URL_D}/api/send-email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, subject, body }) });
+    const r = await fetch(`${SITE_URL_D}/api/send-email`, { method: "POST", headers: { "x-clave-interna": CLAVE_INTERNA, "Content-Type": "application/json" }, body: JSON.stringify({ to, subject, body }) });
     return r.ok;
   } catch { return false; }
 }

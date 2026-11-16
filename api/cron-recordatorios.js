@@ -1,3 +1,4 @@
+import nodeCrypto from "node:crypto";
 // api/cron-recordatorios.js
 // ---------------------------------------------------------------------------
 // Envía UN solo correo resumen diario por persona con todas sus órdenes
@@ -13,6 +14,8 @@
 // ---------------------------------------------------------------------------
 
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
+// Clave para que api/send-email acepte el envío (se deriva de la clave privada; igual en todos los api/)
+const CLAVE_INTERNA = nodeCrypto.createHash("sha256").update("send-email|" + String(process.env.FIREBASE_PRIVATE_KEY || "")).digest("hex");
 const CRON_SECRET = process.env.CRON_SECRET || "condoadmin2026";
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
@@ -114,7 +117,7 @@ async function sendMail(to, subject, body) {
   try {
     const res = await fetch(`${SITE_URL}/api/send-email`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "x-clave-interna": CLAVE_INTERNA, "Content-Type": "application/json" },
       body: JSON.stringify({ to, subject, body }),
     });
     const text = await res.text().catch(() => "");

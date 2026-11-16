@@ -461,6 +461,11 @@ function LoginScreen({onLogin}){
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Reportar Incidencia</div><div style={{color:"#fca5a5",fontSize:12,marginTop:2}}>Ingresa y reporta tu solicitud</div></div>
             <div style={{marginLeft:"auto",color:"#fca5a5",fontSize:20}}>→</div>
           </button>
+          <button onClick={()=>window.open("https://com12norte.github.io/administracion-edificio/copropietario.html","_blank")} style={{background:"linear-gradient(135deg,#1e3a5f,#2e5490)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(30,58,95,.4)"}}>
+            <div style={{fontSize:36}}>📇</div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Registro de Copropietarios</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Datos de tu unidad y contacto de emergencia</div></div>
+            <div style={{marginLeft:"auto",color:"#bfdbfe",fontSize:20}}>→</div>
+          </button>
         </div>
       </div>
     </div>

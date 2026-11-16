@@ -168,7 +168,13 @@ const EQUIP_TIPOS = [
   {id:"e12",nombre:"Bomba de agua",icono:"🔧",frecuencia:"Anual"},
   {id:"e13",nombre:"Motor portón",icono:"🚗",frecuencia:"Anual"},
   {id:"e14",nombre:"Citófonos",icono:"📞",frecuencia:"Anual"},
-  {id:"e15",nombre:"Alarmas",icono:"🔔",frecuencia:"Anual"}
+  {id:"e15",nombre:"Alarmas",icono:"🔔",frecuencia:"Anual"},
+  // Elementos del plan de emergencia (Ley 21.442 art. 40; extintores certificados según D.S. 36)
+  {id:"e16",nombre:"Luces de emergencia",icono:"💡",frecuencia:"Semestral"},
+  {id:"e17",nombre:"Detectores de humo",icono:"🚨",frecuencia:"Anual"},
+  {id:"e18",nombre:"Botiquín de primeros auxilios",icono:"🩹",frecuencia:"Semestral"},
+  {id:"e19",nombre:"Señalética de evacuación",icono:"🪧",frecuencia:"Anual"},
+  {id:"e20",nombre:"Gabinetes red húmeda",icono:"🧵",frecuencia:"Anual"}
 ];
 const PERMS = {
   Administrador:["create","viewAll","assign","changeStatus","closeCases","createTask","viewReports","viewEmails","manageConfig","comment","inspection","inventory","viewAs","manageWork","mantencion","mantRead"],
@@ -492,6 +498,11 @@ function LoginScreen({onLogin}){
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Registro de Copropietarios</div><div style={{color:"#bfdbfe",fontSize:12,marginTop:2}}>Datos de tu unidad y contacto de emergencia</div></div>
             <div style={{marginLeft:"auto",color:"#bfdbfe",fontSize:20}}>→</div>
           </button>
+          <button onClick={()=>window.open(SITE_URL+"/api/plan-emergencia","_blank")} style={{background:"linear-gradient(135deg,#ea580c,#c2410c)",border:"none",borderRadius:14,padding:"20px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,boxShadow:"0 4px 16px rgba(234,88,12,.4)"}}>
+            <div style={{fontSize:36}}>🆘</div>
+            <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:17}}>Plan de Emergencia</div><div style={{color:"#fed7aa",fontSize:12,marginTop:2}}>Qué hacer en sismo o incendio, vías y teléfonos</div></div>
+            <div style={{marginLeft:"auto",color:"#fed7aa",fontSize:20}}>→</div>
+          </button>
         </div>
       </div>
     </div>
@@ -688,7 +699,7 @@ export default function App(){
     {id:"tasks",label:"Órdenes de trabajo",icon:"🛠️",badge:nOrdVenc,badgeRed:true,badgeTitle:"Órdenes vencidas sin informe"},
     {id:"misolicitudes",label:"Mis Órdenes",icon:"✅"},{id:"inspections",label:"Novedades",icon:"📝"},{id:"inventory",label:"Inventario",icon:"📦"},
     {id:"mantencion",label:"Mantención",icon:"🔧",badge:nMantVenc,badgeRed:true,badgeTitle:"Mantenciones vencidas"},
-    {id:"emails",label:"Correos enviados",icon:"✉️"},{id:"reports",label:"Reportes",icon:"📊"},{id:"config",label:"Configuración",icon:"⚙️"},
+    {id:"emails",label:"Correos enviados",icon:"✉️"},{id:"emergencia",label:"Plan de emergencia",icon:"🆘"},{id:"reports",label:"Reportes",icon:"📊"},{id:"config",label:"Configuración",icon:"⚙️"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
     if(n.id==="emails"&&!can(er,"viewEmails")) return false;
@@ -702,6 +713,7 @@ export default function App(){
     if(n.id==="dashboard"&&(er==="Proveedor"||er==="Residente")) return false;
     if(n.id==="requests"&&er==="Residente") return false;
     if(n.id==="tasks"&&er==="Residente") return false;
+    if(n.id==="emergencia"&&!["Administrador","Administrador Edificio","Comite","Conserjeria"].includes(er)) return false;
     return true;
   });
 
@@ -757,6 +769,7 @@ export default function App(){
             {view==="inventory"&&<InvView inventory={inventory} setInv={setInvDB} reqs={reqs} role={er} showToast={showToast} mob={mob}/>}
             {view==="mantencion"&&<MantView mant={mant} setMant={setMantDB} role={er} showToast={showToast} mob={mob} respList={respList} towers={towers} equipos={equipos} setEquipos={setEquiposDB} certs={certs} setCerts={setCertsDB}/>}
             {view==="emails"&&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
+            {view==="emergencia"&&<EmergenciaView role={er} showToast={showToast} mob={mob} towers={towers}/>}
             {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
             {view==="config"&&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} equipos={equipos} setEquipos={setEquiposDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
           </div>
@@ -831,6 +844,214 @@ const sigPaso=(r,role,nPend)=>{
   if(can(role,"createTask")&&r.status==="Asignada") return "Siguiente paso: crea una orden de trabajo para "+r.assignedTo+".";
   return null;
 };
+
+// ── Plan de emergencia, simulacros y brigadas (Ley 21.442 art. 40) ─────────
+const PLAN_DEF={
+  puntoEncuentro:"",
+  zonasSeguras:"",
+  viasEvacuacion:"",
+  telefonos:[{nombre:"Bomberos",numero:"132"},{nombre:"Carabineros",numero:"133"},{nombre:"Ambulancia (SAMU)",numero:"131"},{nombre:"PDI",numero:"134"},{nombre:"Conserjería",numero:""},{nombre:"Administración",numero:""}],
+  sismo:"Antes: identifica las zonas seguras de tu departamento y ten a mano linterna, radio y botiquín.\nDurante: mantén la calma, aléjate de ventanas, protégete bajo un mueble firme o junto a un muro estructural. No uses ascensores ni enciendas fósforos o velas.\nDespués: revisa si hay olor a gas, corta el gas y la luz si hay daños, y si se ordena evacuar, baja por la escalera hacia el punto de encuentro.",
+  incendio:"Si ves fuego o humo, avisa a conserjería y llama a Bomberos (132).\nSal de inmediato por la escalera, nunca por el ascensor. Si hay humo, avanza agachado.\nAntes de abrir una puerta tócala con el dorso de la mano: si está caliente, no la abras.\nSi no puedes salir, cierra la puerta, tapa las rendijas con toallas mojadas y avisa por teléfono dónde estás.",
+  otros:"",
+  planoUrl:"",
+  actualizado:"",
+  revisadoPor:"",
+};
+const SIM_TIPOS=["Sismo","Incendio","Tsunami","Otro"];
+const BRIG_FUNC=["Líder de emergencia","Evacuación","Primeros auxilios","Uso de extintores","Comunicaciones","Apoyo a personas con movilidad reducida"];
+const diasDesde=f=>{const d=new Date(f);return isNaN(d)?null:Math.floor((Date.now()-d)/86400000);};
+
+function EmergenciaView({role,showToast,mob,towers}){
+  const esAdm=role==="Administrador"||role==="Administrador Edificio";
+  const [tab,setTab]=useState("plan");
+  const [plan,setPlan]=useState(null);
+  const [sims,setSims]=useState([]);
+  const [brig,setBrig]=useState([]);
+  const [cargando,setCargando]=useState(true);
+  const [edit,setEdit]=useState(false);
+  const [f,setF]=useState(PLAN_DEF);
+  const [guardando,setGuardando]=useState(false);
+  const fileRef=useRef();
+  const [nsim,setNsim]=useState(null);
+  const [nbrig,setNbrig]=useState(null);
+
+  useEffect(()=>{(async()=>{
+    try{
+      const [p,s,b]=await Promise.all(["plan","simulacros","brigadas"].map(id=>dbGetOne("emergencia",id)));
+      setPlan(p?{...PLAN_DEF,...p}:null); setSims((s&&s.data)||[]); setBrig((b&&b.data)||[]);
+    }catch(ex){ console.error(ex); showToast("No se pudo cargar el plan de emergencia","error"); }
+    setCargando(false);
+  })();},[]);
+
+  const guardarDoc=async(id,data)=>{ await setDoc(doc(fbDb,"emergencia",id),JSON.parse(JSON.stringify(data))); };
+  const guardarPlan=async()=>{
+    setGuardando(true);
+    try{
+      const p={...f,telefonos:(f.telefonos||[]).filter(t=>t.nombre.trim()||t.numero.trim()),actualizado:new Date().toISOString()};
+      if(JSON.stringify(p).length>950000){showToast("El plano es muy pesado. Sube una imagen más pequeña.","error");setGuardando(false);return;}
+      await guardarDoc("plan",p); setPlan(p); setEdit(false); showToast("Plan de emergencia guardado. Ya lo ven los residentes.");
+    }catch(ex){ console.error(ex); showToast("No se pudo guardar: "+((ex&&ex.message)||ex),"error"); }
+    setGuardando(false);
+  };
+  const subirPlano=async ev=>{
+    const fi=ev.target.files&&ev.target.files[0]; ev.target.value="";
+    if(!fi) return;
+    if(!fi.type.startsWith("image/")){showToast("Sube el plano como imagen (JPG o PNG)","error");return;}
+    const url=await achicarFoto(fi,2000,0.72);
+    if(!url){showToast("No se pudo leer la imagen","error");return;}
+    setF(p=>({...p,planoUrl:url}));
+  };
+  const guardarSims=async list=>{ try{ await guardarDoc("simulacros",{data:list}); setSims(list); return true; }catch(ex){ showToast("No se pudo guardar","error"); return false; } };
+  const guardarBrig=async list=>{ try{ await guardarDoc("brigadas",{data:list}); setBrig(list); return true; }catch(ex){ showToast("No se pudo guardar","error"); return false; } };
+
+  if(cargando) return <div style={card}><Empty msg="Cargando..."/></div>;
+
+  const dPlan=plan?diasDesde(plan.actualizado):null;
+  const ultSim=[...sims].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
+  const dSim=ultSim?diasDesde(ultSim.fecha):null;
+  const linkPublico=SITE_URL+"/api/plan-emergencia";
+  const txtArea=(k,h,ph)=><textarea style={{...inp,height:h,resize:"vertical",fontFamily:"inherit"}} value={f[k]||""} onChange={ev=>{const v=ev.target.value;setF(p=>({...p,[k]:v}));}} placeholder={ph}/>;
+  const bloque=(t,v)=>v?<div style={{marginBottom:12}}><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>{t}</div><div style={{fontSize:13,color:"#334155",whiteSpace:"pre-wrap",lineHeight:1.55}}>{v}</div></div>:null;
+
+  return(
+    <div>
+      {/* Estado de cumplimiento */}
+      <Grid cols={mob?1:3} mob={mob}>
+        <Kpi value={!plan?"Sin plan":dPlan===null?"—":dPlan<=365?"Al día":"Vencido"} label={"Plan actualizado"+(plan&&plan.actualizado?" el "+fmtD(plan.actualizado):"")+" · anual"} color={!plan||dPlan>365?"#ef4444":dPlan>300?"#f59e0b":"#10b981"} mob={mob}/>
+        <Kpi value={!ultSim?"Ninguno":dSim<=365?"Al día":"Vencido"} label={"Último simulacro"+(ultSim?": "+fmtD(ultSim.fecha):"")+" · anual"} color={!ultSim||dSim>365?"#ef4444":dSim>300?"#f59e0b":"#10b981"} mob={mob}/>
+        <Kpi value={brig.length} label="Brigadistas registrados" color={brig.length?"#3b82f6":"#f59e0b"} mob={mob}/>
+      </Grid>
+      <div style={{...alrt("info"),fontSize:12}}>La Ley 21.442 (art. 40) exige actualizar el plan de evacuación al menos una vez al año, con simulacros, y entregarlo a Bomberos y Carabineros. La actualización debe firmarla un ingeniero en prevención de riesgos, el presidente del comité y el administrador.</div>
+
+      <Tabs tabs={[{id:"plan",label:"Plan público"},{id:"sim",label:"Simulacros ("+sims.length+")"},{id:"brig",label:"Brigadas ("+brig.length+")"}]} active={tab} onChange={setTab}/>
+
+      {tab==="plan"&&!edit&&(
+        <div style={card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap",marginBottom:10}}>
+            <div style={{fontSize:12,color:"#64748b"}}>Esto es lo que ven los residentes en «Plan de emergencia». No incluye datos personales.<br/><a href={linkPublico} target="_blank" rel="noreferrer" style={{color:"#3b82f6"}}>Ver como residente ↗</a></div>
+            {esAdm&&<button style={BP(true)} onClick={()=>{setF(plan||PLAN_DEF);setEdit(true);}}>{plan?"✏️ Editar plan":"+ Crear plan"}</button>}
+          </div>
+          {!plan?<Empty msg={esAdm?"Todavía no hay plan publicado. Créalo con el botón de arriba.":"La administración aún no publica el plan."}/>:(
+            <div>
+              {bloque("📍 Punto de encuentro",plan.puntoEncuentro)}
+              {bloque("🛡️ Zonas seguras",plan.zonasSeguras)}
+              {bloque("🚪 Vías de evacuación",plan.viasEvacuacion)}
+              {(plan.telefonos||[]).length>0&&<div style={{marginBottom:12}}><div style={{fontWeight:700,fontSize:13,marginBottom:4}}>📞 Teléfonos de emergencia</div>{plan.telefonos.map((t,i)=><IR key={i} l={t.nombre} v={t.numero||"—"}/>)}</div>}
+              {bloque("🌎 En caso de sismo",plan.sismo)}
+              {bloque("🔥 En caso de incendio",plan.incendio)}
+              {bloque("ℹ️ Otras indicaciones",plan.otros)}
+              {plan.planoUrl&&<div><div style={{fontWeight:700,fontSize:13,marginBottom:6}}>🗺️ Plano de evacuación</div><a href={plan.planoUrl} target="_blank" rel="noreferrer"><img src={plan.planoUrl} alt="Plano de evacuación" style={{maxWidth:"100%",borderRadius:8,border:"1px solid #e2e8f0"}}/></a></div>}
+              {plan.revisadoPor&&<div style={{fontSize:11,color:"#94a3b8",marginTop:10}}>Revisado por: {plan.revisadoPor}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab==="plan"&&edit&&(
+        <div style={card}>
+          <div style={{...alrt("warning"),fontSize:12}}>Este contenido es <b>público</b>. No escribas nombres, departamentos ni datos de salud de residentes.</div>
+          <div style={fg}><label style={lbl}>📍 Punto de encuentro</label>{txtArea("puntoEncuentro",50,"Ej: Plazoleta frente al acceso principal de 12 Norte")}</div>
+          <div style={fg}><label style={lbl}>🛡️ Zonas seguras</label>{txtArea("zonasSeguras",60,"Ej: Junto a muros estructurales, bajo marcos de puertas…")}</div>
+          <div style={fg}><label style={lbl}>🚪 Vías de evacuación</label>{txtArea("viasEvacuacion",70,"Ej: Torre 1080: escalera norte hacia el primer piso y salida por calle 12 Norte…")}</div>
+          <div style={fg}><label style={lbl}>📞 Teléfonos de emergencia</label>
+            {(f.telefonos||[]).map((t,i)=>(
+              <div key={i} style={{display:"flex",gap:6,marginBottom:6}}>
+                <input style={{...inp,flex:2}} value={t.nombre} placeholder="Nombre" onChange={ev=>{const v=ev.target.value;setF(p=>({...p,telefonos:p.telefonos.map((x,j)=>j===i?{...x,nombre:v}:x)}));}}/>
+                <input style={{...inp,flex:1}} value={t.numero} placeholder="Número" onChange={ev=>{const v=ev.target.value;setF(p=>({...p,telefonos:p.telefonos.map((x,j)=>j===i?{...x,numero:v}:x)}));}}/>
+                <button style={BG(true)} onClick={()=>setF(p=>({...p,telefonos:p.telefonos.filter((_,j)=>j!==i)}))}>✕</button>
+              </div>
+            ))}
+            <button style={BS(true)} onClick={()=>setF(p=>({...p,telefonos:[...(p.telefonos||[]),{nombre:"",numero:""}]}))}>+ Teléfono</button>
+          </div>
+          <div style={fg}><label style={lbl}>🌎 En caso de sismo</label>{txtArea("sismo",110)}</div>
+          <div style={fg}><label style={lbl}>🔥 En caso de incendio</label>{txtArea("incendio",110)}</div>
+          <div style={fg}><label style={lbl}>ℹ️ Otras indicaciones (tsunami, corte de luz, fuga de gas…)</label>{txtArea("otros",70)}</div>
+          <div style={fg}><label style={lbl}>🗺️ Plano de evacuación (imagen)</label>
+            <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={subirPlano}/>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <button style={BS(true)} onClick={()=>fileRef.current.click()}>{f.planoUrl?"Cambiar plano":"Subir plano"}</button>
+              {f.planoUrl&&<button style={BG(true)} onClick={()=>setF(p=>({...p,planoUrl:""}))}>Quitar</button>}
+              <span style={{fontSize:11,color:"#94a3b8"}}>Si el plano está en PDF, guárdalo como imagen (captura) antes de subirlo.</span>
+            </div>
+            {f.planoUrl&&<img src={f.planoUrl} alt="Plano" style={{maxWidth:"100%",maxHeight:260,marginTop:8,borderRadius:8,border:"1px solid #e2e8f0"}}/>}
+          </div>
+          <div style={fg}><label style={lbl}>Revisado por (prevencionista / comité)</label><input style={inp} value={f.revisadoPor||""} onChange={ev=>{const v=ev.target.value;setF(p=>({...p,revisadoPor:v}));}} placeholder="Ej: Ing. en prevención Juan Pérez · Comité 2026"/></div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button style={BS(true)} onClick={()=>setEdit(false)} disabled={guardando}>Cancelar</button>
+            <button style={{...BP(true),opacity:guardando?.7:1}} onClick={guardarPlan} disabled={guardando}>{guardando?"Guardando...":"Publicar plan"}</button>
+          </div>
+        </div>
+      )}
+
+      {tab==="sim"&&(
+        <div>
+          {esAdm&&!nsim&&<div style={{marginBottom:10}}><button style={BP(true)} onClick={()=>setNsim({id:uid(),fecha:new Date().toISOString().slice(0,10),tipo:"Sismo",torres:"Todas",participantes:"",tiempoMin:"",observaciones:"",informadoSEC:false})}>+ Registrar simulacro</button></div>}
+          {nsim&&(
+            <div style={card}>
+              <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
+                <div><label style={lbl}>Fecha</label><input type="date" style={inp} value={nsim.fecha} onChange={ev=>setNsim(p=>({...p,fecha:ev.target.value}))}/></div>
+                <div><label style={lbl}>Tipo</label><select style={sel} value={nsim.tipo} onChange={ev=>setNsim(p=>({...p,tipo:ev.target.value}))}>{SIM_TIPOS.map(t=><option key={t}>{t}</option>)}</select></div>
+                <div><label style={lbl}>Torres</label><select style={sel} value={nsim.torres} onChange={ev=>setNsim(p=>({...p,torres:ev.target.value}))}><option>Todas</option>{(towers||[]).filter(t=>t.active&&t.name!=="Comun").map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+                <div><label style={lbl}>Participantes (aprox.)</label><input type="number" min="0" style={inp} value={nsim.participantes} onChange={ev=>setNsim(p=>({...p,participantes:ev.target.value}))}/></div>
+                <div><label style={lbl}>Tiempo de evacuación (minutos)</label><input type="number" min="0" step="0.5" style={inp} value={nsim.tiempoMin} onChange={ev=>setNsim(p=>({...p,tiempoMin:ev.target.value}))}/></div>
+                <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,marginTop:18}}><input type="checkbox" checked={!!nsim.informadoSEC} onChange={ev=>setNsim(p=>({...p,informadoSEC:ev.target.checked}))}/>Informado a la Secretaría Ejecutiva de Condominios</label>
+                <div style={{gridColumn:"1/-1"}}><label style={lbl}>Observaciones y mejoras</label><textarea style={{...inp,height:70,fontFamily:"inherit"}} value={nsim.observaciones} onChange={ev=>setNsim(p=>({...p,observaciones:ev.target.value}))} placeholder="Qué funcionó, qué falló, qué hay que corregir…"/></div>
+              </div>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}>
+                <button style={BS(true)} onClick={()=>setNsim(null)}>Cancelar</button>
+                <button style={BP(true)} onClick={async()=>{if(!nsim.fecha){showToast("Indica la fecha","error");return;}const list=[...sims.filter(x=>x.id!==nsim.id),nsim];if(await guardarSims(list)){setNsim(null);showToast("Simulacro registrado");}}}>Guardar</button>
+              </div>
+            </div>
+          )}
+          {sims.length===0?<div style={card}><Empty msg="No hay simulacros registrados. La ley exige al menos uno al año."/></div>:[...sims].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).map(x=>(
+            <div key={x.id} style={{...card,padding:12,marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                <div><div style={{fontWeight:700,fontSize:13}}>{x.tipo} · {fmtD(x.fecha)}</div><div style={{fontSize:12,color:"#64748b"}}>Torres: {x.torres||"Todas"}{x.participantes?" · "+x.participantes+" participantes":""}{x.tiempoMin?" · evacuación en "+x.tiempoMin+" min":""}</div>{x.observaciones&&<div style={{fontSize:12,color:"#334155",marginTop:4,whiteSpace:"pre-wrap"}}>{x.observaciones}</div>}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                  <span style={x.informadoSEC?bdg("#16a34a","#f0fdf4"):bdg("#d97706","#fffbeb")}>{x.informadoSEC?"✓ Informado":"Falta informar"}</span>
+                  {esAdm&&<div style={{display:"flex",gap:4}}><button style={BS(true)} onClick={()=>setNsim(x)}>Editar</button><button style={BD(true)} onClick={async()=>{if(window.confirm("¿Eliminar este simulacro?"))await guardarSims(sims.filter(y=>y.id!==x.id));}}>🗑</button></div>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==="brig"&&(
+        <div>
+          <div style={{...alrt("warning"),fontSize:12}}>Datos personales: solo los ve el personal del edificio. No se muestran a los residentes.</div>
+          {esAdm&&!nbrig&&<div style={{marginBottom:10}}><button style={BP(true)} onClick={()=>setNbrig({id:uid(),nombre:"",torre:"",funcion:BRIG_FUNC[1],telefono:""})}>+ Agregar brigadista</button></div>}
+          {nbrig&&(
+            <div style={card}>
+              <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10}}>
+                <div><label style={lbl}>Nombre</label><input style={inp} value={nbrig.nombre} onChange={ev=>setNbrig(p=>({...p,nombre:ev.target.value}))}/></div>
+                <div><label style={lbl}>Torre</label><select style={sel} value={nbrig.torre} onChange={ev=>setNbrig(p=>({...p,torre:ev.target.value}))}><option value="">Todas / general</option>{(towers||[]).filter(t=>t.active&&t.name!=="Comun").map(t=><option key={t.id} value={t.name}>{t.label}</option>)}</select></div>
+                <div><label style={lbl}>Función</label><select style={sel} value={nbrig.funcion} onChange={ev=>setNbrig(p=>({...p,funcion:ev.target.value}))}>{BRIG_FUNC.map(t=><option key={t}>{t}</option>)}</select></div>
+                <div><label style={lbl}>Teléfono</label><input type="tel" style={inp} value={nbrig.telefono} onChange={ev=>setNbrig(p=>({...p,telefono:ev.target.value}))}/></div>
+              </div>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}>
+                <button style={BS(true)} onClick={()=>setNbrig(null)}>Cancelar</button>
+                <button style={BP(true)} onClick={async()=>{if(!nbrig.nombre.trim()){showToast("Escribe el nombre","error");return;}const list=[...brig.filter(x=>x.id!==nbrig.id),{...nbrig,nombre:nbrig.nombre.trim()}];if(await guardarBrig(list)){setNbrig(null);showToast("Brigadista guardado");}}}>Guardar</button>
+              </div>
+            </div>
+          )}
+          {brig.length===0?<div style={card}><Empty msg="No hay brigadistas registrados."/></div>:(
+            <div style={card}>{[...brig].sort((a,b)=>(a.torre||"").localeCompare(b.torre||"")||a.funcion.localeCompare(b.funcion)).map(x=>(
+              <div key={x.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"8px 0",borderBottom:"1px solid #f1f5f9",flexWrap:"wrap"}}>
+                <div><div style={{fontWeight:600,fontSize:13}}>{x.nombre}</div><div style={{fontSize:11,color:"#64748b"}}>{x.funcion}{x.torre?" · Torre "+x.torre:" · General"}</div></div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  {x.telefono&&<a href={"tel:"+x.telefono} style={{fontSize:12,color:"#3b82f6",textDecoration:"none"}}>📞 {x.telefono}</a>}
+                  {esAdm&&<><button style={BS(true)} onClick={()=>setNbrig(x)}>Editar</button><button style={BD(true)} onClick={async()=>{if(window.confirm("¿Quitar a "+x.nombre+"?"))await guardarBrig(brig.filter(y=>y.id!==x.id));}}>🗑</button></>}
+                </div>
+              </div>
+            ))}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
 function Dashboard({reqs,tasks,mant,role,onOpen,onNew,setReqs,showToast,mob,deleteTask,deleteReq,goList,addEmail,session}){

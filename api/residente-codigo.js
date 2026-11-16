@@ -68,7 +68,9 @@ async function fsGetDoc(token, path) {
 // Acceso del residente a "Mis solicitudes" con un código de 6 dígitos por correo.
 //   POST {accion:"enviar", email}            -> envía el código (vale 10 minutos)
 //   POST {accion:"verificar", email, codigo} -> {ok:true, sesion} si el código es correcto
-//   POST {accion:"listar", email, sesion}     -> {ok:true, solicitudes, vencidas} del residente
+//   POST {accion:"listar", email, sesion}     -> {ok:true, solicitudes, tareas} del residente
+//   POST {accion:"listar", idToken}           -> lo mismo, para el residente que entró con su cuenta
+//        (el token de Firebase se verifica con las claves públicas de Google)
 // Solo se envía código a correos que tengan al menos una solicitud ingresada,
 // para que nadie pueda usar esto para mandar correos a terceros.
 // Usa las mismas variables de Vercel que el cron: FIREBASE_PROJECT_ID,
@@ -94,6 +96,28 @@ const sesionValida = (email, sesion) => {
   const a = Buffer.from(firmaSesion(email, hasta)), b = Buffer.from(f);
   return a.length === b.length && nodeCrypto.timingSafeEqual(a, b);
 };
+
+// Verifica el token de inicio de sesión de Firebase y devuelve el correo (o null)
+let _certs = null, _certsHasta = 0;
+async function verificarIdToken(idToken) {
+  try {
+    const [h, p, sig] = String(idToken || "").split(".");
+    if (!h || !p || !sig) return null;
+    const head = JSON.parse(Buffer.from(h, "base64url").toString());
+    const pay = JSON.parse(Buffer.from(p, "base64url").toString());
+    const ahora = Math.floor(Date.now() / 1000);
+    if (head.alg !== "RS256" || pay.aud !== PROJECT_ID || pay.iss !== "https://securetoken.google.com/" + PROJECT_ID) return null;
+    if (!(pay.exp > ahora) || !(pay.iat <= ahora + 300) || !pay.sub || !pay.email) return null;
+    if (!_certs || Date.now() > _certsHasta) {
+      const r = await fetch("https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com");
+      _certs = await r.json(); _certsHasta = Date.now() + 3600000;
+    }
+    const cert = _certs[head.kid];
+    if (!cert) return null;
+    const ok = nodeCrypto.createVerify("RSA-SHA256").update(h + "." + p).verify(cert, Buffer.from(sig, "base64url"));
+    return ok ? String(pay.email).trim().toLowerCase() : null;
+  } catch { return null; }
+}
 
 async function listarTodo(token, coleccion) {
   const out = []; let pageToken = "";
@@ -144,7 +168,14 @@ export default async function handler(req, res) {
     let body = req.body || {};
     if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
     const accion = String(body.accion || "");
-    const email = String(body.email || "").trim().toLowerCase();
+    let email = String(body.email || "").trim().toLowerCase();
+    let porCuenta = false;
+    if (accion === "listar" && body.idToken) {
+      if (!PROJECT_ID) throw new Error("Faltan variables FIREBASE_*");
+      email = await verificarIdToken(body.idToken);
+      if (!email) return res.status(401).json({ ok: false, error: "Tu sesión venció. Vuelve a iniciar sesión." });
+      porCuenta = true;
+    }
     if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 120) return res.status(400).json({ ok: false, error: "Escribe un correo válido." });
     if (!PROJECT_ID || !CLIENT_EMAIL || !PRIVATE_KEY) throw new Error("Faltan variables FIREBASE_*");
 
@@ -194,7 +225,7 @@ export default async function handler(req, res) {
     }
 
     if (accion === "listar") {
-      if (!sesionValida(email, body.sesion)) return res.status(401).json({ ok: false, error: "Tu acceso venció. Confirma tu correo de nuevo." });
+      if (!porCuenta && !sesionValida(email, body.sesion)) return res.status(401).json({ ok: false, error: "Tu acceso venció. Confirma tu correo de nuevo." });
       const sols = (await listarTodo(token, "solicitudes")).filter(s => String(s.requesterEmail || "").trim().toLowerCase() === email);
       const ids = new Set(sols.map(s => s.id || s._docId));
       const hoy = new Date(); hoy.setHours(0, 0, 0, 0);

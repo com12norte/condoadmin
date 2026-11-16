@@ -159,9 +159,10 @@ export default async function handler(req, res) {
     }
 
     // Cargar datos
-    const [tasks, usuarios] = await Promise.all([
+    const [tasks, usuarios, sols] = await Promise.all([
       fsGet(token, "tareas"),
       fsGet(token, "usuarios"),
+      fsGet(token, "solicitudes"),
     ]);
 
     // Documentos antiguos guardados como {id, data:{...}}: lo que hay en data es lo vigente
@@ -181,9 +182,18 @@ export default async function handler(req, res) {
       return Math.ceil((due - hoy) / 86400000) <= 3;
     });
 
-    if (!pendientes.length) {
+    // Ley 21.442 art. 18: las solicitudes deben responderse en máximo 20 días corridos.
+    // "Respondida" = la administración ya la asignó, la puso en proceso, la cerró o la rechazó.
+    const SIN_RESPUESTA = ["Ingresada", "En revision"];
+    const legales = sols.map(aplanar).filter(r => r && SIN_RESPUESTA.includes(r.status) && r.createdAt).map(r => {
+      const vence = new Date(new Date(r.createdAt).getTime() + 20 * 86400000);
+      const dias = Math.ceil((vence - Date.now()) / 86400000);
+      return { ...r, vence, dias };
+    }).filter(r => r.dias <= 5).sort((a, b) => a.dias - b.dias);
+
+    if (!pendientes.length && !legales.length) {
       await fsSet(token, "config", "daily_reminder_last_sent", { date: chileDateKey, sentAt: now.toISOString() });
-      return res.status(200).json({ ok: true, mensaje: "Sin órdenes pendientes hoy", chileDateKey });
+      return res.status(200).json({ ok: true, mensaje: "Sin pendientes hoy", chileDateKey });
     }
 
     // Índice email por nombre de usuario
@@ -192,11 +202,20 @@ export default async function handler(req, res) {
 
     // Agrupar por destinatario
     const porEmail = {};
+    const destino = (email, nombre) => {
+      const k = String(email).trim().toLowerCase();
+      if (!porEmail[k]) porEmail[k] = { nombre, tareas: [], legales: [] };
+      return porEmail[k];
+    };
     const addItem = (email, nombre, tarea) => {
       if (!email) return;
-      if (!porEmail[email]) porEmail[email] = { nombre, tareas: [] };
-      porEmail[email].tareas.push(tarea);
+      destino(email, nombre).tareas.push(tarea);
     };
+    // Las solicitudes con plazo legal próximo o vencido van a los administradores
+    if (legales.length) {
+      usuarios.filter(u => u.active !== false && ["Administrador", "Administrador Edificio"].includes(u.rol) && String(u.email || "").includes("@"))
+        .forEach(u => { destino(u.email, u.nombre || "").legales = legales; });
+    }
 
     for (const t of pendientes) {
       const due = new Date(t.dueDate); due.setHours(0, 0, 0, 0);
@@ -213,13 +232,26 @@ export default async function handler(req, res) {
 
     // Un correo por persona
     const resultados = [];
-    for (const [email, { nombre, tareas }] of Object.entries(porEmail)) {
+    for (const [email, { nombre, tareas, legales: leg }] of Object.entries(porEmail)) {
       const venc = tareas.filter(t => t.esV).length;
-      const asunto = venc > 0
+      const legVenc = leg.filter(r => r.dias < 0).length;
+      const asunto = legVenc > 0
+        ? `[CondoAdmin] ⚠ ${legVenc} solicitud${legVenc > 1 ? "es" : ""} con plazo legal de respuesta vencido`
+        : venc > 0
         ? `[CondoAdmin] ⚠ Tienes ${venc} orden${venc > 1 ? "es" : ""} vencida${venc > 1 ? "s" : ""} sin informe`
+        : leg.length && !tareas.length
+        ? `[CondoAdmin] ${leg.length} solicitud${leg.length > 1 ? "es" : ""} por responder (plazo legal)`
         : `[CondoAdmin] Recordatorio: ${tareas.length} orden${tareas.length > 1 ? "es" : ""} pendiente${tareas.length > 1 ? "s" : ""} de informe`;
-      const filas = tareas.map(t => `  • [${t.diasTxt}] ${t.title} (vence: ${fmtD(t.dueDate)})`).join("\n");
-      const cuerpo = `Hola ${nombre},\n\nTienes las siguientes órdenes pendientes de informe de cierre:\n\n${filas}\n\nIngresa al sistema y completa el informe de cada orden.\n\n— CondoAdmin`;
+      let cuerpo = `Hola ${nombre},\n\n`;
+      if (leg.length) {
+        const fl = leg.map(r => `  • [${r.dias < 0 ? "⚠ VENCIDO hace " + Math.abs(r.dias) + " día(s)" : r.dias === 0 ? "🔴 Vence HOY" : "🟡 Quedan " + r.dias + " día(s)"}] ${r.code || r.id} · ${r.category || ""} · ${r.requesterName || ""} (ingresó ${fmtD(r.createdAt)})`).join("\n");
+        cuerpo += `Solicitudes que deben responderse dentro de 20 días corridos (Ley 21.442, art. 18):\n\n${fl}\n\nPara darlas por respondidas, asígnalas, ponlas en proceso, ciérralas o recházalas con el motivo.\n\n`;
+      }
+      if (tareas.length) {
+        const filas = tareas.map(t => `  • [${t.diasTxt}] ${t.title} (vence: ${fmtD(t.dueDate)})`).join("\n");
+        cuerpo += `Órdenes pendientes de informe de cierre:\n\n${filas}\n\nIngresa al sistema y completa el informe de cada orden.\n\n`;
+      }
+      cuerpo += `— CondoAdmin`;
       resultados.push(await sendMail(email, asunto, cuerpo));
     }
 

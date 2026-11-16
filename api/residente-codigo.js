@@ -258,6 +258,10 @@ export default async function handler(req, res) {
     }
 
     // Registro de copropietarios: ¿este correo ya tiene una unidad registrada? (devuelve su enlace personal)
+    // Consulta del código de Google del registro: ¿esta sesión de correo es válida? (no entrega datos)
+    if (accion === "sesion_ok") {
+      return res.status(200).json({ ok: sesionValida(email, body.sesion) });
+    }
     if (accion === "registro") {
       if (!sesionValida(email, body.sesion)) return res.status(401).json({ ok: false, error: "Tu acceso venció. Pide un código nuevo." });
       return res.status(200).json({ ok: true, registros: await registrosDe(token, email) });

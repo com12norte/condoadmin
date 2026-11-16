@@ -86,12 +86,16 @@ const uploadImg = async (file, path) => {
 };
 
 const SITE_URL = "https://condoadmin-rouge.vercel.app";
+// Solo el personal con sesión puede enviar correos desde la app (api/send-email exige su token).
+// Los avisos a residentes sin sesión los envía el servidor.
 const sendMail = async (to, subject, body) => {
   if (!to || !to.includes("@")) return;
   try {
+    const t = fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null;
+    if (!t) return;
     await fetch(SITE_URL + "/api/send-email", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + t },
       body: JSON.stringify({ to, subject, body }),
     });
   } catch (ex) {
@@ -2398,7 +2402,7 @@ function NewReqModal({role,reqs,setReqs,addEmail,showToast,onClose,onOpen,cats,t
       } else setReqs(p=>[nr,...p]);
       if(esResidente) setResLS({requesterName:datos.requesterName,requesterEmail:datos.requesterEmail,requesterPhone:datos.requesterPhone,tower:f.tower,unit:isAreaComun?(getResLS().unit||""):datos.unit});
       // Mail al solicitante
-      if(datos.requesterEmail.includes("@")){
+      if(datos.requesterEmail.includes("@")&&!invitado){
         addEmail({requestId:code,date:now,to:datos.requesterEmail,subject:"[CondoAdmin] Solicitud "+code+" recibida",type:"Creacion",status:"Enviado",body:"Su solicitud fue registrada. Código: "+code+".\n\nLe contactaremos a la brevedad."});
       }
       // Aviso a administradores: lo envía el servidor (no depende de que esta persona pueda leer la lista de usuarios)

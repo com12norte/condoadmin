@@ -686,6 +686,26 @@ export default function App(){
     sendMail(log.to, log.subject, log.body).catch(ex=>console.warn("addEmail sendMail",ex));
   };
 
+  // Cuando el ejecutor completa todas las órdenes de una solicitud «En proceso», la solicitud pasa sola a
+  // «Cierre» (Resuelta = lista para revisar) y se avisa a la administración. Cerrarla sigue siendo de la administración.
+  const autoCierreRef=useRef(new Set());
+  useEffect(()=>{
+    if(!session||usaServidor(session)||!reqs.length) return;
+    reqs.forEach(r=>{
+      if(r.status!=="En proceso"||autoCierreRef.current.has(r.id)) return;
+      const ts=tasks.filter(t=>t.requestId===r.id&&t.status!=="Cancelada");
+      if(!ts.length||!ts.every(t=>t.status==="Completada")) return;
+      autoCierreRef.current.add(r.id);
+      const now=new Date().toISOString();
+      const upd={...r,status:"Resuelta",history:[...(r.history||[]),{date:now,user:"Sistema",action:"Órdenes de trabajo completadas",from:"En proceso",to:"Resuelta",note:"Lista para revisión y cierre"}]};
+      setReqsDB(p=>p.map(x=>x.id===r.id?upd:x));
+      setSelReq(prev=>prev&&prev.id===r.id?upd:prev);
+      usuarios.filter(u=>u.active&&(u.rol==="Administrador"||u.rol==="Administrador Edificio")&&u.email&&u.email.includes("@")).forEach(u=>
+        addEmail({requestId:r.id,date:now,to:u.email,subject:"[CondoAdmin] "+r.code+" lista para cerrar",type:"Aviso interno",status:"Enviado",
+          body:"Hola "+u.nombre+",\n\nSe completaron todas las órdenes de trabajo de la solicitud "+r.code+(r.category?" ("+r.category+")":"")+".\nRevisa el informe y las fotos y ciérrala en CondoAdmin:\n"+SITE_URL+"\n\n— CondoAdmin"}));
+    });
+  },[tasks,reqs]);
+
   const openReq=r=>{setSelReq(r);setView("detail");setNavOpen(false);};
 
   const respList=usuarios.length?[...usuarios.filter(u=>u.active&&u.rol!=="Residente").map(u=>u.nombre),"Sin asignar"]:["Sin asignar"];
@@ -1650,8 +1670,9 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const usuario=session?.nombre&&session.nombre!==role?session.nombre:role;
   // Proveedores = usuarios activos con rol Proveedor; los administradores también pueden ser proveedores
   const provs=[...new Map((usuarios||[]).filter(u=>u&&u.active!==false&&u.nombre&&["Proveedor","Administrador","Administrador Edificio"].includes(u.rol)).map(u=>[u.nombre,u])).values()].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es"));
-  const closeFinal=(nota)=>{
-    const c=cerrarReq(r,nota,usuario);
+  const closeFinal=(nota,motivoSinOrden)=>{
+    let c=cerrarReq(r,nota,usuario);
+    if(motivoSinOrden){ c={...c,cierreSinOrden:motivoSinOrden}; c.history=c.history.map((h,i)=>i===c.history.length-1?{...h,note:"Sin orden de trabajo · "+motivoSinOrden+" · "+nota}:h); }
     setReqs(p=>p.map(x=>x.id===r.id?c:x)); setSelReq(c); setNs("Cerrada");
     if(tieneCorreo(c)) addEmail(mailCierre(c,nota));
     showToast("Solicitud cerrada"+(tieneCorreo(c)?" · se avisó al residente":"")); setShowCl(false); return true;
@@ -1841,7 +1862,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
             {etapa==="Cerrada"&&(
               <div style={{marginBottom:10}}>
                 {myTasks.length===0
-                  ?<div style={{...alrt("warning"),fontSize:12}}>Esta solicitud no tiene órdenes de trabajo. Puedes cerrarla igual con una nota.</div>
+                  ?<div style={{...alrt("warning"),fontSize:12}}>Esta solicitud no tiene órdenes de trabajo. Puedes cerrarla igual: te pediremos el motivo (consulta respondida, duplicada, corresponde a un tercero…) y una nota.</div>
                   :myTasks.map(t=>(
                     <div key={t.id} style={{marginBottom:10}}>
                       <div style={{fontWeight:600,fontSize:13,marginBottom:6}}>{t.title} <span style={{fontWeight:400,fontSize:11,color:(t.informe||"").trim()?"#16a34a":"#d97706"}}>· {(t.informe||"").trim()?"✓ con informe":"falta informe"}</span></div>
@@ -2009,7 +2030,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       )}
       {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
-      {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
+      {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} sinOrden={myTasks.filter(t=>t.status!=="Cancelada").length===0} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
     </div>
   );
 }
@@ -2259,17 +2280,24 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
 }
 
 // ── CloseModal ─────────────────────────────────────────────────────────────
-function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast}){
+const MOTIVOS_SIN_ORDEN=["Consulta respondida","Duplicada","Corresponde a un tercero (Esval, Chilquinta, municipalidad…)","Resuelta en el momento (sin orden)","Otro"];
+function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast,sinOrden}){
+  const [motSO,setMotSO]=useState(""); const [errSO,setErrSO]=useState(false);
   const closure=atts.filter(a=>a.requestId===req.id&&a.type==="cierre");
   const [showEv,setShowEv]=useState(false);
   const [nota,setNota]=useState("");
   const [err,setErr]=useState(false);
-  const confirmar=()=>{ if(!nota.trim()){setErr(true);return;} onConfirm(nota.trim()); };
+  const confirmar=()=>{ let bad=false; if(sinOrden&&!motSO){setErrSO(true);bad=true;} if(!nota.trim()){setErr(true);bad=true;} if(bad) return; onConfirm(nota.trim(),sinOrden?motSO:null); };
   return(
     <div style={MSt}>
       <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:460,padding:"20px",marginTop:16}}>
         <h3 style={{margin:"0 0 4px",fontSize:15}}>Cerrar solicitud {req.code}</h3>
         <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>{tieneCorreo(req)?"Se avisará a "+req.requesterEmail+" y se le preguntará si quedó resuelto.":"Esta solicitud no tiene correo de contacto; no se enviará aviso."}</div>
+        {sinOrden&&<div style={{marginBottom:10}}>
+          <label style={lbl}>Se cierra sin orden de trabajo. Motivo *</label>
+          <select style={{...sel,width:"100%",...(errSO?{borderColor:"#ef4444",background:"#fef2f2"}:{})}} value={motSO} onChange={ev=>{setMotSO(ev.target.value);setErrSO(false);}}><option value="">Seleccione…</option>{MOTIVOS_SIN_ORDEN.map(m=><option key={m}>{m}</option>)}</select>
+          {errSO&&<div style={{color:"#ef4444",fontSize:11,marginTop:2}}>Elige el motivo. Queda en el historial y en los reportes.</div>}
+        </div>}
         <label style={lbl}>¿Qué se hizo? *</label>
         <textarea autoFocus style={{...inp,height:80,resize:"vertical",fontFamily:"inherit",...(err?{borderColor:"#ef4444",background:"#fef2f2"}:{})}} value={nota} onChange={ev=>{setNota(ev.target.value);setErr(false);}} placeholder="Ej: Se cambió el flexible del lavamanos y se probó sin filtraciones."/>
         {err&&<div style={{color:"#ef4444",fontSize:11,marginTop:2}}>Escribe una nota de cierre. El residente la verá en el correo.</div>}

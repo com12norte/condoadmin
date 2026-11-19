@@ -1767,7 +1767,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
         const ayuda={
           Ingresada:"Revisa lo que reportó el residente y confirma la prioridad. Si no corresponde, recházala indicando el motivo.",
           Asignada:"Elige quién se hace cargo y, si se necesita, el proveedor que hará el trabajo.",
-          "En proceso":"Crea la orden de trabajo con fecha límite y sube fotos del avance.",
+          "En proceso":"Es cuando el trabajo se está haciendo. Crea la orden de trabajo para quien lo ejecuta (ya viene propuesta con los datos de la solicitud y la fecha límite según la prioridad) y sube fotos del avance.",
           Cerrada:"Revisa el informe de la orden y las fotos de cierre, y cierra con una nota. El residente recibe un correo y se le pregunta si quedó resuelto.",
         }[etapa];
         const sinResp=!r.assignedTo||r.assignedTo==="Sin asignar";
@@ -2018,7 +2018,21 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
-  const initF=()=>({title:"",desc:"",responsible:respAuto,ejecutor:todos[0]||"",dueDate:"",priority:"Media"});
+  // Propuesta desde la solicitud: título, descripción, prioridad y fecha límite según el plazo de esa prioridad (editables)
+  const propuesta=()=>{
+    if(!req) return {title:"",desc:"",dueDate:"",priority:"Media"};
+    const tipo=(req.subcategory||req.category||"Trabajo").trim();
+    const lugar=req.tower?(" · Torre "+req.tower+(req.unit?" / "+req.unit:"")):"";
+    const vence=venceSLA(req); const hoy=new Date();
+    const lim=vence&&vence>hoy?vence:new Date(hoy.getTime()+(SLA_H[req.priority]||72)*3600000);
+    const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    return {title:tipo+lugar+(req.code?" ("+req.code+")":""),desc:(req.description||"").trim(),dueDate:ymd(lim),priority:PRIORITIES.includes(req.priority)?req.priority:"Media"};
+  };
+  // El ejecutor es el proveedor elegido en «Asignada» (si hay); no se vuelve a preguntar
+  const ejecAuto=req&&req.proveedor?req.proveedor:"";
+  const initF=()=>({...propuesta(),responsible:respAuto,ejecutor:ejecAuto});
+  const deAsignacion=!!(req&&respAuto&&ejecAuto);
+  const [cambiarQuien,setCambiarQuien]=useState(false);
   const [f,setF]=useState(initF());
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
@@ -2038,10 +2052,14 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
     <div style={{...card,border:"2px solid #3b82f6",marginBottom:12}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}><div style={{fontWeight:600,fontSize:13}}>Nueva Orden de Trabajo</div>{!inline&&<button style={BG(true)} onClick={onClose}>✕</button>}</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo *</label><input style={inp} placeholder="Describe el trabajo..." value={f.title} onChange={ev=>setF(p=>({...p,title:ev.target.value}))}/></div>
+        <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Trabajo *{req?<span style={{fontWeight:400,color:"#94a3b8"}}> · propuesto desde la solicitud, puedes cambiarlo</span>:null}</label><input style={inp} placeholder="Describe el trabajo..." value={f.title} onChange={ev=>setF(p=>({...p,title:ev.target.value}))}/></div>
         <div style={{...fg,gridColumn:"1/-1"}}><label style={lbl}>Descripción</label><textarea style={{...inp,height:60,resize:"vertical"}} value={f.desc} onChange={ev=>setF(p=>({...p,desc:ev.target.value}))}/></div>
-        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{(respAssign||[]).map(r=><option key={r}>{r}</option>)}</select></div>
-        <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{todos.map(r=><option key={r}>{r}</option>)}</select></div>
+        {deAsignacion&&!cambiarQuien
+          ?<div style={{...fg,gridColumn:"1/-1",fontSize:12,color:"#475569"}}>Responsable: <b>{f.responsible}</b> · Ejecutor: <b>{f.ejecutor}</b> <span style={{color:"#94a3b8"}}>(de la Asignación)</span> · <button type="button" onClick={()=>setCambiarQuien(true)} style={{background:"none",border:"none",color:"#3b82f6",cursor:"pointer",padding:0,fontSize:12}}>cambiar</button></div>
+          :<>
+        <div style={fg}><label style={lbl}>Responsable</label><select style={sel} value={f.responsible} onChange={ev=>setF(p=>({...p,responsible:ev.target.value}))}>{[...new Set([f.responsible,...(respAssign||[])].filter(Boolean))].map(r=><option key={r}>{r}</option>)}</select></div>
+        <div style={fg}><label style={lbl}>Ejecutor</label><select style={sel} value={f.ejecutor} onChange={ev=>setF(p=>({...p,ejecutor:ev.target.value}))}><option value="">Sin asignar</option>{[...new Set([f.ejecutor,...todos].filter(Boolean))].map(r=><option key={r}>{r}</option>)}</select></div>
+          </>}
         <div style={fg}><label style={lbl}>Fecha límite</label><input type="date" style={inp} value={f.dueDate} onChange={ev=>setF(p=>({...p,dueDate:ev.target.value}))}/></div>
         <div style={fg}><label style={lbl}>Prioridad</label><select style={sel} value={f.priority} onChange={ev=>setF(p=>({...p,priority:ev.target.value}))}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
       </div>

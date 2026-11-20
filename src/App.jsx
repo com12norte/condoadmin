@@ -722,7 +722,7 @@ export default function App(){
     {id:"tasks",label:"Órdenes de trabajo",icon:"🛠️",badge:nOrdVenc,badgeRed:true,badgeTitle:"Órdenes vencidas sin informe"},
     {id:"misolicitudes",label:"Mis Órdenes",icon:"✅"},{id:"inspections",label:"Novedades",icon:"📝"},{id:"inventory",label:"Inventario",icon:"📦"},
     {id:"mantencion",label:"Mantención",icon:"🔧",badge:nMantVenc,badgeRed:true,badgeTitle:"Mantenciones vencidas"},
-    {id:"emails",label:"Correos enviados",icon:"✉️"},{id:"emergencia",label:"Plan de emergencia",icon:"🆘"},{id:"reports",label:"Reportes",icon:"📊"},{id:"config",label:"Configuración",icon:"⚙️"},
+    {id:"emails",label:"Correos enviados",icon:"✉️"},{id:"emergencia",label:"Plan de emergencia",icon:"🆘"},{id:"comprobantes",label:"Comprobantes y controles",icon:"🧾"},{id:"parking",label:"Parking",icon:"🅿️"},{id:"reports",label:"Reportes",icon:"📊"},{id:"config",label:"Configuración",icon:"⚙️"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
     if(n.id==="emails"&&!can(er,"viewEmails")) return false;
@@ -737,6 +737,7 @@ export default function App(){
     if(n.id==="requests"&&er==="Residente") return false;
     if(n.id==="tasks"&&er==="Residente") return false;
     if(n.id==="emergencia"&&!["Administrador","Administrador Edificio","Comite","Conserjeria"].includes(er)) return false;
+    if((n.id==="comprobantes"||n.id==="parking")&&!["Administrador","Administrador Edificio"].includes(er)) return false;
     return true;
   });
 
@@ -793,6 +794,8 @@ export default function App(){
             {view==="mantencion"&&<MantView mant={mant} setMant={setMantDB} role={er} showToast={showToast} mob={mob} respList={respList} towers={towers} equipos={equipos} setEquipos={setEquiposDB} certs={certs} setCerts={setCertsDB}/>}
             {view==="emails"&&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
             {view==="emergencia"&&<EmergenciaView role={er} showToast={showToast} mob={mob} towers={towers}/>}
+            {view==="comprobantes"&&<SitioIntegrado key="comprobantes" titulo="Comprobantes y controles" url="https://com12norte.github.io/administracion-edificio/?embed=1"/>}
+            {view==="parking"&&<SitioIntegrado key="parking" titulo="Parking" url="https://parkadmin-ashy.vercel.app/?ir=personal&embed=1"/>}
             {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
             {view==="config"&&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} equipos={equipos} setEquipos={setEquiposDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
           </div>
@@ -2281,6 +2284,32 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
 
 // ── CloseModal ─────────────────────────────────────────────────────────────
 const MOTIVOS_SIN_ORDEN=["Consulta respondida","Duplicada","Corresponde a un tercero (Esval, Chilquinta, municipalidad…)","Resuelta en el momento (sin orden)","Otro"];
+// Comprobantes (sitio del edificio) y Parking, abiertos dentro de CondoAdmin con la misma sesión:
+// se les envía el token del usuario y lo validan contra su rol en CondoAdmin. No vuelven a pedir clave.
+function SitioIntegrado({titulo,url}){
+  const ref=useRef(null);
+  const origen=new URL(url).origin;
+  const enviar=async()=>{
+    const u=fbAuth.currentUser; if(!u||!ref.current) return;
+    try{ ref.current.contentWindow.postMessage({tipo:"condoadmin-sesion",token:await u.getIdToken(),refreshToken:u.refreshToken,email:u.email},origen); }catch(_){}
+  };
+  useEffect(()=>{
+    const alRecibir=ev=>{ if(ev.origin===origen&&ev.data&&ev.data.tipo==="listo-para-sesion") enviar(); };
+    window.addEventListener("message",alRecibir);
+    const t=setInterval(async()=>{ const u=fbAuth.currentUser; if(u){ await u.getIdToken(true); enviar(); } },45*60*1000);
+    return()=>{ window.removeEventListener("message",alRecibir); clearInterval(t); };
+  },[url]);
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 90px)"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <h2 style={{margin:0,fontSize:18}}>{titulo}</h2>
+        <a href={url.replace(/[?&]embed=1/,"")} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#3b82f6"}}>Abrir en pestaña aparte ↗</a>
+      </div>
+      <iframe ref={ref} src={url} title={titulo} onLoad={enviar} style={{flex:1,width:"100%",border:"1px solid #e2e8f0",borderRadius:10,background:"#fff"}}/>
+    </div>
+  );
+}
+
 function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast,sinOrden}){
   const [motSO,setMotSO]=useState(""); const [errSO,setErrSO]=useState(false);
   const closure=atts.filter(a=>a.requestId===req.id&&a.type==="cierre");

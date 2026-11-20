@@ -164,23 +164,87 @@ async function guardar(token, docId, f) {
 const borrar = (token, docId) => fetch(`${FS()}/codigos_acceso/${docId}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
 
 // Páginas que pueden llamar a este servicio desde el navegador (formulario de copropietarios en GitHub Pages)
-const ORIGENES = ["https://com12norte.github.io", "https://condoadmin-rouge.vercel.app"];
+const ORIGENES = ["https://com12norte.github.io", "https://condoadmin-rouge.vercel.app", "https://parkadmin-ashy.vercel.app"];
 
 // Registros de copropietarios asociados a un correo (propietario o residente)
 function expandirJSON(v) {
   if (typeof v === "string" && /^\s*[{[]/.test(v)) { try { return JSON.parse(v); } catch { return v; } }
   return v;
 }
+// Unidad normalizada: "12 Norte 1080" + "1a" -> "1080-A1"
+function claveUnidad(dir, depto) {
+  const nums = String(dir || "").match(/\d{3,4}/g);
+  const t = nums ? nums[nums.length - 1] : "";
+  let d = String(depto || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const m = d.match(/^(\d)([A-Z])$/); if (m) d = m[2] + m[1];
+  return t && d ? t + "-" + d : "";
+}
+// Documentos que faltan según el Registro de Copropietarios (mismo criterio que el código de Google)
+const NOMBRE_DOC = { dominio: "Certificado de dominio vigente", ci_dueno: "Cédula de identidad del o los propietarios", contrato: "Contrato de arriendo o declaración del propietario", ci_arrendatario: "Cédula del arrendatario u ocupante" };
+function docsFaltan(r) {
+  const d = expandirJSON(r.datos) || {}, est = expandirJSON(r.docsEstado) || {}, ocup = expandirJSON(r.ocupante) || {};
+  let docs = expandirJSON(r.docs) || []; if (!Array.isArray(docs)) docs = [];
+  docs = docs.map(x => (x && x._lista) ? x._lista : x);
+  const anio = new Date().getFullYear();
+  const vigente = x => x && x.estado !== "rechazado" && !(x.tipo === "dominio" && x.fecha && parseInt(String(x.fecha).slice(0, 4), 10) < anio);
+  const arrienda = /arrend|prestada/i.test(d.uso || "") || !!ocup.activo || est.contrato === "falta" || est.ci_arrendatario === "falta";
+  const req = ["dominio", "ci_dueno"].concat(arrienda ? ["contrato", "ci_arrendatario"] : []);
+  return req.filter(t => est[t] !== "ok" && !docs.some(x => x.tipo === t && vigente(x))).map(t => NOMBRE_DOC[t]);
+}
+// Unidades del Registro de Copropietarios (el maestro) en que figura este correo
 async function registrosDe(token, email) {
   const out = [];
   for (const r of await listarTodo(token, "copropietarios")) {
-    const d = expandirJSON(r.datos) || {};
+    const d = expandirJSON(r.datos) || {}, ocup = expandirJSON(r.ocupante) || {};
     const prop = String(d.prop_mail || r.prop_mail || "").trim().toLowerCase();
     const resi = String(d.res_mail || r.res_mail || "").trim().toLowerCase();
-    if (prop === email) out.push({ direccion: r.direccion || "", depto: r.depto || "", token: r.token || "", rol: "propietario" });
-    else if (resi === email) out.push({ direccion: r.direccion || "", depto: r.depto || "", rol: "residente" });
+    const ocu = String(ocup.correo || "").trim().toLowerCase();
+    const base = { direccion: r.direccion || "", depto: r.depto || "", unidad: claveUnidad(r.direccion, r.depto), estado: r.estado || "", faltan: docsFaltan(r) };
+    if (prop === email) out.push({ ...base, token: r.token || "", rol: "propietario" });
+    else if (resi === email || ocu === email) out.push({ ...base, rol: "residente" });
   }
   return out;
+}
+
+// ── Parking: el residente registra su estacionamiento por el servidor ──
+// Solo puede hacerlo para una unidad donde su correo figura en el Registro de Copropietarios
+// y que tenga los documentos completos. Siempre queda «pendiente» de visado.
+function aFs(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(aFs) } };
+  if (typeof v === "object") return { mapValue: { fields: Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined).map(([k, x]) => [k, aFs(x)])) } };
+  return { stringValue: String(v) };
+}
+async function fsSet(token, path, obj) {
+  const res = await fetch(`${FS()}/${path}`, { method: "PATCH", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ fields: aFs(obj).mapValue.fields }) });
+  if (!res.ok) throw new Error("Firestore " + path + ": " + res.status + " " + (await res.text()));
+}
+const txt = (v, n = 120) => String(v == null ? "" : v).slice(0, n);
+const nombreCorto = n => { const p = String(n || "").trim().split(/\s+/).filter(Boolean); return !p.length ? "" : p.length > 1 ? p[0] + " " + p[1][0].toUpperCase() + "." : p[0]; };
+async function guardarParking(token, email, b) {
+  const spot = parseInt(b.spotId, 10);
+  if (!(spot > 0 && spot < 1000)) return { status: 400, body: { ok: false, error: "Estacionamiento no válido" } };
+  const unidad = claveUnidad(b.torre, b.depto);
+  const mia = (await registrosDe(token, email)).find(r => r.unidad === unidad);
+  if (!mia) return { status: 403, body: { ok: false, error: "Tu correo no figura en el Registro de Copropietarios para esta unidad." } };
+  if (mia.faltan.length) return { status: 403, body: { ok: false, error: "Faltan documentos en el Registro de Copropietarios.", faltan: mia.faltan } };
+  const r = b.registro || {};
+  const veh = (Array.isArray(r.vehiculos) ? r.vehiculos : []).slice(0, 5).map(v => ({ patente: txt(v.patente, 10).toUpperCase(), marca: txt(v.marca, 40), color: txt(v.color, 30), esVisita: v.esVisita === "si" ? "si" : "no", nombreVisita: txt(v.nombreVisita, 80), telefonoVisita: txt(v.telefonoVisita, 20) })).filter(v => v.patente);
+  const uso = ["uso_exclusivo", "visitas", "ceder_largo", "sin_uso"].includes(r.usoEstacionamiento) ? r.usoEstacionamiento : "";
+  const ahora = new Date().toISOString();
+  const datos = {
+    nombre: txt(r.nombre, 80), rut: txt(r.rut, 15), email, telefono: txt(r.telefono, 20), tipoResidente: txt(r.tipoResidente, 30),
+    usoEstacionamiento: uso, vehiculos: veh, patentes: veh.map(v => v.patente.replace(/[^A-Z0-9]/g, "")),
+    emailHash: sha(email), estadoRegistro: "pendiente", updatedAt: ahora, fechaRegistro: txt(r.fechaRegistro, 10) || ahora.slice(0, 10),
+    unidadRegistro: unidad, rolRegistro: mia.rol,
+  };
+  if (uso === "ceder_largo") Object.assign(datos, { nombreCedido: txt(r.nombreCedido, 80), rutCedido: txt(r.rutCedido, 15), emailCedido: txt(r.emailCedido, 120), telefonoCedido: txt(r.telefonoCedido, 20), torreCedido: txt(r.torreCedido, 10), deptoCedido: txt(r.deptoCedido, 10), estadoPrestamo: "pendiente", fechaInicioP: txt(r.fechaInicioP, 10), fechaVencP: txt(r.fechaVencP, 10) });
+  await fsSet(token, "parking_registros/" + spot, datos);
+  const publico = { patentes: datos.patentes, vehiculos: veh.map(v => ({ patente: v.patente, marca: v.marca, color: v.color, esVisita: v.esVisita, nombreVisita: v.nombreVisita })), usoEstacionamiento: uso, estadoRegistro: "pendiente", nombre: nombreCorto(datos.nombre), tieneEmail: true, updatedAt: ahora };
+  await fsSet(token, "parking_ocupacion/" + spot, publico);
+  return { status: 200, body: { ok: true, publico } };
 }
 
 export default async function handler(req, res) {
@@ -220,8 +284,11 @@ export default async function handler(req, res) {
       }
       // Para el registro de copropietarios cualquier correo puede verificarse (también quien se registra por primera vez).
       // Para "Mis solicitudes", solo correos con solicitudes o registro.
-      const paraRegistro = body.para === "registro";
-      if (!paraRegistro && !(await tieneSolicitudes(token, email)) && !(await registrosDe(token, email)).length) {
+      const paraRegistro = body.para === "registro", paraParking = body.para === "parking";
+      if (paraParking && !(await registrosDe(token, email)).length) {
+        return res.status(404).json({ ok: false, error: "Ese correo no figura en el Registro de Copropietarios. Para registrar patentes, primero completa el registro de tu unidad." });
+      }
+      if (!paraRegistro && !paraParking && !(await tieneSolicitudes(token, email)) && !(await registrosDe(token, email)).length) {
         return res.status(404).json({ ok: false, error: "No encontramos solicitudes ingresadas con ese correo. Revisa que esté bien escrito." });
       }
       const codigo = String(nodeCrypto.randomInt(0, 1000000)).padStart(6, "0");
@@ -231,8 +298,8 @@ export default async function handler(req, res) {
         headers: { "x-clave-interna": CLAVE_INTERNA, "Content-Type": "application/json" },
         body: JSON.stringify({
           to: email,
-          subject: (paraRegistro ? "[Edificio 12 Norte] Código para el Registro de Copropietarios: " : "[CondoAdmin] Tu código de acceso: ") + codigo,
-          body: (paraRegistro ? "Tu código para ingresar al Registro de Copropietarios del Edificio 12 Norte es:" : "Tu código para ver tus solicitudes en CondoAdmin es:") + "\n\n    " + codigo + "\n\nVale por 10 minutos. Si no lo pediste, ignora este correo.\n\n— Comunidad Edificio 12 Norte",
+          subject: (paraParking ? "[Edificio 12 Norte] Código para Parking: " : paraRegistro ? "[Edificio 12 Norte] Código para el Registro de Copropietarios: " : "[CondoAdmin] Tu código de acceso: ") + codigo,
+          body: (paraParking ? "Tu código para registrar tu estacionamiento en Parking del Edificio 12 Norte es:" : paraRegistro ? "Tu código para ingresar al Registro de Copropietarios del Edificio 12 Norte es:" : "Tu código para ver tus solicitudes en CondoAdmin es:") + "\n\n    " + codigo + "\n\nVale por 10 minutos. Si no lo pediste, ignora este correo.\n\n— Comunidad Edificio 12 Norte",
         }),
       });
       if (!mail.ok) {
@@ -265,6 +332,12 @@ export default async function handler(req, res) {
     if (accion === "registro") {
       if (!sesionValida(email, body.sesion)) return res.status(401).json({ ok: false, error: "Tu acceso venció. Pide un código nuevo." });
       return res.status(200).json({ ok: true, registros: await registrosDe(token, email) });
+    }
+
+    if (accion === "parking_guardar") {
+      if (!sesionValida(email, body.sesion)) return res.status(401).json({ ok: false, error: "Tu acceso venció. Pide un código nuevo." });
+      const r = await guardarParking(token, email, body);
+      return res.status(r.status).json(r.body);
     }
 
     if (accion === "listar") {

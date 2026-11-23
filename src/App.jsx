@@ -2776,6 +2776,8 @@ const cpPost=async(accion,extra)=>{ const j=await gasPost({accion,...(extra||{})
 const cpMail=r=>{ const d=r.datos||{}; return String(d.prop_mail||d.res_mail||"").trim(); };
 const CP_BADGE={vigente:["✅ Al día","#d1fae5","#065f46"],revisar:["🕐 Por validar","#dbeafe","#1e40af"],devuelto:["↩️ Devuelto","#fef3c7","#92400e"],debe:["❗ Debe actualizar","#fee2e2","#991b1b"],sinreg:["⚪ Sin registro","#e5e7eb","#374151"]};
 const CP_DOC={dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",contrato:"Contrato arriendo",ci_arrendatario:"Cédula arrendatario",mandato:"Mandato corredor"};
+// El servidor pide el certificado de dominio del año en curso: uno de años anteriores cuenta como faltante
+const domVencido=x=>!!x.fecha&&parseInt(String(x.fecha).slice(0,4),10)<new Date().getFullYear();
 const CP_TIPOS_DOC={sin_clasificar:"Sin clasificar",dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",ci_arrendatario:"Cédula arrendatario",contrato:"Contrato arriendo",mandato:"Mandato corredor",otro:"Otro"};
 const CP_ETIQ=[["Propietario",null],["prop_nombre","Nombre"],["prop_rut","RUT"],["prop_fnac","Nacimiento"],["prop_nac","Nacionalidad"],["prop_tel","Teléfono"],["prop_mail","Correo"],["conyuge_nombre","Cónyuge/pareja"],["conyuge_rut","RUT cónyuge"],["uso","Uso de la residencia"],["resid_principal","Residencia principal del dueño"],
   ["Residente principal",null],["res_nombre","Nombre"],["res_rut","RUT"],["res_fnac","Nacimiento"],["res_nac","Nacionalidad"],["res_tel","Teléfono"],["res_mail","Correo"],
@@ -2935,14 +2937,16 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
     {r.motivo&&<div style={{...alrt("warning")}}>Motivo devolución: {r.motivo}</div>}
     {CP_ETIQ.map(([k,l])=>l===null?<div key={k}>{sec(k)}</div>:(d[k]!==undefined&&d[k]!=="")?<div key={k} style={{display:"flex",gap:8,fontSize:12,padding:"3px 0",borderBottom:"1px dashed #e2e8f0"}}><span style={{flex:"0 0 40%",color:"#64748b"}}>{l}</span><span>{String(d[k])}</span></div>:null)}
     {sec("Documentos")}
-    {(r.faltan||[]).length?<div style={{fontSize:12,color:"#b45309",marginBottom:4}}>Faltan: {r.faltan.map(t=>CP_DOC[t]||t).join(", ")}</div>:<div style={{fontSize:12,color:"#059669",marginBottom:4}}>✓ Documentación completa</div>}
+    {(r.faltan||[]).length?<div style={{fontSize:12,color:"#b45309",marginBottom:4}}>Faltan: {r.faltan.map(t=>{ const v=t==="dominio"&&(r.docs||[]).find(x=>x.tipo==="dominio"&&x.estado!=="rechazado"&&domVencido(x));
+        return (CP_DOC[t]||t)+(v?" (el entregado es de "+String(v.fecha).slice(0,4)+"; se pide uno de "+new Date().getFullYear()+")":""); }).join(", ")}</div>:<div style={{fontSize:12,color:"#059669",marginBottom:4}}>✓ Documentación completa</div>}
     {r.docsEstado&&<div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Según Listado: {Object.entries(r.docsEstado).map(([k,v])=>(CP_DOC[k]||"Ficha")+": "+({ok:"entregado",falta:"pendiente",na:"no corresponde",desconoce:"se desconoce"}[v]||v)).join(" · ")}</div>}
     {r.carpetaUrl&&<div style={{fontSize:12,marginBottom:6}}><a href={r.carpetaUrl} target="_blank" rel="noreferrer">📁 Carpeta en Drive ({r.archivosCarpeta==null?"?":r.archivosCarpeta} archivos)</a></div>}
     {(r.docs||[]).some(x=>(x.tipo||"sin_clasificar")==="sin_clasificar")&&<div style={{...alrt("warning"),marginBottom:6}}>Hay documentos sin tipo: indica qué documento es cada uno para que cuente como entregado.</div>}
     {(r.docs||[]).map((x,i)=>{ const est=x.estado||"pendiente", col={validado:"#059669",rechazado:"#dc2626",pendiente:"#2563eb"}[est];
       const tipo=tipos[i]??x.tipo??"sin_clasificar", sinTipo=tipo==="sin_clasificar";
       return(<div key={i} style={{border:"1px solid "+(sinTipo?"#fbbf24":"#e2e8f0"),background:sinTipo?"#fffbeb":"#fff",borderRadius:8,padding:8,marginBottom:6,fontSize:12}}>
-        <div style={{fontWeight:700,fontSize:13,color:sinTipo?"#b45309":"#0f172a",marginBottom:2}}>{sinTipo?"⚠ Documento sin tipo":CP_TIPOS_DOC[tipo]||tipo}</div>
+        <div style={{fontWeight:700,fontSize:13,color:sinTipo?"#b45309":"#0f172a",marginBottom:2}}>{sinTipo?"⚠ Documento sin tipo":CP_TIPOS_DOC[tipo]||tipo}
+          {tipo==="dominio"&&domVencido(x)&&<span style={{marginLeft:8,fontSize:11,fontWeight:700,color:"#991b1b",background:"#fee2e2",borderRadius:10,padding:"1px 8px"}}>Vencido: es de {String(x.fecha).slice(0,4)}</span>}</div>
         <div><a href={x.url} target="_blank" rel="noreferrer">📎 {x.nombre}</a> <span style={{color:"#64748b"}}>{x.fecha||""} · {x.origen||""}</span></div>
         {x.asunto&&<div style={{color:"#64748b"}}>Asunto: {x.asunto}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:5}}>

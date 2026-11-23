@@ -783,8 +783,19 @@ export default function App(){
   if(loading) return <Loader/>;
   if(!session) return <LoginScreen onLogin={handleLogin}/>;
 
+  const esAdm=["Administrador","Administrador Edificio"].includes(er);
+  const barra=[{id:"dashboard",icon:"🏠",label:"Inicio"},{id:"requests",icon:"📋",label:"Solicitudes"},
+    esAdm?{id:"parking",icon:"🅿️",label:"Parking"}:{id:er==="Proveedor"?"provider":"tasks",icon:"🛠️",label:"Órdenes"}].filter(b=>b.id==="parking"||navItems.some(n=>n.id===b.id));
   return(
-    <div style={{display:"flex",flexDirection:"column",height:"100vh",fontFamily:"system-ui,sans-serif",background:"#f1f5f9",color:"#1e293b",overflow:"hidden"}}>
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",fontFamily:"system-ui,sans-serif",background:"#f1f5f9",color:"#0f172a",overflow:"hidden"}}>
+      {mob&&!usaServidor(session)&&!navOpen&&(
+        <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:45,background:"#fff",borderTop:"1px solid #e2e8f0",display:"flex",paddingBottom:"env(safe-area-inset-bottom)"}}>
+          {barra.map(b=>(
+            <button key={b.id} onClick={()=>setView(b.id)} style={{flex:1,background:"none",border:"none",padding:"8px 0 6px",cursor:"pointer",color:(view===b.id||(view==="detail"&&b.id==="requests"))?"#1e3a5f":"#94a3b8",fontWeight:(view===b.id)?700:500}}>
+              <div style={{fontSize:20}}>{b.icon}</div><div style={{fontSize:11}}>{b.label}</div></button>))}
+          <button onClick={()=>setNavOpen(true)} style={{flex:1,background:"none",border:"none",padding:"8px 0 6px",cursor:"pointer",color:"#94a3b8"}}>
+            <div style={{fontSize:20}}>☰</div><div style={{fontSize:11}}>Más</div></button>
+        </div>)}
       {viewAs&&<div style={{background:"#7c3aed",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:100,fontSize:13}}><span>Visualizando como: <strong>{viewAs}</strong></span><button style={{...BG(true),color:"#fff"}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir</button></div>}
       {mob&&<div style={{background:"#0f172a",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,zIndex:60}}><div onClick={()=>{setView(er==="Proveedor"?"provider":"dashboard");setNavOpen(false);}} style={{color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>CondoAdmin</div><div style={{display:"flex",gap:8,alignItems:"center"}}><span style={bdg("#fff","#1e3a5f")}>{er}</span><button style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}} onClick={()=>setNavOpen(p=>!p)}>{navOpen?"✕":"☰"}</button></div></div>}
       <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
@@ -803,9 +814,10 @@ export default function App(){
               {!mob&&<span style={{...bdg("#fff",viewAs?"#7c3aed":"#1e3a5f"),fontSize:12,padding:"5px 10px"}}>{er}</span>}
             </div>
           </div>
-          <div style={{flex:1,overflowY:"auto",padding:mob?"12px":"16px"}}>
+          <div style={{flex:1,overflowY:"auto",padding:mob?"12px":"16px",paddingBottom:mob&&!usaServidor(session)?76:undefined}}>
             {dataLoading&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,fontSize:13,color:"#1d4ed8"}}><div style={{width:16,height:16,border:"3px solid #bfdbfe",borderTop:"3px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Cargando información...<style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>}
             {view==="dashboard"&&er==="Residente"&&<ResidenteReqs reqs={reqs} tasks={tasks} session={session} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob}/>}
+            {view==="dashboard"&&["Administrador","Administrador Edificio"].includes(er)&&<AccesosRapidos nAbiertas={nAbiertas} nOrdVenc={nOrdVenc} setView={setView} mob={mob}/>}
             {view==="dashboard"&&er!=="Residente"&&<Dashboard reqs={reqs} tasks={tasks} mant={mant} role={er} onOpen={openReq} onNew={()=>setShowNew(true)} mob={mob} deleteTask={deleteTask} deleteReq={deleteReq} setReqs={setReqsDB} showToast={showToast} goList={goList} addEmail={addEmail} session={session}/>}
             {view==="requests"&&<ReqList reqs={reqs} role={er} onOpen={openReq} setReqs={setReqsDB} deleteReq={deleteReq} showToast={showToast} addEmail={addEmail} mob={mob} towers={towers} respList={respList} session={session} tab={listTab} setTab={setListTab}/>}
             {view==="detail"&&selReq&&<ReqDetail req={selReq} reqs={reqs} tasks={tasks} atts={atts} emails={emails} role={er} setReqs={setReqsDB} setTasks={setTasksDB} deleteTask={deleteTask} setAtts={setAtts} addEmail={addEmail} showToast={showToast} onBack={()=>setView(er==="Residente"?"mis_reqs":"requests")} setSelReq={setSelReq} mob={mob} respList={respList} respAssign={respAssign} usuarios={usuarios} session={session}/>}
@@ -2312,6 +2324,30 @@ const MOTIVOS_SIN_ORDEN=["Consulta respondida","Duplicada","Corresponde a un ter
 // Comprobantes (sitio del edificio) y Parking, abiertos dentro de CondoAdmin con la misma sesión:
 // se les envía el token del usuario y lo validan contra su rol en CondoAdmin. No vuelven a pedir clave.
 let vistaInicial=null;
+const GAS_EDIFICIO="https://script.google.com/macros/s/AKfycbxKRCFQItt75ZYhqNVhY4y691BYD62uV8wSOxfC3RFN8KJvdNJS_1TbvP-72GXpIAUV/exec";
+// Inicio: lo pendiente de las tres áreas, con acceso directo
+function AccesosRapidos({nAbiertas,nOrdVenc,setView,mob}){
+  const [pk,setPk]=useState(null), [ct,setCt]=useState(null);
+  useEffect(()=>{
+    (async()=>{ try{ const sn=await getDocs(query(collection(fbDb,"parking_registros"),where("estadoRegistro","==","pendiente"))); setPk(sn.size); }catch(_){ setPk("—"); } })();
+    (async()=>{ try{ const t=await fbAuth.currentUser?.getIdToken(); const j=await (await fetch(GAS_EDIFICIO+"?accion=listar&hoja=Controles&clave="+encodeURIComponent(t||""))).json();
+      setCt(j.ok?(j.data||[]).filter(x=>x.tipo==="solicitud_ctrl"&&["pendiente","pago_pendiente"].includes(x.estado)).length:"—"); }catch(_){ setCt("—"); } })();
+  },[]);
+  const T=({ico,tit,n,sub,color,ir})=>(
+    <button onClick={()=>setView(ir)} style={{flex:"1 1 160px",textAlign:"left",background:"#fff",border:"1px solid #e2e8f0",borderLeft:"4px solid "+color,borderRadius:10,padding:"12px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+      <span style={{fontSize:22}}>{ico}</span>
+      <span style={{flex:1,minWidth:0}}><span style={{display:"block",fontSize:12,color:"#64748b",fontWeight:600}}>{tit}</span>
+        <span style={{display:"block",fontSize:22,fontWeight:800,color:"#0f172a",lineHeight:1.2}}>{n===null?"…":n}</span>
+        <span style={{display:"block",fontSize:11,color:"#94a3b8"}}>{sub}</span></span>
+      <span style={{color:"#94a3b8"}}>›</span>
+    </button>);
+  return(
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+      <T ico="📋" tit="Solicitudes abiertas" n={nAbiertas} sub={nOrdVenc?nOrdVenc+" órdenes vencidas":"Ver solicitudes"} color="#3b82f6" ir="requests"/>
+      <T ico="🅿️" tit="Parking por visar" n={pk} sub="Registros pendientes" color="#16a34a" ir="parking"/>
+      <T ico="📡" tit="Controles por revisar" n={ct} sub="Solicitudes de control" color="#d97706" ir="comprobantes"/>
+    </div>);
+}
 let volverAlMenu=null; // usuario que vuelve al menú de módulos sin cerrar sesión
 function SitioIntegrado({titulo,url}){
   const ref=useRef(null);

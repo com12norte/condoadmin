@@ -2910,6 +2910,15 @@ function ListaRecibos({showToast}){
   useEffect(()=>{ cargar(); },[]);
   const borrar=async r=>{ if(!window.confirm("¿Eliminar el recibo de "+r.nombre+" (depto "+r.depto+")?")) return;
     try{ const j=await gasPost({accion:"borrar",hoja:"Recibos",id:r.id}); if(!j.ok) throw new Error(j.error); showToast("Recibo eliminado","success"); cargar(); }catch(e){ showToast("No se pudo eliminar: "+e.message,"error"); } };
+  // Reenvía el PDF por correo (usa el envío de correo del servidor; va con copia a la administración)
+  const [reenv,setReenv]=useState(null);
+  const reenviar=async()=>{ const r=reenv.r, para=reenv.para.trim();
+    if(!emailValido(para)){ showToast("Correo no válido","error"); return; }
+    setReenv(x=>({...x,env:true}));
+    try{ const j=await gasPost({tipo:"email_link",para,asunto:"Comunidad Edificio 12 Norte - Recibo Conforme Depto. "+r.depto+" (reenvío)",
+        cuerpo:"Estimado/a "+r.nombre+",\n\nLe reenviamos su recibo conforme de entrega de "+(r.tipo==="Llave"?"llave de acceso"+(r.detalle?" ("+r.detalle+")":""):"control remoto")+" del departamento N° "+r.depto+", "+r.dir+", de fecha "+r.fecha+".\n\nDescargue su documento aquí:\n"+r.pdfUrl+"\n\nSaludos,\nComunidad Edificio 12 Norte de Viña del Mar"});
+      if(!j.ok) throw new Error(j.error); showToast("Recibo reenviado a "+para,"success"); setReenv(null);
+    }catch(e){ showToast("No se pudo reenviar: "+e.message,"error"); setReenv(x=>x&&({...x,env:false})); } };
   if(lista===null) return <div style={{...card,color:"#64748b"}}>Cargando recibos…</div>;
   const t=q.trim().toLowerCase();
   const vis=lista.filter(r=>!t||[r.nombre,r.depto,r.dir,r.tipo,r.detalle].join(" ").toLowerCase().includes(t));
@@ -2926,9 +2935,15 @@ function ListaRecibos({showToast}){
         <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{r.nombre}</div>
           <div style={{fontSize:12,color:"#64748b"}}>{r.dir} · depto {r.depto} · {r.tipo}{r.detalle?" ("+r.detalle+")":""} · {r.fecha}</div></div>
         {r.pdfUrl&&r.pdfUrl!=="—"&&<a href={r.pdfUrl} target="_blank" rel="noreferrer" style={{...BS(true),textDecoration:"none"}}>PDF</a>}
+        {r.pdfUrl&&r.pdfUrl!=="—"&&<button style={BS(true)} onClick={()=>setReenv({r,para:r.email&&r.email!=="—"?r.email:""})}>✉ Reenviar</button>}
         <button style={BD(true)} onClick={()=>borrar(r)}>Eliminar</button>
       </div>))}
     </div>}
+    {reenv&&<Ventana titulo={"Reenviar recibo — "+reenv.r.nombre} onClose={()=>setReenv(null)} pie={<><button style={BS(true)} onClick={()=>setReenv(null)}>Cancelar</button><button style={BP(true)} disabled={reenv.env} onClick={reenviar}>{reenv.env?"Enviando…":"Reenviar"}</button></>}>
+      <div style={{fontSize:13,color:"#334155",marginBottom:10}}>{reenv.r.tipo} · {reenv.r.dir} depto {reenv.r.depto} · {reenv.r.fecha}</div>
+      <label style={lbl}>Enviar a</label><input type="email" style={inp} value={reenv.para} onChange={e=>setReenv(x=>({...x,para:e.target.value}))} placeholder="residente@correo.com" autoFocus/>
+      <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Puedes cambiar el correo si el residente dio otro. Va con copia a la administración.</div>
+    </Ventana>}
   </div>);
 }
 

@@ -2360,7 +2360,7 @@ function ComprobantesView({showToast,mob}){
     {tab==="recibos"&&<ListaRecibos showToast={showToast}/>}
     {tab==="pago"&&<NuevoPago showToast={showToast} mob={mob} alGuardar={()=>setTab("pagos")}/>}
     {tab==="pagos"&&<ListaPagos showToast={showToast}/>}
-    {tab==="controles"&&<SitioIntegrado key="controles" titulo="Controles" url="https://com12norte.github.io/administracion-edificio/?embed=1#controles"/>}
+    {tab==="controles"&&<ControlesView showToast={showToast} mob={mob}/>}
   </div>);
 }
 
@@ -2509,7 +2509,7 @@ function ListaPagos({showToast}){
   const vis=lista.filter(p=>!t||[p.numero,p.nombre,p.rut,p.concepto,p.periodo].join(" ").toLowerCase().includes(t));
   const suma=vis.reduce((a,p)=>a+(Number(p.total)||0),0);
   return(<div>
-    {err&&<div style={alrt("danger")}>{err}</div>}
+    {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
       <input style={{...inp,maxWidth:320}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar proveedor, N°, concepto o período…"/>
       <span style={{fontSize:12,color:"#64748b"}}>{vis.length} de {lista.length} · total {fmtPesos(suma)}</span>
@@ -2527,6 +2527,221 @@ function ListaPagos({showToast}){
   </div>);
 }
 
+// ── Controles remotos: listado, solicitudes de residentes y envío de link ──
+const ESTADOS_SOL={link_enviado:["📨","Link enviado","#64748b"],datos_enviados:["📋","Datos recibidos","#64748b"],declaracion:["📝","Declaración firmada","#64748b"],pago_pendiente:["💳","Esperando pago","#b45309"],
+  pendiente:["⏳","Comprobante por revisar","#dc2626"],aprobado:["✅","Aprobada — preparar control","#2563eb"],listo:["📦","Listo para retiro","#059669"],entregado:["🎉","Entregado","#059669"],rechazado:["✗","Rechazada","#94a3b8"]};
+const tipoSolTxt=s=>(s.tipoSol||s.tipo)==="segundo"?"➕ 2° control":"🚨 Pérdida / falla";
+function Ventana({titulo,onClose,children,pie}){
+  return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:560,maxHeight:"90vh",display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"12px 16px",borderBottom:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",alignItems:"center"}}><b style={{fontSize:14}}>{titulo}</b><button onClick={onClose} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#64748b"}}>✕</button></div>
+      <div style={{padding:16,overflowY:"auto"}}>{children}</div>
+      {pie&&<div style={{padding:"10px 16px",borderTop:"1px solid #e2e8f0",display:"flex",justifyContent:"flex-end",gap:8,flexWrap:"wrap"}}>{pie}</div>}
+    </div>
+  </div>);
+}
+
+function ControlesView({showToast,mob}){
+  const [sub,setSub]=useState("solicitudes");
+  const [listado,setListado]=useState(null), [sols,setSols]=useState(null), [err,setErr]=useState("");
+  const cargar=async()=>{ setErr("");
+    try{ const [l,c]=await Promise.all([gasListar("Listado"),gasListar("Controles")]);
+      setListado(l.map(x=>({n:parseInt(x.n)||0,dir:x.dir||"",depto:x.depto||"",estado:x.estado||"Vigente",entrega:x.entrega||"—",fecha:x.fecha||"",notas:x.notas||""})).filter(x=>x.n>0).sort((a,b)=>a.n-b.n));
+      setSols(c.filter(x=>x.id&&(x.nombre||x.email)).sort((a,b)=>String(b.id).localeCompare(String(a.id))));
+    }catch(e){ setErr(e.message); setListado(x=>x||[]); setSols(x=>x||[]); } };
+  useEffect(()=>{ cargar(); },[]);
+  // Guarda el listado completo en Drive (nunca uno vacío, para no borrar el registro por error)
+  const guardarListado=async nuevo=>{ if(!nuevo.length) throw new Error("Listado vacío"); const j=await gasPost({accion:"guardar_listado",listado:nuevo}); if(!j.ok) throw new Error(j.error); setListado([...nuevo].sort((a,b)=>a.n-b.n)); };
+  const cambiarEstado=async(s,estado,extra={})=>{ const nuevo={...s,...extra,tipo:"solicitud_ctrl",estado}; const j=await gasPost(nuevo); if(!j.ok) throw new Error(j.error); setSols(l=>l.map(x=>x.id===s.id?nuevo:x)); return nuevo; };
+  const porRevisar=(sols||[]).filter(s=>s.estado==="pendiente").length;
+  const subs=[{id:"solicitudes",label:"Solicitudes"+(porRevisar?" ("+porRevisar+")":"")},{id:"listado",label:"Listado de controles"},{id:"enviar",label:"Enviar link"}];
+  if(listado===null||sols===null) return <div style={{...card,color:"#64748b"}}>Cargando controles…</div>;
+  const ext=listado.filter(c=>c.dir!=="Administración");
+  const stat=(v,t,c)=><div style={{...card,padding:"10px 12px",textAlign:"center",margin:0}}><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div><div style={{fontSize:11,color:"#64748b"}}>{t}</div></div>;
+  return(<div>
+    {err&&<div style={alrt("error")}>{err}</div>}
+    <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:8,marginBottom:12}}>
+      {stat(ext.length,"Controles","#1e3a5f")}{stat(ext.filter(c=>c.estado==="Vigente").length,"Vigentes","#059669")}{stat(listado.filter(c=>c.estado==="Bloqueado").length,"Bloqueados","#dc2626")}{stat(porRevisar,"Pagos por revisar","#b45309")}
+    </div>
+    <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+      {subs.map(t=><button key={t.id} onClick={()=>setSub(t.id)} style={{padding:"6px 12px",borderRadius:16,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid "+(sub===t.id?"#1e3a5f":"#e2e8f0"),background:sub===t.id?"#1e3a5f":"#fff",color:sub===t.id?"#fff":"#334155"}}>{t.label}</button>)}
+      <button onClick={cargar} style={{...BS(true),marginLeft:"auto"}}>↻ Actualizar</button>
+    </div>
+    {sub==="solicitudes"&&<SolicitudesCtrl sols={sols} setSols={setSols} listado={listado} guardarListado={guardarListado} cambiarEstado={cambiarEstado} showToast={showToast} mob={mob}/>}
+    {sub==="listado"&&<ListadoCtrl listado={listado} guardarListado={guardarListado} showToast={showToast} mob={mob}/>}
+    {sub==="enviar"&&<EnviarLinkCtrl sols={sols} showToast={showToast} alEnviar={()=>{cargar();setSub("solicitudes");}}/>}
+  </div>);
+}
+
+function SolicitudesCtrl({sols,setSols,listado,guardarListado,cambiarEstado,showToast,mob}){
+  const [fil,setFil]=useState("activas"), [ver,setVer]=useState(null), [ent,setEnt]=useState(null), [ocup,setOcup]=useState(false);
+  const activas=s=>!["entregado","rechazado"].includes(s.estado);
+  const vis=sols.filter(s=>fil==="todas"||(fil==="activas"?activas(s):fil==="revisar"?s.estado==="pendiente":s.estado===fil));
+  const accion=async(fn,msg)=>{ setOcup(true); try{ await fn(); showToast(msg,"success"); setVer(null); }catch(e){ showToast("Error: "+e.message,"error"); } setOcup(false); };
+  const aprobar=s=>accion(async()=>{ await cambiarEstado(s,"aprobado");
+    if((s.tipoSol||s.tipo)==="perdida"&&s.ctrlN){ const n=listado.map(c=>c.n==s.ctrlN?{...c,estado:"Bloqueado",notas:(c.notas?c.notas+" · ":"")+"Bloqueado por "+s.id}:c); await guardarListado(n); }
+  },"Aprobada — se avisó al residente por correo");
+  const rechazar=s=>{ if(window.confirm("¿Rechazar la solicitud "+s.id+"?")) accion(()=>cambiarEstado(s,"rechazado"),"Solicitud rechazada"); };
+  const listo=s=>accion(()=>cambiarEstado(s,"listo"),"Marcada lista — se avisó al residente para retirar");
+  const borrar=s=>{ if(window.confirm("¿Eliminar la solicitud "+s.id+"? No se puede deshacer.")) accion(async()=>{ const j=await gasPost({accion:"borrar",hoja:"Controles",id:s.id}); if(!j.ok) throw new Error(j.error); setSols(l=>l.filter(x=>x.id!==s.id)); },"Solicitud eliminada"); };
+  const filtros=[["activas","En curso"],["revisar","Por revisar"],["aprobado","Aprobadas"],["listo","Listas"],["entregado","Entregadas"],["todas","Todas"]];
+  const fila=(k,v)=>v?<div style={{display:"flex",gap:8,fontSize:13,padding:"5px 0",borderBottom:"1px solid #f1f5f9"}}><span style={{color:"#64748b",minWidth:120}}>{k}</span><span style={{fontWeight:500}}>{v}</span></div>:null;
+  return(<div>
+    <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>{filtros.map(([k,t])=><button key={k} onClick={()=>setFil(k)} style={{...BS(true),...(fil===k?{background:"#eff6ff",borderColor:"#93c5fd",color:"#1e3a5f"}:{})}}>{t}</button>)}</div>
+    {!vis.length?<div style={{...card,color:"#64748b",textAlign:"center"}}>No hay solicitudes en esta vista.</div>:
+    <div style={{...card,padding:0,overflow:"hidden"}}>
+      {vis.map((s,i)=>{ const [ic,tx,co]=ESTADOS_SOL[s.estado]||["❓",s.estado||"—","#64748b"];
+        return(<div key={s.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderTop:i?"1px solid #f1f5f9":"none",flexWrap:mob?"wrap":"nowrap"}}>
+          <span style={{fontSize:11,fontWeight:700,color:"#1e3a5f",background:"#eff6ff",borderRadius:6,padding:"4px 8px"}}>{s.id}</span>
+          <div style={{flex:1,minWidth:160}}><div style={{fontWeight:600,fontSize:13}}>{s.nombre||s.email}{s.depto?" — depto "+s.depto:""}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>{s.dir||"—"} · {tipoSolTxt(s)}{s.ctrlN?" · N° "+s.ctrlN:""} · <span style={{color:co,fontWeight:600}}>{ic} {tx}</span></div></div>
+          <div style={{display:"flex",gap:6}}>
+            <button style={BS(true)} onClick={()=>setVer(s)}>Ver</button>
+            {s.estado==="pendiente"&&<button style={BP(true)} disabled={ocup} onClick={()=>aprobar(s)}>Aprobar</button>}
+            {s.estado==="aprobado"&&<button style={BP(true)} disabled={ocup} onClick={()=>listo(s)}>Listo para retiro</button>}
+            {s.estado==="listo"&&<button style={BP(true)} onClick={()=>setEnt(s)}>Entregar</button>}
+          </div>
+        </div>); })}
+    </div>}
+    {ver&&<Ventana titulo={ver.id+" — "+(ver.nombre||ver.email)} onClose={()=>setVer(null)} pie={<>
+        <button style={BD(true)} disabled={ocup} onClick={()=>borrar(ver)}>Eliminar</button>
+        {ver.estado==="pendiente"&&<><button style={BS(true)} disabled={ocup} onClick={()=>rechazar(ver)}>Rechazar</button><button style={BP(true)} disabled={ocup} onClick={()=>aprobar(ver)}>Aprobar y avisar</button></>}
+        {ver.estado==="aprobado"&&<button style={BP(true)} disabled={ocup} onClick={()=>listo(ver)}>Listo para retiro</button>}
+        {ver.estado==="listo"&&<button style={BP(true)} onClick={()=>{setEnt(ver);setVer(null);}}>Registrar entrega</button>}
+      </>}>
+      <div style={{...alrt("info"),marginBottom:10}}>{tipoSolTxt(ver)} · {(ESTADOS_SOL[ver.estado]||[])[1]||ver.estado}</div>
+      {fila("Nombre",ver.nombre)}{fila("RUT",ver.rut)}{fila("Dirección",ver.dir)}{fila("Departamento",ver.depto)}{fila("Correo",ver.email)}{fila("Teléfono",ver.tel)}
+      {fila("Control afectado",ver.ctrlN&&"N° "+ver.ctrlN)}{fila("Motivo",ver.motivo)}{fila("Creada",ver.creado)}{fila("Control entregado",ver.numCtrlNuevo&&"N° "+ver.numCtrlNuevo)}
+      {ver.firma&&<div style={{marginTop:10}}><div style={{fontSize:11,color:"#64748b",fontWeight:700,textTransform:"uppercase"}}>Declaración firmada</div>
+        <div style={{fontSize:12,color:"#334155",margin:"4px 0 6px",lineHeight:1.6}}>Declara bajo juramento que el control {ver.ctrlN?"N° "+ver.ctrlN+" ":""}{(ver.tipoSol||ver.tipo)==="perdida"?"fue "+(ver.motivo||"extraviado/dañado")+" y no está en su poder.":"se solicita como segundo dispositivo de acceso."}</div>
+        <img src={ver.firma} alt="Firma" style={{maxHeight:80,maxWidth:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:6}}/></div>}
+      {(ver.comprobanteLink||String(ver.comprobante||"").startsWith("data:image"))&&<div style={{marginTop:10}}><div style={{fontSize:11,color:"#64748b",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Comprobante de pago</div>
+        {ver.comprobanteLink?<a href={ver.comprobanteLink} target="_blank" rel="noreferrer" style={{...BS(true),textDecoration:"none",display:"inline-block"}}>📎 Ver comprobante</a>:<img src={ver.comprobante} alt="Comprobante" style={{maxWidth:"100%",borderRadius:6}}/>}</div>}
+    </Ventana>}
+    {ent&&<EntregaCtrl sol={ent} listado={listado} guardarListado={guardarListado} cambiarEstado={cambiarEstado} showToast={showToast} onClose={()=>setEnt(null)}/>}
+  </div>);
+}
+
+// Entrega del control: recibo conforme firmado (PDF + correo), control asignado en el listado y solicitud cerrada
+function EntregaCtrl({sol,listado,guardarListado,cambiarEstado,showToast,onClose}){
+  const hoy=new Date().toISOString().slice(0,10);
+  const [n,setN]=useState(""), [fecha,setFecha]=useState(hoy), [firma,setFirma]=useState(""), [env,setEnv]=useState(false);
+  const ocupado=n&&listado.find(c=>c.n==n&&c.estado==="Vigente"&&!(c.dir===sol.dir&&c.depto===sol.depto));
+  const guardar=async()=>{
+    if(!n){ showToast("Indica el N° de control entregado","error"); return; }
+    if(!firma){ showToast("Falta la firma del residente","error"); return; }
+    setEnv(true);
+    try{
+      const [y,m,d]=fecha.split("-"), f=d+"/"+m+"/"+y;
+      const r=await gasPost({tipo:"recibo",tipoRecibo:"control",numControl:"un",nombre:sol.nombre||"",rut:sol.rut||"",dir:sol.dir||"",depto:sol.depto||"",fecha:fechaLarga(fecha),email:sol.email||"",firma,creado:new Date().toLocaleString("es-CL")});
+      if(!r.ok) throw new Error(r.error);
+      const existe=listado.some(c=>c.n==n);
+      const nuevo=existe?listado.map(c=>c.n==n?{...c,dir:sol.dir,depto:sol.depto,estado:"Vigente",entrega:"Completada",fecha:f}:c)
+        :[...listado,{n:parseInt(n),dir:sol.dir,depto:sol.depto,estado:"Vigente",entrega:"Completada",fecha:f,notas:sol.id}];
+      await guardarListado(nuevo);
+      await cambiarEstado(sol,"entregado",{numCtrlNuevo:parseInt(n),fechaEntrega:fecha});
+      showToast("Entregado — control N° "+n+" asignado"+(sol.email?" y recibo enviado al residente":""),"success"); onClose();
+    }catch(e){ showToast("No se pudo registrar: "+e.message,"error"); }
+    setEnv(false);
+  };
+  return(<Ventana titulo={"Entrega de control — "+sol.id} onClose={onClose} pie={<><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} disabled={env} onClick={guardar}>{env?"Guardando…":"Registrar entrega"}</button></>}>
+    <div style={{fontSize:13,marginBottom:10}}><b>{sol.nombre}</b> · {sol.dir} depto {sol.depto} · {tipoSolTxt(sol)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div><label style={lbl}>N° de control entregado *</label><input type="number" style={inp} value={n} onChange={e=>setN(e.target.value)}/></div>
+      <div><label style={lbl}>Fecha</label><input type="date" style={inp} value={fecha} onChange={e=>setFecha(e.target.value)}/></div>
+    </div>
+    {ocupado&&<div style={{...alrt("warning"),marginTop:8}}>El N° {n} figura vigente para {ocupado.dir} {ocupado.depto}. Si continúas, se reasigna a este departamento.</div>}
+    <div style={{marginTop:12}}><label style={lbl}>Firma del residente (recibe conforme) *</label><Firma onChange={setFirma}/></div>
+    <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Se genera el recibo conforme en PDF{sol.email?" y se le envía por correo":""}, y el control queda asignado en el listado.</div>
+  </Ventana>);
+}
+
+function ListadoCtrl({listado,guardarListado,showToast,mob}){
+  const [q,setQ]=useState(""), [fil,setFil]=useState("todos"), [ed,setEd]=useState(null), [env,setEnv]=useState(false);
+  const cuenta=(d,p)=>listado.filter(c=>c.dir===d&&c.depto===p&&c.estado==="Vigente").length;
+  const t=q.trim().toLowerCase();
+  const vis=listado.filter(c=>(fil==="todos"||(fil==="2"?cuenta(c.dir,c.depto)>=2:c.estado===fil))&&(!t||(c.n+" "+c.dir+" "+c.depto+" "+c.notas).toLowerCase().includes(t)));
+  const guardar=async()=>{ const c={...ed.c,n:parseInt(ed.c.n)||0};
+    if(!c.n||!c.dir){ showToast("Falta N° o dirección","error"); return; }
+    if(listado.some((x,i)=>x.n===c.n&&i!==ed.i)){ showToast("Ya existe el control N° "+c.n,"error"); return; }
+    setEnv(true);
+    try{ await guardarListado(ed.i<0?[...listado,c]:listado.map((x,i)=>i===ed.i?c:x)); showToast("Control guardado","success"); setEd(null); }catch(e){ showToast("No se pudo guardar: "+e.message,"error"); }
+    setEnv(false); };
+  const eliminar=async()=>{ if(!window.confirm("¿Quitar el control N° "+ed.c.n+" del listado?")) return; setEnv(true);
+    try{ await guardarListado(listado.filter((x,i)=>i!==ed.i)); showToast("Control quitado","success"); setEd(null); }catch(e){ showToast("Error: "+e.message,"error"); } setEnv(false); };
+  const setC=(k,v)=>setEd(e=>({...e,c:{...e.c,[k]:v}}));
+  const nuevo=()=>setEd({i:-1,c:{n:(listado.length?Math.max(...listado.map(c=>c.n)):0)+1,dir:"",depto:"",estado:"Vigente",entrega:"No iniciada",fecha:"",notas:""}});
+  const chip=(e)=>e==="Vigente"?<span style={{background:"#d1fae5",color:"#065f46",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>Vigente</span>:<span style={{background:"#fee2e2",color:"#991b1b",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{e}</span>;
+  return(<div>
+    <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+      <input style={{...inp,maxWidth:260}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar N°, dirección, depto…"/>
+      {[["todos","Todos"],["Vigente","Vigentes"],["Bloqueado","Bloqueados"],["2","Deptos con 2"]].map(([k,x])=><button key={k} onClick={()=>setFil(k)} style={{...BS(true),...(fil===k?{background:"#eff6ff",borderColor:"#93c5fd",color:"#1e3a5f"}:{})}}>{x}</button>)}
+      <button style={{...BP(true),marginLeft:"auto"}} onClick={nuevo}>＋ Agregar</button>
+    </div>
+    {!listado.length&&<div style={alrt("warning")}>El listado de controles en Drive está vacío.</div>}
+    <div style={{...card,padding:0,overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+        <thead><tr>{["N°","Dirección","Depto","Estado","Del depto","Entrega","Fecha","Notas"].map(h=><th key={h} style={{textAlign:"left",padding:"8px 10px",background:"#f8fafc",color:"#64748b",fontSize:11,textTransform:"uppercase",borderBottom:"1px solid #e2e8f0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+        <tbody>{vis.map(c=>{ const i=listado.indexOf(c), k=cuenta(c.dir,c.depto);
+          return(<tr key={c.n} onClick={()=>setEd({i,c:{...c}})} style={{cursor:"pointer",borderBottom:"1px solid #f1f5f9"}}>
+            <td style={{padding:"7px 10px",fontWeight:700}}>{c.n}</td><td style={{padding:"7px 10px",whiteSpace:"nowrap"}}>{c.dir}</td><td style={{padding:"7px 10px",fontWeight:600}}>{c.depto}</td>
+            <td style={{padding:"7px 10px"}}>{chip(c.estado)}</td><td style={{padding:"7px 10px",color:k>=2?"#1d4ed8":"#64748b",fontWeight:k>=2?700:400}}>{c.dir==="Administración"?"—":k}</td>
+            <td style={{padding:"7px 10px",color:"#64748b"}}>{c.entrega||"—"}</td><td style={{padding:"7px 10px",color:"#64748b",whiteSpace:"nowrap"}}>{c.fecha||"—"}</td><td style={{padding:"7px 10px",color:"#64748b"}}>{c.notas||"—"}</td>
+          </tr>); })}</tbody>
+      </table>
+    </div>
+    <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Toca una fila para editarla. Máximo 2 controles vigentes por departamento.</div>
+    {ed&&<Ventana titulo={ed.i<0?"Agregar control":"Control N° "+listado[ed.i].n} onClose={()=>setEd(null)} pie={<>
+        {ed.i>=0&&<button style={BD(true)} disabled={env} onClick={eliminar}>Quitar</button>}
+        <button style={BS(true)} onClick={()=>setEd(null)}>Cancelar</button><button style={BP(true)} disabled={env} onClick={guardar}>{env?"Guardando…":"Guardar"}</button></>}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><label style={lbl}>N° control</label><input type="number" style={inp} value={ed.c.n} onChange={e=>setC("n",e.target.value)}/></div>
+        <div><label style={lbl}>Estado</label><select style={sel} value={ed.c.estado} onChange={e=>setC("estado",e.target.value)}><option>Vigente</option><option>Bloqueado</option></select></div>
+        <div><label style={lbl}>Dirección</label><select style={sel} value={ed.c.dir} onChange={e=>setC("dir",e.target.value)}><option value="">Seleccione…</option>{[...DIRECCIONES_ED,"Administración"].map(d=><option key={d}>{d}</option>)}</select></div>
+        <div><label style={lbl}>Depto</label><select style={sel} value={ed.c.depto} onChange={e=>setC("depto",e.target.value)}><option value="">—</option>{[...DEPTOS_ED,"—"].map(d=><option key={d}>{d}</option>)}</select></div>
+        <div><label style={lbl}>Entrega</label><select style={sel} value={ed.c.entrega} onChange={e=>setC("entrega",e.target.value)}>{["Completada","No iniciada","—"].map(d=><option key={d}>{d}</option>)}</select></div>
+        <div><label style={lbl}>Fecha</label><input style={inp} value={ed.c.fecha} onChange={e=>setC("fecha",e.target.value)} placeholder="dd/mm/aaaa"/></div>
+        <div style={{gridColumn:"1/-1"}}><label style={lbl}>Notas</label><input style={inp} value={ed.c.notas} onChange={e=>setC("notas",e.target.value)}/></div>
+      </div>
+      {ed.c.estado==="Vigente"&&ed.c.dir&&ed.c.dir!=="Administración"&&cuenta(ed.c.dir,ed.c.depto)-(ed.i>=0&&listado[ed.i].estado==="Vigente"&&listado[ed.i].dir===ed.c.dir&&listado[ed.i].depto===ed.c.depto?1:0)>=2&&<div style={{...alrt("warning"),marginTop:10}}>Este departamento ya tiene 2 controles vigentes.</div>}
+    </Ventana>}
+  </div>);
+}
+
+function EnviarLinkCtrl({sols,showToast,alEnviar}){
+  const [tipo,setTipo]=useState(""), [email,setEmail]=useState(""), [nombre,setNombre]=useState(""), [env,setEnv]=useState(false);
+  const enviar=async()=>{
+    const e=email.trim().toLowerCase();
+    if(!tipo){ showToast("Elige el tipo de solicitud","error"); return; }
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)){ showToast("Correo no válido","error"); return; }
+    setEnv(true);
+    try{
+      const actual=await gasListar("Controles");
+      const previa=actual.find(s=>String(s.email||"").toLowerCase()===e&&(s.tipoSol||s.tipo)===tipo&&!["entregado","rechazado"].includes(s.estado));
+      const n=actual.map(s=>parseInt(String(s.id||"").replace(/\D/g,""))||0);
+      const id=previa?previa.id:"SOL-"+String((n.length?Math.max(...n):0)+1).padStart(4,"0");
+      const url="https://com12norte.github.io/administracion-edificio/solicitud.html?tipo="+tipo+"&id="+id;
+      const j=await gasPost({tipo:"enviar_link_ctrl",id,tipoSol:tipo,nombre:nombre.trim()||"Residente",email:e,url,tipoLabel:tipo==="perdida"?"Perdida/Falla de Control":"2 Control Remoto",
+        estado:previa?previa.estado:"link_enviado",creado:previa?previa.creado:new Date().toLocaleString("es-CL"),reenvio:!!previa});
+      if(!j.ok) throw new Error(j.error);
+      showToast((previa?"Link reenviado ("+id+")":"Link enviado ("+id+")")+" a "+e,"success"); setEmail(""); setNombre(""); alEnviar();
+    }catch(ex){ showToast("No se pudo enviar: "+ex.message,"error"); }
+    setEnv(false);
+  };
+  const Opc=({v,ico,t,d})=>(<button type="button" onClick={()=>setTipo(v)} style={{flex:1,padding:"14px 10px",borderRadius:10,cursor:"pointer",textAlign:"center",border:"1.5px solid "+(tipo===v?"#1e3a5f":"#e2e8f0"),background:tipo===v?"#eff6ff":"#fff"}}>
+    <div style={{fontSize:24}}>{ico}</div><div style={{fontWeight:700,fontSize:13,marginTop:4}}>{t}</div><div style={{fontSize:11,color:"#64748b"}}>{d}</div></button>);
+  return(<div style={{...card,maxWidth:620,padding:16}}>
+    <div style={{fontWeight:700,fontSize:15}}>Enviar link al residente</div>
+    <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>El residente completa la declaración, la firma y el comprobante de pago desde su celular, cuando quiera. Si ya tiene una solicitud abierta del mismo tipo, se le reenvía la misma.</div>
+    <div style={{display:"flex",gap:10,marginBottom:12}}><Opc v="perdida" ico="🚨" t="Pérdida / falla" d="Declaración + reposición $15.000"/><Opc v="segundo" ico="➕" t="2° control" d="Segundo control $15.000"/></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div><label style={lbl}>Correo del residente *</label><input type="email" style={inp} value={email} onChange={e=>setEmail(e.target.value)} placeholder="residente@correo.com"/></div>
+      <div><label style={lbl}>Nombre</label><input style={inp} value={nombre} onChange={e=>setNombre(e.target.value)} placeholder="Opcional"/></div>
+    </div>
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}><button style={BP(true)} disabled={env} onClick={enviar}>{env?"Enviando…":"✉ Enviar link"}</button></div>
+  </div>);
+}
+
 function ListaRecibos({showToast}){
   const [lista,setLista]=useState(null), [err,setErr]=useState(""), [q,setQ]=useState("");
   const cargar=async()=>{ setErr(""); try{ const d=await gasListar("Recibos"); setLista([...d].sort((a,b)=>String(b.id).localeCompare(String(a.id)))); }catch(e){ setErr(e.message); setLista([]); } };
@@ -2537,7 +2752,7 @@ function ListaRecibos({showToast}){
   const t=q.trim().toLowerCase();
   const vis=lista.filter(r=>!t||[r.nombre,r.depto,r.dir,r.tipo,r.detalle].join(" ").toLowerCase().includes(t));
   return(<div>
-    {err&&<div style={alrt("danger")}>{err}</div>}
+    {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
       <input style={{...inp,maxWidth:320}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar nombre, depto o dirección…"/>
       <span style={{fontSize:12,color:"#64748b"}}>{vis.length} de {lista.length}</span>

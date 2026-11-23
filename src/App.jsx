@@ -2841,7 +2841,7 @@ function CopropietariosView({showToast,mob}){
   const cnt={vigente:0,revisar:0,devuelto:0,debe:0,sinreg:0,sincorreo:0,faltan:0};
   data.forEach(r=>{ cnt[estado(r)]++; if(!cpMail(r)) cnt.sincorreo++; if((r.faltan||[]).length) cnt.faltan++; });
   const t=q.toLowerCase().replace(/[.\-]/g,"");
-  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:(fil!=="todos"&&estado(r)!==fil)) return false;
+  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sintipo"?!(r.docs||[]).some(x=>(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
     if(!t) return true; const d=r.datos||{}; return (r.direccion+" "+r.depto+" "+(d.prop_nombre||"")+" "+(d.prop_rut||"")+" "+(d.res_nombre||"")).toLowerCase().replace(/[.\-]/g,"").includes(t); })
     .sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
   const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
@@ -2852,7 +2852,7 @@ function CopropietariosView({showToast,mob}){
     {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:12}}>
       {kpi("todos","Unidades",data.length,"#1e3a5f")}{kpi("vigente","Al día "+anio,cnt.vigente,"#059669")}{kpi("revisar","Por validar",cnt.revisar,"#2563eb")}{kpi("devuelto","Devueltos",cnt.devuelto,"#d97706")}
-      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}
+      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
       <input style={{...inp,maxWidth:340}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, depto, nombre o RUT…"/>
@@ -2938,15 +2938,19 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
     {(r.faltan||[]).length?<div style={{fontSize:12,color:"#b45309",marginBottom:4}}>Faltan: {r.faltan.map(t=>CP_DOC[t]||t).join(", ")}</div>:<div style={{fontSize:12,color:"#059669",marginBottom:4}}>✓ Documentación completa</div>}
     {r.docsEstado&&<div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Según Listado: {Object.entries(r.docsEstado).map(([k,v])=>(CP_DOC[k]||"Ficha")+": "+({ok:"entregado",falta:"pendiente",na:"no corresponde",desconoce:"se desconoce"}[v]||v)).join(" · ")}</div>}
     {r.carpetaUrl&&<div style={{fontSize:12,marginBottom:6}}><a href={r.carpetaUrl} target="_blank" rel="noreferrer">📁 Carpeta en Drive ({r.archivosCarpeta==null?"?":r.archivosCarpeta} archivos)</a></div>}
+    {(r.docs||[]).some(x=>(x.tipo||"sin_clasificar")==="sin_clasificar")&&<div style={{...alrt("warning"),marginBottom:6}}>Hay documentos sin tipo: indica qué documento es cada uno para que cuente como entregado.</div>}
     {(r.docs||[]).map((x,i)=>{ const est=x.estado||"pendiente", col={validado:"#059669",rechazado:"#dc2626",pendiente:"#2563eb"}[est];
-      return(<div key={i} style={{border:"1px solid #e2e8f0",borderRadius:8,padding:8,marginBottom:6,fontSize:12}}>
+      const tipo=tipos[i]??x.tipo??"sin_clasificar", sinTipo=tipo==="sin_clasificar";
+      return(<div key={i} style={{border:"1px solid "+(sinTipo?"#fbbf24":"#e2e8f0"),background:sinTipo?"#fffbeb":"#fff",borderRadius:8,padding:8,marginBottom:6,fontSize:12}}>
+        <div style={{fontWeight:700,fontSize:13,color:sinTipo?"#b45309":"#0f172a",marginBottom:2}}>{sinTipo?"⚠ Documento sin tipo":CP_TIPOS_DOC[tipo]||tipo}</div>
         <div><a href={x.url} target="_blank" rel="noreferrer">📎 {x.nombre}</a> <span style={{color:"#64748b"}}>{x.fecha||""} · {x.origen||""}</span></div>
         {x.asunto&&<div style={{color:"#64748b"}}>Asunto: {x.asunto}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:5}}>
-          <select style={{...sel,width:"auto",padding:"4px 6px"}} value={tipos[i]??x.tipo??"sin_clasificar"} onChange={e=>{ const v=e.target.value; setTipos(t=>({...t,[i]:v})); hacer(async()=>{ const y=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:v,estado:null,motivo:""}); if(!y.ok) throw new Error(y.error); showToast("Tipo actualizado","success"); await cargar(); }); }}>
+          <span style={{color:"#64748b"}}>Tipo de documento:</span>
+          <select style={{...sel,width:"auto",padding:"4px 6px",...(sinTipo?{borderColor:"#f59e0b"}:{})}} value={tipo} onChange={e=>{ const v=e.target.value; setTipos(t=>({...t,[i]:v})); hacer(async()=>{ const y=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:v,estado:null,motivo:""}); if(!y.ok) throw new Error(y.error); showToast("Tipo actualizado","success"); await cargar(); }); }}>
             {Object.entries(CP_TIPOS_DOC).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
           <span style={{color:col,fontWeight:700}}>{est}</span>{x.motivo&&<span style={{color:"#dc2626"}}>({x.motivo})</span>}
-          <button style={BS(true)} disabled={ocup} onClick={()=>docAccion(i,"validado")}>✅ Validar</button>
+          <button style={BS(true)} disabled={ocup} onClick={()=>{ if(sinTipo){ showToast("Primero indica qué tipo de documento es","error"); return; } docAccion(i,"validado"); }}>✅ Validar</button>
           <button style={BS(true)} disabled={ocup} onClick={()=>docAccion(i,"rechazado")}>❌ Rechazar</button>
         </div>
       </div>); })}

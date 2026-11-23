@@ -831,7 +831,7 @@ export default function App(){
             {view==="emails"&&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
             {view==="emergencia"&&<EmergenciaView role={er} showToast={showToast} mob={mob} towers={towers}/>}
             {view==="comprobantes"&&<ComprobantesView showToast={showToast} mob={mob}/>}
-            {view==="copropietarios"&&<SitioIntegrado key="copropietarios" titulo="Registro de copropietarios" url="https://com12norte.github.io/administracion-edificio/?embed=1#coprop"/>}
+            {view==="copropietarios"&&<CopropietariosView showToast={showToast} mob={mob}/>}
             {view==="parking"&&<SitioIntegrado key="parking" titulo="Parking" url="https://parkadmin-ashy.vercel.app/?ir=personal&embed=1"/>}
             {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
             {view==="config"&&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} equipos={equipos} setEquipos={setEquiposDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
@@ -2740,6 +2740,154 @@ function EnviarLinkCtrl({sols,showToast,alEnviar}){
     </div>
     <div style={{display:"flex",justifyContent:"flex-end",marginTop:12}}><button style={BP(true)} disabled={env} onClick={enviar}>{env?"Enviando…":"✉ Enviar link"}</button></div>
   </div>);
+}
+
+// ── Registro de Copropietarios (maestro de unidades y personas) ──
+const CP_URL_PUBLICO="https://com12norte.github.io/administracion-edificio/copropietario.html";
+const cpPost=async(accion,extra)=>{ const j=await gasPost({accion,...(extra||{})}); return j.resultado||j; };
+const cpMail=r=>{ const d=r.datos||{}; return String(d.prop_mail||d.res_mail||"").trim(); };
+const CP_BADGE={vigente:["✅ Al día","#d1fae5","#065f46"],revisar:["🕐 Por validar","#dbeafe","#1e40af"],devuelto:["↩️ Devuelto","#fef3c7","#92400e"],debe:["❗ Debe actualizar","#fee2e2","#991b1b"],sinreg:["⚪ Sin registro","#e5e7eb","#374151"]};
+const CP_DOC={dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",contrato:"Contrato arriendo",ci_arrendatario:"Cédula arrendatario",mandato:"Mandato corredor"};
+const CP_TIPOS_DOC={sin_clasificar:"Sin clasificar",dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",ci_arrendatario:"Cédula arrendatario",contrato:"Contrato arriendo",mandato:"Mandato corredor",otro:"Otro"};
+const CP_ETIQ=[["Propietario",null],["prop_nombre","Nombre"],["prop_rut","RUT"],["prop_fnac","Nacimiento"],["prop_nac","Nacionalidad"],["prop_tel","Teléfono"],["prop_mail","Correo"],["conyuge_nombre","Cónyuge/pareja"],["conyuge_rut","RUT cónyuge"],["uso","Uso de la residencia"],["resid_principal","Residencia principal del dueño"],
+  ["Residente principal",null],["res_nombre","Nombre"],["res_rut","RUT"],["res_fnac","Nacimiento"],["res_nac","Nacionalidad"],["res_tel","Teléfono"],["res_mail","Correo"],
+  ["Unidad",null],["n_res","Residentes"],["n_disc","Con discapacidad"],["n_movred","Movilidad reducida"],["n_nohisp","No hispanoparlantes"],["n_electro","Electrodependientes"],["n_menores","Menores"],["n_adultos","Adultos mayores"],["mascota","Mascota"],["masc_tipo","Tipo"],["masc_det","Nombre y color"],["masc_reg","Reg. Nacional"],
+  ["Emergencia",null],["em_nombre","Contacto"],["em_par","Parentesco"],["em_tel","Teléfono"]];
+const csvDescargar=(nombre,filas)=>{ const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"'; const csv=filas.map(r=>r.map(q).join(",")).join("\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"})); a.download=nombre; a.click(); };
+const copiarTexto=(t,ok)=>{ (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(ok).catch(()=>window.prompt("Copia el link:",t)); };
+// Importación del CSV de respuestas del Google Form
+function cpParseCSV(t){ const rows=[]; let row=[],c="",q=false;
+  for(let i=0;i<t.length;i++){ const ch=t[i];
+    if(q){ if(ch==='"'){ if(t[i+1]==='"'){c+='"';i++;} else q=false; } else c+=ch; }
+    else if(ch==='"') q=true; else if(ch===","){row.push(c);c="";} else if(ch==="\n"){row.push(c);rows.push(row);row=[];c="";} else if(ch!=="\r") c+=ch; }
+  if(c||row.length){row.push(c);rows.push(row);} return rows; }
+const cpN=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/\s+/g," ").trim();
+function cpKeyDe(h){ const n=cpN(h), res=n.includes("copropietario o residente");
+  const t=[[n.startsWith("marca temporal"),"_ts"],[n.startsWith("direccion de unidad"),"_dir"],[n.startsWith("letra y numero"),"_depto"],[n.startsWith("direccion de la residencia"),"resid_principal"],
+    [n.startsWith("nombre completo del conyuge"),"conyuge_nombre"],[n.startsWith("rut")&&n.includes("conyuge"),"conyuge_rut"],
+    [n.startsWith("nombre completo")&&res,"res_nombre"],[n.startsWith("rut")&&res,"res_rut"],[n.startsWith("fecha de nacimiento")&&res,"res_fnac"],[n.startsWith("nacionalidad")&&res,"res_nac"],[n.startsWith("numero de telefono")&&res,"res_tel"],[n.startsWith("mail")&&res,"res_mail"],
+    [n.startsWith("nombre completo del propietario"),"prop_nombre"],[n.startsWith("rut")&&n.includes("propietario"),"prop_rut"],[n.startsWith("fecha de nacimiento")&&n.includes("propietario"),"prop_fnac"],[n.startsWith("nacionalidad")&&n.includes("propietario"),"prop_nac"],[n.startsWith("numero de telefono")&&n.includes("propietario"),"prop_tel"],[n.startsWith("mail")&&n.includes("propietario"),"prop_mail"],
+    [n.startsWith("uso de la residencia"),"uso"],[n.startsWith("numero de residente"),"n_res"],[n.includes("con discapacidad"),"n_disc"],[n.includes("movilidad reducida"),"n_movred"],[n.includes("no hispano"),"n_nohisp"],[n.includes("electrodependiente"),"n_electro"],[n.includes("menores de edad"),"n_menores"],[n.includes("adultos mayores"),"n_adultos"],
+    [n.startsWith("tiene mascota"),"mascota"],[n.startsWith("tipo de mascota"),"masc_tipo"],[n.startsWith("senale nombre"),"masc_det"],[n.startsWith("esta registrada"),"masc_reg"],
+    [n.startsWith("nombre de la persona"),"em_nombre"],[n.startsWith("tipo de parentesco"),"em_par"],[n.startsWith("numero de telefono de la persona"),"em_tel"]];
+  const f=t.find(x=>x[0]); return f?f[1]:null; }
+const cpFecha=v=>{ v=String(v||"").trim(); const m=v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); return m?m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0"):v; };
+const cpRutFmt=v=>{ v=String(v||"").replace(/[^0-9kK]/g,"").toUpperCase(); if(v.length<2) return v; return v.slice(0,-1).replace(/\B(?=(\d{3})+(?!\d))/g,".")+"-"+v.slice(-1); };
+
+function CopropietariosView({showToast,mob}){
+  const [data,setData]=useState(null), [anio,setAnio]=useState(new Date().getFullYear()), [err,setErr]=useState("");
+  const [fil,setFil]=useState("todos"), [q,setQ]=useState(""), [abierto,setAbierto]=useState(null), [ocup,setOcup]=useState("");
+  const fileRef=useRef(null);
+  const cargar=async()=>{ setErr(""); try{ const r=await cpPost("coprop_listar"); if(!r.ok) throw new Error(r.error||"Error"); setData(r.data||[]); if(r.anio) setAnio(r.anio); return r.data||[]; }catch(e){ setErr(e.message); setData(d=>d||[]); return null; } };
+  useEffect(()=>{ cargar(); },[]);
+  const estado=r=>r.estado==="sin_registro"?"sinreg":r.anio===anio&&r.estado==="aprobado"?"vigente":r.anio===anio&&r.estado==="pendiente_revision"?"revisar":r.estado==="devuelto"?"devuelto":"debe";
+  const herramienta=async(clave,aviso,fn)=>{ setOcup(clave); showToast(aviso,"info"); try{ await fn(); }catch(e){ showToast("Error: "+e.message,"error"); } setOcup(""); };
+  const recordarTodos=()=>{ if(!window.confirm("¿Enviar recordatorio con link personal a las unidades que deben actualizar? (máx. 40 correos por día)")) return;
+    herramienta("rec","Enviando recordatorios…",async()=>{ const r=await cpPost("coprop_recordar",{ids:"morosos"}); if(!r.ok) throw new Error(r.error); showToast("Enviados: "+r.enviados+" · sin correo: "+r.sinCorreo,"success"); cargar(); }); };
+  const sincDocs=()=>herramienta("sinc","Sincronizando con el Listado de Documentos…",async()=>{ const r=await cpPost("coprop_sincdocs"); if(!r.ok) throw new Error(r.error); showToast("Listado leído: "+r.filasLeidas+" unidades · "+r.unidadesNuevasSinRegistro+" sin registro · "+r.sinCarpeta+" sin carpeta","success"); cargar(); });
+  const indexar=()=>herramienta("idx","Indexando carpetas de Drive…",async()=>{ const r=await cpPost("coprop_indexar"); if(!r.ok) throw new Error(r.error); showToast(r.archivosIndexados+" archivos nuevos en "+r.unidadesRevisadas+" carpetas","success"); cargar(); });
+  const traerCorreo=()=>herramienta("mail","Trayendo adjuntos del correo… puede tardar unos minutos",async()=>{ const r=await cpPost("coprop_importarcorreo"); if(!r.ok) throw new Error(r.error); showToast(r.archivosGuardados+" archivos guardados · "+(r.mensaje||""),"success"); cargar(); });
+  const faltantes=()=>{ const f=(data||[]).filter(r=>(r.faltan||[]).length).sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
+    if(!f.length){ showToast("No hay documentos faltantes","success"); return; }
+    csvDescargar("documentos_faltantes.csv",[["Dirección","Depto","Propietario","Correo","Estado registro","Documentos que faltan","Observación listado"],...f.map(r=>[r.direccion,r.depto,(r.datos||{}).prop_nombre,cpMail(r),CP_BADGE[estado(r)][0],r.faltan.map(t=>CP_DOC[t]||t).join(" + "),r.obsListado])]); };
+  const importar=async e=>{ const file=e.target.files[0]; e.target.value=""; if(!file) return;
+    const rows=cpParseCSV(await file.text()).filter(r=>r.some(x=>x.trim()));
+    if(rows.length<2){ showToast("CSV vacío","error"); return; }
+    const keys=rows[0].map(cpKeyDe), falta=["_dir","_depto","prop_nombre","prop_rut"].filter(k=>!keys.includes(k));
+    if(falta.length){ showToast("No reconozco columnas: "+falta.join(", ")+". ¿Es el CSV de respuestas del Form?","error"); return; }
+    const regs=rows.slice(1).map(r=>{ const d={}; keys.forEach((k,i)=>{ if(k&&!k.startsWith("_")&&r[i]!==undefined) d[k]=r[i].trim(); });
+      ["prop_fnac","res_fnac"].forEach(k=>{ if(d[k]) d[k]=cpFecha(d[k]); }); ["prop_rut","res_rut","conyuge_rut"].forEach(k=>{ if(d[k]) d[k]=cpRutFmt(d[k]); });
+      if(d.mascota) d.mascota=/^s/i.test(d.mascota)?"Sí":"No";
+      const m=String(r[keys.indexOf("_ts")]||"").match(/(\d{4})-\d{2}|\/(\d{4})/);
+      return {anio:m?parseInt(m[1]||m[2],10):anio,direccion:(r[keys.indexOf("_dir")]||"").trim(),depto:(r[keys.indexOf("_depto")]||"").trim(),datos:d}; }).filter(x=>x.direccion&&x.depto);
+    if(!regs.length){ showToast("Sin filas válidas","error"); return; }
+    if(!window.confirm("Se importarán "+regs.length+" respuestas como Registro "+anio+" (quedan \"Al día\"). Si una unidad aparece repetida, queda la última fila. ¿Continuar?")) return;
+    herramienta("imp","Importando…",async()=>{ const r=await cpPost("coprop_importar",{registros:regs,anio}); if(!r.ok) throw new Error(r.error); showToast("Importado: "+r.nuevos+" nuevas, "+r.actualizados+" actualizadas","success"); cargar(); }); };
+
+  if(data===null) return <div style={{...card,color:"#64748b"}}>Cargando registro…</div>;
+  const cnt={vigente:0,revisar:0,devuelto:0,debe:0,sinreg:0,sincorreo:0,faltan:0};
+  data.forEach(r=>{ cnt[estado(r)]++; if(!cpMail(r)) cnt.sincorreo++; if((r.faltan||[]).length) cnt.faltan++; });
+  const t=q.toLowerCase().replace(/[.\-]/g,"");
+  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:(fil!=="todos"&&estado(r)!==fil)) return false;
+    if(!t) return true; const d=r.datos||{}; return (r.direccion+" "+r.depto+" "+(d.prop_nombre||"")+" "+(d.prop_rut||"")+" "+(d.res_nombre||"")).toLowerCase().replace(/[.\-]/g,"").includes(t); })
+    .sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
+  const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
+    <div style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>{n}</div><div style={{fontSize:11,color:"#64748b"}}>{tx}</div></button>;
+  const herr=[["🔗 Copiar link público",()=>copiarTexto(CP_URL_PUBLICO,()=>showToast("Link público copiado","success")),""],["📧 Recordar a los que deben",recordarTodos,"rec"],["📂 Sincronizar documentos",sincDocs,"sinc"],
+    ["🗂️ Indexar carpetas de Drive",indexar,"idx"],["✉️ Traer adjuntos del correo",traerCorreo,"mail"],["⬇️ Faltantes (CSV)",faltantes,""],["📥 Importar CSV del Form",()=>fileRef.current.click(),"imp"]];
+  return(<div>
+    {err&&<div style={alrt("error")}>{err}</div>}
+    <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:12}}>
+      {kpi("todos","Unidades",data.length,"#1e3a5f")}{kpi("vigente","Al día "+anio,cnt.vigente,"#059669")}{kpi("revisar","Por validar",cnt.revisar,"#2563eb")}{kpi("devuelto","Devueltos",cnt.devuelto,"#d97706")}
+      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}
+    </div>
+    <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+      <input style={{...inp,maxWidth:340}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, depto, nombre o RUT…"/>
+      <span style={{fontSize:12,color:"#64748b"}}>{vis.length} de {data.length}</span>
+      <button style={{...BS(true),marginLeft:"auto"}} onClick={cargar}>↻ Actualizar</button>
+    </div>
+    <details style={{...card,padding:"8px 12px",marginBottom:10}}>
+      <summary style={{cursor:"pointer",fontSize:13,fontWeight:600,color:"#334155"}}>Herramientas</summary>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{herr.map(([tx,fn,k])=><button key={tx} style={BS(true)} disabled={!!ocup} onClick={fn}>{ocup&&ocup===k?"⏳ ":""}{tx}</button>)}</div>
+      <input ref={fileRef} type="file" accept=".csv" style={{display:"none"}} onChange={importar}/>
+    </details>
+    {!vis.length?<div style={{...card,color:"#64748b",textAlign:"center"}}>Sin resultados.</div>:
+    <div style={{...card,padding:0,overflow:"hidden"}}>
+      {vis.map((r,i)=>{ const b=CP_BADGE[estado(r)], d=r.datos||{};
+        return(<div key={r.id} onClick={()=>setAbierto(r.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 14px",borderTop:i?"1px solid #f1f5f9":"none",cursor:"pointer",flexWrap:mob?"wrap":"nowrap"}}>
+          <div style={{minWidth:150,fontSize:13}}><b>{r.direccion}</b> · {r.depto}</div>
+          <div style={{flex:1,minWidth:140,fontSize:13,color:"#334155"}}>{d.prop_nombre||"—"}{!cpMail(r)&&<span title="Sin correo" style={{color:"#dc2626",marginLeft:6,fontSize:11}}>sin correo</span>}</div>
+          <span style={{background:b[1],color:b[2],padding:"2px 9px",borderRadius:12,fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>{b[0]}</span>
+          <span style={{fontSize:12,color:"#64748b",minWidth:36}}>{r.anio||"—"}</span>
+          <span style={{fontSize:12,color:(r.faltan||[]).length?"#b45309":"#059669",minWidth:90}}>{(r.faltan||[]).length?"Faltan "+r.faltan.length:"✓ Docs"}</span>
+        </div>); })}
+    </div>}
+    {abierto&&<FichaCoprop r={data.find(x=>x.id===abierto)} estado={estado} cargar={cargar} showToast={showToast} onClose={()=>setAbierto(null)}/>}
+  </div>);
+}
+
+function FichaCoprop({r,estado,cargar,showToast,onClose}){
+  const [motivo,setMotivo]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({});
+  if(!r) return null;
+  const d=r.datos||{}, b=CP_BADGE[estado(r)];
+  const hacer=async(fn)=>{ setOcup(true); try{ await fn(); }catch(e){ showToast("Error: "+e.message,"error"); } setOcup(false); };
+  const validar=dec=>{ if(dec==="devuelto"&&!motivo.trim()){ showToast("Escribe el motivo de la devolución","error"); return; }
+    hacer(async()=>{ const x=await cpPost("coprop_validar",{id:r.id,decision:dec,motivo:motivo.trim()}); if(!x.ok) throw new Error(x.error);
+      showToast((dec==="aprobado"?"Aprobado":"Devuelto")+(x.correoEnviado?" · correo enviado":" · sin correo registrado"),"success"); await cargar(); onClose(); }); };
+  const recordar=()=>hacer(async()=>{ const x=await cpPost("coprop_recordar",{ids:[r.id]}); if(!x.ok) throw new Error(x.error); showToast(x.enviados?"Link reenviado":"No se envió (sin correo)",x.enviados?"success":"error"); });
+  const docAccion=(i,est)=>{ if(est==="rechazado"&&!motivo.trim()){ showToast("Escribe el motivo abajo para rechazar el documento","error"); return; }
+    hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:tipos[i]??r.docs[i].tipo,estado:est,motivo:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast(est?"Documento "+est:"Tipo actualizado","success"); await cargar(); }); };
+  const sec=t=><div style={{fontWeight:700,color:"#1e3a5f",margin:"12px 0 4px",fontSize:13}}>{t}</div>;
+  return(<Ventana titulo={r.direccion+" · depto "+r.depto} onClose={onClose} pie={<>
+      <input style={{...inp,flex:"1 1 100%"}} value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Motivo (obligatorio para devolver o rechazar un documento)"/>
+      <button style={BS(true)} onClick={()=>copiarTexto(CP_URL_PUBLICO+"?t="+r.token,()=>showToast("Link personal copiado","success"))}>🔗 Copiar link personal</button>
+      <button style={BS(true)} disabled={ocup} onClick={recordar}>📧 Reenviar link</button>
+      <button style={{...BS(true),color:"#b45309",borderColor:"#fcd34d"}} disabled={ocup} onClick={()=>validar("devuelto")}>↩️ Devolver</button>
+      <button style={BP(true)} disabled={ocup} onClick={()=>validar("aprobado")}>✅ Aprobar</button>
+    </>}>
+    <div style={{marginBottom:8}}><span style={{background:b[1],color:b[2],padding:"2px 9px",borderRadius:12,fontWeight:700,fontSize:11}}>{b[0]}</span> <span style={{color:"#64748b",fontSize:12}}>Año {r.anio||"—"}{r.origen==="importado"?" · importado del Form":""}</span></div>
+    {r.motivo&&<div style={{...alrt("warning")}}>Motivo devolución: {r.motivo}</div>}
+    {CP_ETIQ.map(([k,l])=>l===null?<div key={k}>{sec(k)}</div>:(d[k]!==undefined&&d[k]!=="")?<div key={k} style={{display:"flex",gap:8,fontSize:12,padding:"3px 0",borderBottom:"1px dashed #e2e8f0"}}><span style={{flex:"0 0 40%",color:"#64748b"}}>{l}</span><span>{String(d[k])}</span></div>:null)}
+    {sec("Documentos")}
+    {(r.faltan||[]).length?<div style={{fontSize:12,color:"#b45309",marginBottom:4}}>Faltan: {r.faltan.map(t=>CP_DOC[t]||t).join(", ")}</div>:<div style={{fontSize:12,color:"#059669",marginBottom:4}}>✓ Documentación completa</div>}
+    {r.docsEstado&&<div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Según Listado: {Object.entries(r.docsEstado).map(([k,v])=>(CP_DOC[k]||"Ficha")+": "+({ok:"entregado",falta:"pendiente",na:"no corresponde",desconoce:"se desconoce"}[v]||v)).join(" · ")}</div>}
+    {r.carpetaUrl&&<div style={{fontSize:12,marginBottom:6}}><a href={r.carpetaUrl} target="_blank" rel="noreferrer">📁 Carpeta en Drive ({r.archivosCarpeta==null?"?":r.archivosCarpeta} archivos)</a></div>}
+    {(r.docs||[]).map((x,i)=>{ const est=x.estado||"pendiente", col={validado:"#059669",rechazado:"#dc2626",pendiente:"#2563eb"}[est];
+      return(<div key={i} style={{border:"1px solid #e2e8f0",borderRadius:8,padding:8,marginBottom:6,fontSize:12}}>
+        <div><a href={x.url} target="_blank" rel="noreferrer">📎 {x.nombre}</a> <span style={{color:"#64748b"}}>{x.fecha||""} · {x.origen||""}</span></div>
+        {x.asunto&&<div style={{color:"#64748b"}}>Asunto: {x.asunto}</div>}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:5}}>
+          <select style={{...sel,width:"auto",padding:"4px 6px"}} value={tipos[i]??x.tipo??"sin_clasificar"} onChange={e=>{ const v=e.target.value; setTipos(t=>({...t,[i]:v})); hacer(async()=>{ const y=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:v,estado:null,motivo:""}); if(!y.ok) throw new Error(y.error); showToast("Tipo actualizado","success"); await cargar(); }); }}>
+            {Object.entries(CP_TIPOS_DOC).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
+          <span style={{color:col,fontWeight:700}}>{est}</span>{x.motivo&&<span style={{color:"#dc2626"}}>({x.motivo})</span>}
+          <button style={BS(true)} disabled={ocup} onClick={()=>docAccion(i,"validado")}>✅ Validar</button>
+          <button style={BS(true)} disabled={ocup} onClick={()=>docAccion(i,"rechazado")}>❌ Rechazar</button>
+        </div>
+      </div>); })}
+    {sec("Avisos enviados")}
+    <div style={{fontSize:12,color:"#64748b"}}>{(r.envios||[]).length?r.envios.map(e=>e.tipo+" ("+e.fecha+")").join(", "):"Ninguno"}</div>
+  </Ventana>);
 }
 
 function ListaRecibos({showToast}){

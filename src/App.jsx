@@ -2353,12 +2353,13 @@ function Firma({onChange}){
 
 function ComprobantesView({showToast,mob}){
   const [tab,setTab]=useState("recibo");
-  const tabs=[{id:"recibo",label:"＋ Recibo"},{id:"recibos",label:"Recibos"},{id:"pagos",label:"Pagos a proveedores"},{id:"controles",label:"Controles"}];
+  const tabs=[{id:"recibo",label:"＋ Recibo"},{id:"recibos",label:"Recibos"},{id:"pago",label:"＋ Pago proveedor"},{id:"pagos",label:"Pagos"},{id:"controles",label:"Controles"}];
   return(<div>
     <Tabs tabs={tabs} active={tab} onChange={setTab}/>
     {tab==="recibo"&&<NuevoRecibo showToast={showToast} mob={mob} alGuardar={()=>setTab("recibos")}/>}
     {tab==="recibos"&&<ListaRecibos showToast={showToast}/>}
-    {tab==="pagos"&&<SitioIntegrado key="pagos" titulo="Pagos a proveedores" url="https://com12norte.github.io/administracion-edificio/?embed=1#pago-nuevo"/>}
+    {tab==="pago"&&<NuevoPago showToast={showToast} mob={mob} alGuardar={()=>setTab("pagos")}/>}
+    {tab==="pagos"&&<ListaPagos showToast={showToast}/>}
     {tab==="controles"&&<SitioIntegrado key="controles" titulo="Controles" url="https://com12norte.github.io/administracion-edificio/?embed=1#controles"/>}
   </div>);
 }
@@ -2408,6 +2409,121 @@ function NuevoRecibo({showToast,mob,alGuardar}){
       <button style={BS(true)} onClick={()=>{setF(vacio);setErr({});setK(x=>x+1);}}>Limpiar</button>
       <button style={BP(true)} disabled={env} onClick={guardar}>{env?"Guardando…":"Guardar recibo"}</button>
     </div>
+  </div>);
+}
+
+const fmtPesos=n=>"$"+Number(n||0).toLocaleString("es-CL");
+const CONCEPTOS_PAGO=["Mantención","Reparación","Aseo","Jardinería","Seguridad","Citofonía","Electricidad","Gasfitería","Pintura","Otro"];
+
+function NuevoPago({showToast,mob,alGuardar}){
+  const hoy=new Date().toISOString().slice(0,10);
+  const vacio={nombre:"",rut:"",giro:"",email:"",banco:"",fecha:hoy,periodo:"",concepto:"",desc:"",factura:"",cotizacion:"",neto:"",descuento:"",forma:"Transferencia Bancaria",operacion:"",obs:"",firma:""};
+  const [f,setF]=useState(vacio), [err,setErr]=useState({}), [env,setEnv]=useState(false), [k,setK]=useState(0), [prev,setPrev]=useState([]);
+  useEffect(()=>{ gasListar("Pagos").then(setPrev).catch(()=>{}); },[]);
+  const set=(c,v)=>{ setF(p=>({...p,[c]:v})); setErr(e=>({...e,[c]:false})); };
+  // Proveedores ya usados: al elegir uno se completan sus datos
+  const provs=[...new Map(prev.filter(p=>p.nombre).map(p=>[p.nombre.trim().toLowerCase(),p])).values()];
+  const elegirNombre=v=>{ set("nombre",v); const p=provs.find(x=>x.nombre.trim().toLowerCase()===v.trim().toLowerCase());
+    if(p) setF(x=>({...x,nombre:v,rut:x.rut||p.rut||"",email:x.email||(p.email&&p.email!=="—"?p.email:""),concepto:x.concepto||p.concepto||""})); };
+  const neto=parseFloat(f.neto)||0, desc=parseFloat(f.descuento)||0, iva=Math.round(neto*0.19), total=neto+iva-desc;
+  const siguiente=()=>{ const n=prev.map(p=>parseInt(String(p.numero||"").replace(/\D/g,""))||0); return "CP-"+String((n.length?Math.max(...n):0)+1).padStart(4,"0"); };
+  const guardar=async()=>{
+    const e={}; ["nombre","rut","concepto","desc"].forEach(c=>{ if(!String(f[c]).trim()) e[c]=true; });
+    if(!neto) e.neto=true;
+    if(f.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) e.email=true;
+    if(!f.firma) e.firma=true;
+    setErr(e); if(Object.keys(e).length){ showToast(e.firma&&Object.keys(e).length===1?"Falta la firma de quien autoriza":"Completa los campos marcados","error"); return; }
+    setEnv(true);
+    try{
+      let actual=prev; try{ actual=await gasListar("Pagos"); setPrev(actual); }catch{}
+      const n=actual.map(p=>parseInt(String(p.numero||"").replace(/\D/g,""))||0);
+      const numero="CP-"+String((n.length?Math.max(...n):0)+1).padStart(4,"0");
+      const t=x=>String(x||"").trim();
+      const j=await gasPost({tipo:"pago",id:Date.now(),numero,nombre:t(f.nombre),rut:t(f.rut),giro:t(f.giro),email:t(f.email),banco:t(f.banco),fecha:fechaLarga(f.fecha),periodo:t(f.periodo),
+        concepto:f.concepto,desc:t(f.desc),factura:t(f.factura),cotizacion:t(f.cotizacion),neto,iva,descuento:desc,total,forma:f.forma,operacion:t(f.operacion),obs:t(f.obs),firma:f.firma,creado:new Date().toLocaleString("es-CL")});
+      if(!j.ok) throw new Error(j.error||"Error");
+      showToast(numero+" guardado"+(f.email?" y enviado al proveedor":""),"success");
+      setF(vacio); setK(x=>x+1); alGuardar();
+    }catch(ex){ showToast("No se pudo guardar: "+ex.message,"error"); }
+    setEnv(false);
+  };
+  const st=c=>({...inp,...(err[c]?{borderColor:"#ef4444",background:"#fef2f2"}:{})});
+  const g2={display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10};
+  const full={gridColumn:"1/-1"};
+  const sec=t=><div style={{fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",margin:"16px 0 8px",borderBottom:"1px solid #e2e8f0",paddingBottom:4}}>{t}</div>;
+  return(<div style={{...card,maxWidth:760,padding:16}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+      <div style={{fontWeight:700,fontSize:15}}>Comprobante de pago a proveedor</div>
+      <div style={{fontSize:12,color:"#1e3a5f",fontWeight:700}}>{siguiente()}</div>
+    </div>
+    <div style={{fontSize:12,color:"#64748b"}}>Al guardar se genera el PDF en Drive y, si pones el correo, se le envía al proveedor.</div>
+    {sec("Proveedor")}
+    <div style={g2}>
+      <div style={full}><label style={lbl}>Razón social / nombre *</label><input list="provs-pago" style={st("nombre")} value={f.nombre} onChange={e=>elegirNombre(e.target.value)} placeholder="Ej: Servicios Técnicos Ltda."/>
+        <datalist id="provs-pago">{provs.map(p=><option key={p.nombre} value={p.nombre}/>)}</datalist></div>
+      <div><label style={lbl}>RUT *</label><input style={st("rut")} value={f.rut} onChange={e=>set("rut",e.target.value)} placeholder="Ej: 76.123.456-7"/></div>
+      <div><label style={lbl}>Giro</label><input style={inp} value={f.giro} onChange={e=>set("giro",e.target.value)} placeholder="Ej: Servicios de mantención"/></div>
+      <div><label style={lbl}>Correo</label><input type="email" style={st("email")} value={f.email} onChange={e=>set("email",e.target.value)} placeholder="proveedor@correo.com"/></div>
+      <div><label style={lbl}>Cuenta bancaria</label><input style={inp} value={f.banco} onChange={e=>set("banco",e.target.value)} placeholder="Ej: Banco Estado — Cta Cte"/></div>
+    </div>
+    {sec("Detalle")}
+    <div style={g2}>
+      <div><label style={lbl}>Fecha de pago</label><input type="date" style={inp} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/></div>
+      <div><label style={lbl}>Período</label><input style={inp} value={f.periodo} onChange={e=>set("periodo",e.target.value)} placeholder="Ej: Noviembre 2026"/></div>
+      <div style={full}><label style={lbl}>Concepto *</label><select style={{...sel,...(err.concepto?{borderColor:"#ef4444",background:"#fef2f2"}:{})}} value={f.concepto} onChange={e=>set("concepto",e.target.value)}><option value="">Seleccione…</option>{CONCEPTOS_PAGO.map(c=><option key={c}>{c}</option>)}</select></div>
+      <div style={full}><label style={lbl}>Descripción del servicio *</label><textarea rows={2} style={{...st("desc"),resize:"vertical"}} value={f.desc} onChange={e=>set("desc",e.target.value)} placeholder="Detalla el servicio prestado…"/></div>
+      <div><label style={lbl}>N° factura / boleta</label><input style={inp} value={f.factura} onChange={e=>set("factura",e.target.value)}/></div>
+      <div><label style={lbl}>N° cotización</label><input style={inp} value={f.cotizacion} onChange={e=>set("cotizacion",e.target.value)}/></div>
+    </div>
+    {sec("Montos")}
+    <div style={g2}>
+      <div><label style={lbl}>Monto neto ($) *</label><input type="number" inputMode="numeric" style={st("neto")} value={f.neto} onChange={e=>set("neto",e.target.value)} placeholder="0"/></div>
+      <div><label style={lbl}>Descuento ($)</label><input type="number" inputMode="numeric" style={inp} value={f.descuento} onChange={e=>set("descuento",e.target.value)} placeholder="0"/></div>
+    </div>
+    <div style={{display:"flex",gap:16,flexWrap:"wrap",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px 14px",marginTop:10,fontSize:13}}>
+      <span>Neto <b>{fmtPesos(neto)}</b></span><span>IVA 19% <b>{fmtPesos(iva)}</b></span>{desc?<span>Descuento <b>-{fmtPesos(desc)}</b></span>:null}
+      <span style={{marginLeft:"auto",color:"#1e3a5f",fontWeight:800,fontSize:15}}>Total {fmtPesos(total)}</span>
+    </div>
+    {sec("Forma de pago")}
+    <div style={g2}>
+      <div><label style={lbl}>Forma de pago</label><select style={sel} value={f.forma} onChange={e=>set("forma",e.target.value)}>{["Transferencia Bancaria","Efectivo","Cheque"].map(x=><option key={x}>{x}</option>)}</select></div>
+      <div><label style={lbl}>N° operación / referencia</label><input style={inp} value={f.operacion} onChange={e=>set("operacion",e.target.value)}/></div>
+      <div style={full}><label style={lbl}>Observaciones</label><textarea rows={2} style={{...inp,resize:"vertical"}} value={f.obs} onChange={e=>set("obs",e.target.value)}/></div>
+    </div>
+    <div style={{marginTop:12}}><label style={{...lbl,color:err.firma?"#ef4444":lbl.color}}>Firma de quien autoriza el pago *</label><Firma key={k} onChange={v=>set("firma",v)}/></div>
+    <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
+      <button style={BS(true)} onClick={()=>{setF(vacio);setErr({});setK(x=>x+1);}}>Limpiar</button>
+      <button style={BP(true)} disabled={env} onClick={guardar}>{env?"Guardando…":"Guardar comprobante"}</button>
+    </div>
+  </div>);
+}
+
+function ListaPagos({showToast}){
+  const [lista,setLista]=useState(null), [err,setErr]=useState(""), [q,setQ]=useState("");
+  const cargar=async()=>{ setErr(""); try{ const d=await gasListar("Pagos"); setLista([...d].sort((a,b)=>String(b.id).localeCompare(String(a.id)))); }catch(e){ setErr(e.message); setLista([]); } };
+  useEffect(()=>{ cargar(); },[]);
+  const borrar=async p=>{ if(!window.confirm("¿Eliminar el comprobante "+(p.numero||"")+" de "+p.nombre+"?")) return;
+    try{ const j=await gasPost({accion:"borrar",hoja:"Pagos",id:p.id}); if(!j.ok) throw new Error(j.error); showToast("Comprobante eliminado","success"); cargar(); }catch(e){ showToast("No se pudo eliminar: "+e.message,"error"); } };
+  if(lista===null) return <div style={{...card,color:"#64748b"}}>Cargando pagos…</div>;
+  const t=q.trim().toLowerCase();
+  const vis=lista.filter(p=>!t||[p.numero,p.nombre,p.rut,p.concepto,p.periodo].join(" ").toLowerCase().includes(t));
+  const suma=vis.reduce((a,p)=>a+(Number(p.total)||0),0);
+  return(<div>
+    {err&&<div style={alrt("danger")}>{err}</div>}
+    <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
+      <input style={{...inp,maxWidth:320}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar proveedor, N°, concepto o período…"/>
+      <span style={{fontSize:12,color:"#64748b"}}>{vis.length} de {lista.length} · total {fmtPesos(suma)}</span>
+    </div>
+    {!vis.length?<div style={{...card,color:"#64748b",textAlign:"center"}}>No hay comprobantes de pago.</div>:
+    <div style={{...card,padding:0,overflow:"hidden"}}>
+      {vis.map((p,i)=>(<div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderTop:i?"1px solid #f1f5f9":"none"}}>
+        <span style={{fontSize:11,fontWeight:700,color:"#1e3a5f",minWidth:58}}>{p.numero||"—"}</span>
+        <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{p.nombre}</div>
+          <div style={{fontSize:12,color:"#64748b"}}>{p.concepto} · {fmtPesos(p.total)} · {p.fecha}{p.forma?" · "+p.forma:""}</div></div>
+        {p.pdfUrl&&p.pdfUrl!=="—"&&<a href={p.pdfUrl} target="_blank" rel="noreferrer" style={{...BS(true),textDecoration:"none"}}>PDF</a>}
+        <button style={BD(true)} onClick={()=>borrar(p)}>Eliminar</button>
+      </div>))}
+    </div>}
   </div>);
 }
 

@@ -2805,12 +2805,16 @@ const cpRutFmt=v=>{ v=String(v||"").replace(/[^0-9kK]/g,"").toUpperCase(); if(v.
 
 function CopropietariosView({showToast,mob}){
   const [data,setData]=useState(null), [anio,setAnio]=useState(new Date().getFullYear()), [err,setErr]=useState("");
-  const [fil,setFil]=useState("todos"), [q,setQ]=useState(""), [abierto,setAbierto]=useState(null), [ocup,setOcup]=useState("");
+  const [fil,setFil]=useState("todos"), [q,setQ]=useState(""), [abierto,setAbierto]=useState(null), [ocup,setOcup]=useState(""), [invitar,setInvitar]=useState(false);
   const fileRef=useRef(null);
   const cargar=async()=>{ setErr(""); try{ const r=await cpPost("coprop_listar"); if(!r.ok) throw new Error(r.error||"Error"); setData(r.data||[]); if(r.anio) setAnio(r.anio); return r.data||[]; }catch(e){ setErr(e.message); setData(d=>d||[]); return null; } };
   useEffect(()=>{ cargar(); },[]);
   const estado=r=>r.estado==="sin_registro"?"sinreg":r.anio===anio&&r.estado==="aprobado"?"vigente":r.anio===anio&&r.estado==="pendiente_revision"?"revisar":r.estado==="devuelto"?"devuelto":"debe";
   const herramienta=async(clave,aviso,fn)=>{ setOcup(clave); showToast(aviso,"info"); try{ await fn(); }catch(e){ showToast("Error: "+e.message,"error"); } setOcup(""); };
+  const campana=()=>{ const con=(data||[]).filter(r=>cpMail(r)).length;
+    if(!window.confirm("Se enviará a las "+con+" unidades con correo un aviso para que revisen y actualicen su ficha "+anio+", cada una con su enlace personal.\n\nSe envían hasta 40 por día; el resto sale solo en los días siguientes. ¿Enviar?")) return;
+    herramienta("camp","Enviando solicitud de actualización…",async()=>{ const r=await cpPost("coprop_campana"); if(!r.ok) throw new Error(r.error);
+      showToast("Enviados hoy: "+r.enviados+(r.pendientes?" · quedan "+r.pendientes+" para los próximos días (salen solos)":"")+(r.yaEnviados?" · ya avisados antes: "+r.yaEnviados:"")+(r.sinCorreo?" · sin correo: "+r.sinCorreo:""),"success"); cargar(); }); };
   const recordarTodos=()=>{ if(!window.confirm("¿Enviar recordatorio con link personal a las unidades que deben actualizar? (máx. 40 correos por día)")) return;
     herramienta("rec","Enviando recordatorios…",async()=>{ const r=await cpPost("coprop_recordar",{ids:"morosos"}); if(!r.ok) throw new Error(r.error); showToast("Enviados: "+r.enviados+" · sin correo: "+r.sinCorreo,"success"); cargar(); }); };
   const sincDocs=()=>herramienta("sinc","Sincronizando con el Listado de Documentos…",async()=>{ const r=await cpPost("coprop_sincdocs"); if(!r.ok) throw new Error(r.error); showToast("Listado leído: "+r.filasLeidas+" unidades · "+r.unidadesNuevasSinRegistro+" sin registro · "+r.sinCarpeta+" sin carpeta","success"); cargar(); });
@@ -2855,6 +2859,12 @@ function CopropietariosView({showToast,mob}){
       <span style={{fontSize:12,color:"#64748b"}}>{vis.length} de {data.length}</span>
       <button style={{...BS(true),marginLeft:"auto"}} onClick={cargar}>↻ Actualizar</button>
     </div>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+      <button style={BP(true)} disabled={!!ocup} onClick={campana}>{ocup==="camp"?"⏳ ":""}📣 Pedir actualización a todos</button>
+      <button style={BS(true)} onClick={()=>setInvitar(true)}>➕ Invitar propietario nuevo</button>
+      <button style={BS(true)} onClick={()=>copiarTexto(CP_URL_PUBLICO,()=>showToast("Link para arrendatarios y nuevos copiado","success"))}>🔗 Link para arrendatarios</button>
+    </div>
+    {invitar&&<InvitarCoprop showToast={showToast} onClose={()=>setInvitar(false)} alTerminar={cargar}/>}
     <details style={{...card,padding:"8px 12px",marginBottom:10}}>
       <summary style={{cursor:"pointer",fontSize:13,fontWeight:600,color:"#334155"}}>Herramientas</summary>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{herr.map(([tx,fn,k])=><button key={tx} style={BS(true)} disabled={!!ocup} onClick={fn}>{ocup&&ocup===k?"⏳ ":""}{tx}</button>)}</div>
@@ -2869,14 +2879,41 @@ function CopropietariosView({showToast,mob}){
           <span style={{background:b[1],color:b[2],padding:"2px 9px",borderRadius:12,fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>{b[0]}</span>
           <span style={{fontSize:12,color:"#64748b",minWidth:36}}>{r.anio||"—"}</span>
           <span style={{fontSize:12,color:(r.faltan||[]).length?"#b45309":"#059669",minWidth:90}}>{(r.faltan||[]).length?"Faltan "+r.faltan.length:"✓ Docs"}</span>
+          {r.carpetaUrl?<a href={r.carpetaUrl} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} title={"Carpeta en Drive ("+(r.archivosCarpeta??"?")+" archivos)"} style={{fontSize:16,textDecoration:"none",minWidth:22}}>📁</a>:<span style={{minWidth:22}}/>}
         </div>); })}
     </div>}
     {abierto&&<FichaCoprop r={data.find(x=>x.id===abierto)} estado={estado} cargar={cargar} showToast={showToast} onClose={()=>setAbierto(null)}/>}
   </div>);
 }
 
+// Invita a un propietario nuevo: le llega por correo su enlace personal para registrar la unidad.
+// Con "cambio" (venta), los datos del dueño anterior pasan al historial.
+function InvitarCoprop({unidad,cambio,showToast,onClose,alTerminar}){
+  const [f,setF]=useState({dir:"",depto:"",nombre:"",email:""}), [env,setEnv]=useState(false);
+  const set=(k,v)=>setF(x=>({...x,[k]:v}));
+  const enviar=async()=>{
+    if(!unidad&&(!f.dir||!f.depto)){ showToast("Elige dirección y departamento","error"); return; }
+    if(!emailValido(f.email)){ showToast("Correo no válido","error"); return; }
+    if(cambio&&!window.confirm("Los datos del propietario actual pasan al historial y su enlace deja de funcionar. ¿Continuar?")) return;
+    setEnv(true);
+    try{ const x=await cpPost("coprop_invitar",{id:unidad?.id,direccion:f.dir,depto:f.depto,nombre:f.nombre.trim(),email:f.email.trim(),cambioPropietario:!!cambio});
+      if(!x.ok) throw new Error(x.error); showToast("Invitación enviada a "+f.email.trim(),"success"); alTerminar(); onClose();
+    }catch(e){ showToast("No se pudo enviar: "+e.message,"error"); }
+    setEnv(false); };
+  return(<Ventana titulo={cambio?"Cambio de propietario — "+unidad.direccion+" "+unidad.depto:unidad?"Invitar a registrarse — "+unidad.direccion+" "+unidad.depto:"Invitar propietario nuevo"} onClose={onClose}
+    pie={<><button style={BS(true)} onClick={onClose}>Cancelar</button><button style={BP(true)} disabled={env} onClick={enviar}>{env?"Enviando…":"✉ Enviar invitación"}</button></>}>
+    <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{cambio?"Úsalo cuando la unidad se vendió. El nuevo dueño recibe su enlace personal y completa el registro desde cero.":"Le llega un correo con su enlace personal para registrar los datos de la unidad y subir los documentos."}</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      {!unidad&&<><div><label style={lbl}>Dirección *</label><select style={sel} value={f.dir} onChange={e=>set("dir",e.target.value)}><option value="">Seleccione…</option>{DIRECCIONES_ED.map(d=><option key={d}>{d}</option>)}</select></div>
+        <div><label style={lbl}>Departamento *</label><select style={sel} value={f.depto} onChange={e=>set("depto",e.target.value)}><option value="">Seleccione…</option>{DEPTOS_ED.map(d=><option key={d}>{d}</option>)}</select></div></>}
+      <div><label style={lbl}>Nombre del propietario</label><input style={inp} value={f.nombre} onChange={e=>set("nombre",e.target.value)} placeholder="Opcional"/></div>
+      <div><label style={lbl}>Correo *</label><input type="email" style={inp} value={f.email} onChange={e=>set("email",e.target.value)} placeholder="propietario@correo.com"/></div>
+    </div>
+  </Ventana>);
+}
+
 function FichaCoprop({r,estado,cargar,showToast,onClose}){
-  const [motivo,setMotivo]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({});
+  const [motivo,setMotivo]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null);
   if(!r) return null;
   const d=r.datos||{}, b=CP_BADGE[estado(r)];
   const hacer=async(fn)=>{ setOcup(true); try{ await fn(); }catch(e){ showToast("Error: "+e.message,"error"); } setOcup(false); };
@@ -2913,6 +2950,12 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
           <button style={BS(true)} disabled={ocup} onClick={()=>docAccion(i,"rechazado")}>❌ Rechazar</button>
         </div>
       </div>); })}
+    {sec("Propietario")}
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      {!(d.prop_rut||d.prop_nombre)?<button style={BS(true)} onClick={()=>setInv("invitar")}>✉ Invitar a registrarse</button>
+        :<button style={BS(true)} onClick={()=>setInv("cambio")}>🔄 Cambio de propietario (venta)</button>}
+    </div>
+    {inv&&<InvitarCoprop unidad={r} cambio={inv==="cambio"} showToast={showToast} onClose={()=>setInv(null)} alTerminar={cargar}/>}
     {sec("Avisos enviados")}
     <div style={{fontSize:12,color:"#64748b"}}>{(r.envios||[]).length?r.envios.map(e=>e.tipo+" ("+e.fecha+")").join(", "):"Ninguno"}</div>
   </Ventana>);

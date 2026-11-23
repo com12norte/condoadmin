@@ -830,7 +830,7 @@ export default function App(){
             {view==="mantencion"&&<MantView mant={mant} setMant={setMantDB} role={er} showToast={showToast} mob={mob} respList={respList} towers={towers} equipos={equipos} setEquipos={setEquiposDB} certs={certs} setCerts={setCertsDB}/>}
             {view==="emails"&&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
             {view==="emergencia"&&<EmergenciaView role={er} showToast={showToast} mob={mob} towers={towers}/>}
-            {view==="comprobantes"&&<SitioIntegrado key="comprobantes" titulo="Comprobantes y controles" url="https://com12norte.github.io/administracion-edificio/?embed=1"/>}
+            {view==="comprobantes"&&<ComprobantesView showToast={showToast} mob={mob}/>}
             {view==="copropietarios"&&<SitioIntegrado key="copropietarios" titulo="Registro de copropietarios" url="https://com12norte.github.io/administracion-edificio/?embed=1#coprop"/>}
             {view==="parking"&&<SitioIntegrado key="parking" titulo="Parking" url="https://parkadmin-ashy.vercel.app/?ir=personal&embed=1"/>}
             {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
@@ -2325,6 +2325,120 @@ const MOTIVOS_SIN_ORDEN=["Consulta respondida","Duplicada","Corresponde a un ter
 // se les envía el token del usuario y lo validan contra su rol en CondoAdmin. No vuelven a pedir clave.
 let vistaInicial=null;
 const GAS_EDIFICIO="https://script.google.com/macros/s/AKfycbxKRCFQItt75ZYhqNVhY4y691BYD62uV8wSOxfC3RFN8KJvdNJS_1TbvP-72GXpIAUV/exec";
+// ── Comprobantes (recibos, pagos, controles) ───────────────────────────────
+// Los datos y los PDF los maneja el código de Google del edificio; CondoAdmin le manda la sesión del usuario.
+const gasPost=async payload=>{ const t=await fbAuth.currentUser?.getIdToken(); const r=await fetch(GAS_EDIFICIO,{method:"POST",body:JSON.stringify({...payload,clave:t})}); return r.json(); };
+const gasListar=async hoja=>{ const t=await fbAuth.currentUser?.getIdToken(); const j=await (await fetch(GAS_EDIFICIO+"?accion=listar&hoja="+encodeURIComponent(hoja)+"&clave="+encodeURIComponent(t||""))).json(); if(!j.ok) throw new Error(j.error||"No se pudo cargar"); return j.data||[]; };
+const DIRECCIONES_ED=["3 Oriente 1080","3 Oriente 1060","12 Norte 1054","12 Norte 1052","12 Norte 1036","12 Norte 1038","4 Oriente 1061","4 Oriente 1081"];
+const DEPTOS_ED=["A1","B2","C3","D4","E5","E6","F5","F6","G7","H8"];
+const fechaLarga=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return parseInt(d)+" de "+["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"][parseInt(m)-1]+" de "+y; };
+
+// Firma con el dedo o el mouse; entrega la imagen (PNG) o "" si está vacía
+function Firma({onChange}){
+  const ref=useRef(null), dib=useRef(false), hay=useRef(false);
+  useEffect(()=>{ const c=ref.current; const w=c.parentElement.clientWidth; c.width=w*2; c.height=320; c.style.width=w+"px"; c.style.height="160px";
+    const x=c.getContext("2d"); x.scale(2,2); x.lineWidth=2.2; x.lineCap="round"; x.strokeStyle="#0f172a"; },[]);
+  const pos=e=>{ const r=ref.current.getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; };
+  const down=e=>{ e.preventDefault(); ref.current.setPointerCapture(e.pointerId); dib.current=true; const x=ref.current.getContext("2d"); const [a,b]=pos(e); x.beginPath(); x.moveTo(a,b); };
+  const move=e=>{ if(!dib.current) return; const x=ref.current.getContext("2d"); const [a,b]=pos(e); x.lineTo(a,b); x.stroke(); hay.current=true; };
+  const up=()=>{ if(!dib.current) return; dib.current=false; if(hay.current) onChange(ref.current.toDataURL("image/png")); };
+  const borrar=()=>{ const c=ref.current; c.getContext("2d").clearRect(0,0,c.width,c.height); hay.current=false; onChange(""); };
+  return(<div>
+    <div style={{border:"1.5px dashed #cbd5e1",borderRadius:8,background:"#f8fafc",touchAction:"none"}}>
+      <canvas ref={ref} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up} style={{display:"block",cursor:"crosshair"}}/>
+    </div>
+    <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:11,color:"#94a3b8"}}><span>Firme aquí con el dedo o el mouse</span><button type="button" onClick={borrar} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:12}}>Borrar firma</button></div>
+  </div>);
+}
+
+function ComprobantesView({showToast,mob}){
+  const [tab,setTab]=useState("recibo");
+  const tabs=[{id:"recibo",label:"＋ Recibo"},{id:"recibos",label:"Recibos"},{id:"pagos",label:"Pagos a proveedores"},{id:"controles",label:"Controles"}];
+  return(<div>
+    <Tabs tabs={tabs} active={tab} onChange={setTab}/>
+    {tab==="recibo"&&<NuevoRecibo showToast={showToast} mob={mob} alGuardar={()=>setTab("recibos")}/>}
+    {tab==="recibos"&&<ListaRecibos showToast={showToast}/>}
+    {tab==="pagos"&&<SitioIntegrado key="pagos" titulo="Pagos a proveedores" url="https://com12norte.github.io/administracion-edificio/?embed=1#pago-nuevo"/>}
+    {tab==="controles"&&<SitioIntegrado key="controles" titulo="Controles" url="https://com12norte.github.io/administracion-edificio/?embed=1#controles"/>}
+  </div>);
+}
+
+function NuevoRecibo({showToast,mob,alGuardar}){
+  const hoy=new Date().toISOString().slice(0,10);
+  const vacio={tipo:"",nombre:"",rut:"",dir:"",depto:"",fecha:hoy,numControl:"un",tipoLlave:"",email:"",firma:""};
+  const [f,setF]=useState(vacio), [err,setErr]=useState({}), [env,setEnv]=useState(false), [k,setK]=useState(0);
+  const set=(c,v)=>{ setF(p=>({...p,[c]:v})); setErr(e=>({...e,[c]:false})); };
+  const guardar=async()=>{
+    const e={}; ["tipo","nombre","rut","dir","depto"].forEach(c=>{ if(!String(f[c]).trim()) e[c]=true; });
+    if(f.tipo==="llaves"&&!f.tipoLlave) e.tipoLlave=true;
+    if(f.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) e.email=true;
+    if(!f.firma) e.firma=true;
+    setErr(e); if(Object.keys(e).length){ showToast(e.firma&&Object.keys(e).length===1?"Falta la firma del residente":"Completa los campos marcados","error"); return; }
+    setEnv(true);
+    try{
+      const j=await gasPost({tipo:"recibo",tipoRecibo:f.tipo,nombre:f.nombre.trim(),rut:f.rut.trim(),dir:f.dir,depto:f.depto,email:f.email.trim(),fecha:fechaLarga(f.fecha),
+        numControl:f.tipo==="control"?f.numControl:null,tipoLlave:f.tipo==="llaves"?f.tipoLlave:null,firma:f.firma,creado:new Date().toLocaleString("es-CL")});
+      if(!j.ok) throw new Error(j.error||"Error");
+      showToast("Recibo guardado"+(f.email?" y enviado por correo al residente":""),"success");
+      setF(vacio); setK(x=>x+1); alGuardar();
+    }catch(ex){ showToast("No se pudo guardar: "+ex.message,"error"); }
+    setEnv(false);
+  };
+  const st=c=>({...inp,...(err[c]?{borderColor:"#ef4444",background:"#fef2f2"}:{})});
+  const ss=c=>({...sel,...(err[c]?{borderColor:"#ef4444",background:"#fef2f2"}:{})});
+  const g2={display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:10};
+  const Opc=({v,ico,t,d})=>(<button type="button" onClick={()=>set("tipo",v)} style={{flex:1,padding:"14px 10px",borderRadius:10,cursor:"pointer",textAlign:"center",border:"1.5px solid "+(f.tipo===v?"#1e3a5f":err.tipo?"#ef4444":"#e2e8f0"),background:f.tipo===v?"#eff6ff":"#fff"}}>
+    <div style={{fontSize:24}}>{ico}</div><div style={{fontWeight:700,fontSize:13,color:"#0f172a",marginTop:4}}>{t}</div><div style={{fontSize:11,color:"#64748b"}}>{d}</div></button>);
+  return(<div style={{...card,maxWidth:760,padding:16}}>
+    <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>Nuevo recibo conforme</div>
+    <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Entrega de llaves o de control remoto. Al guardar se genera el PDF en Drive y, si pones el correo, se le envía al residente.</div>
+    <div style={{display:"flex",gap:10,marginBottom:14}}><Opc v="llaves" ico="🔑" t="Entrega de llaves" d="Llave de acceso"/><Opc v="control" ico="📡" t="Control remoto" d="Acceso vehicular"/></div>
+    <div style={g2}>
+      <div><label style={lbl}>Nombre completo *</label><input style={st("nombre")} value={f.nombre} onChange={e=>set("nombre",e.target.value)} placeholder="Ej: Juan Pérez González"/></div>
+      <div><label style={lbl}>RUT / Cédula *</label><input style={st("rut")} value={f.rut} onChange={e=>set("rut",e.target.value)} placeholder="Ej: 12.345.678-9"/></div>
+      <div><label style={lbl}>Dirección *</label><select style={ss("dir")} value={f.dir} onChange={e=>set("dir",e.target.value)}><option value="">Seleccione…</option>{DIRECCIONES_ED.map(d=><option key={d}>{d}</option>)}</select></div>
+      <div><label style={lbl}>Departamento *</label><select style={ss("depto")} value={f.depto} onChange={e=>set("depto",e.target.value)}><option value="">Seleccione…</option>{DEPTOS_ED.map(d=><option key={d}>{d}</option>)}</select></div>
+      <div><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/></div>
+      {f.tipo==="control"&&<div><label style={lbl}>Cantidad de controles</label><select style={sel} value={f.numControl} onChange={e=>set("numControl",e.target.value)}><option value="un">Uno (1)</option><option value="dos">Dos (2)</option><option value="tres">Tres (3)</option></select></div>}
+      {f.tipo==="llaves"&&<div><label style={lbl}>Tipo de llave *</label><select style={ss("tipoLlave")} value={f.tipoLlave} onChange={e=>set("tipoLlave",e.target.value)}><option value="">Seleccione…</option>{["Bodega","Puerta acceso patio","Mampara","Puerta acceso calle"].map(t=><option key={t}>{t}</option>)}</select></div>}
+      <div style={{gridColumn:"1/-1"}}><label style={lbl}>Correo del residente (opcional)</label><input type="email" style={st("email")} value={f.email} onChange={e=>set("email",e.target.value)} placeholder="residente@correo.com"/></div>
+    </div>
+    <div style={{marginTop:12}}><label style={{...lbl,color:err.firma?"#ef4444":lbl.color}}>Firma del residente *</label><Firma key={k} onChange={v=>set("firma",v)}/></div>
+    <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
+      <button style={BS(true)} onClick={()=>{setF(vacio);setErr({});setK(x=>x+1);}}>Limpiar</button>
+      <button style={BP(true)} disabled={env} onClick={guardar}>{env?"Guardando…":"Guardar recibo"}</button>
+    </div>
+  </div>);
+}
+
+function ListaRecibos({showToast}){
+  const [lista,setLista]=useState(null), [err,setErr]=useState(""), [q,setQ]=useState("");
+  const cargar=async()=>{ setErr(""); try{ const d=await gasListar("Recibos"); setLista([...d].sort((a,b)=>String(b.id).localeCompare(String(a.id)))); }catch(e){ setErr(e.message); setLista([]); } };
+  useEffect(()=>{ cargar(); },[]);
+  const borrar=async r=>{ if(!window.confirm("¿Eliminar el recibo de "+r.nombre+" (depto "+r.depto+")?")) return;
+    try{ const j=await gasPost({accion:"borrar",hoja:"Recibos",id:r.id}); if(!j.ok) throw new Error(j.error); showToast("Recibo eliminado","success"); cargar(); }catch(e){ showToast("No se pudo eliminar: "+e.message,"error"); } };
+  if(lista===null) return <div style={{...card,color:"#64748b"}}>Cargando recibos…</div>;
+  const t=q.trim().toLowerCase();
+  const vis=lista.filter(r=>!t||[r.nombre,r.depto,r.dir,r.tipo,r.detalle].join(" ").toLowerCase().includes(t));
+  return(<div>
+    {err&&<div style={alrt("danger")}>{err}</div>}
+    <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
+      <input style={{...inp,maxWidth:320}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar nombre, depto o dirección…"/>
+      <span style={{fontSize:12,color:"#64748b"}}>{vis.length} de {lista.length}</span>
+    </div>
+    {!vis.length?<div style={{...card,color:"#64748b",textAlign:"center"}}>No hay recibos.</div>:
+    <div style={{...card,padding:0,overflow:"hidden"}}>
+      {vis.map((r,i)=>(<div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderTop:i?"1px solid #f1f5f9":"none"}}>
+        <span style={{fontSize:20}}>{r.tipo==="Llave"?"🔑":"📡"}</span>
+        <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{r.nombre}</div>
+          <div style={{fontSize:12,color:"#64748b"}}>{r.dir} · depto {r.depto} · {r.tipo}{r.detalle?" ("+r.detalle+")":""} · {r.fecha}</div></div>
+        {r.pdfUrl&&r.pdfUrl!=="—"&&<a href={r.pdfUrl} target="_blank" rel="noreferrer" style={{...BS(true),textDecoration:"none"}}>PDF</a>}
+        <button style={BD(true)} onClick={()=>borrar(r)}>Eliminar</button>
+      </div>))}
+    </div>}
+  </div>);
+}
+
 // Inicio: lo pendiente de las tres áreas, con acceso directo
 function AccesosRapidos({nAbiertas,nOrdVenc,setView,mob}){
   const [pk,setPk]=useState(null), [ct,setCt]=useState(null);

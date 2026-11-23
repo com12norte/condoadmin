@@ -79,8 +79,8 @@ function pagina(cuerpo) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Plan de Emergencia · Edificio 12 Norte</title>
 <style>
-body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f1f5f9;color:#1e293b;line-height:1.55}
-header{background:linear-gradient(135deg,#ea580c,#c2410c);color:#fff;padding:20px 16px;text-align:center}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f1f5f9;color:#0f172a;line-height:1.55}
+header{background:#1e3a5f;color:#fff;padding:20px 16px;text-align:center}
 header h1{margin:0;font-size:20px}header p{margin:4px 0 0;font-size:13px;opacity:.9}
 main{max-width:760px;margin:0 auto;padding:14px}
 section{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 18px;margin-bottom:12px}

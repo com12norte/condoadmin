@@ -2513,7 +2513,14 @@ function NuevoPago({showToast,mob,alGuardar}){
 }
 
 function ListaPagos({showToast}){
-  const [lista,setLista]=useState(null), [err,setErr]=useState(""), [q,setQ]=useState("");
+  const [lista,setLista]=useState(null), [err,setErr]=useState(""), [q,setQ]=useState(""), [ver,setVer]=useState(null), [reenv,setReenv]=useState(null);
+  const reenviar=async()=>{ const p=reenv.r, para=reenv.para.trim();
+    if(!emailValido(para)){ showToast("Correo no válido","error"); return; }
+    setReenv(x=>({...x,env:true}));
+    try{ const j=await gasPost({tipo:"email_link",para,asunto:(p.numero||"")+" - Comprobante de Pago - "+(p.concepto||"")+" (reenvío)",
+        cuerpo:"Estimado/a "+p.nombre+",\n\nLe reenviamos el comprobante de pago "+(p.numero||"")+" por "+(p.concepto||"")+".\n\nTOTAL PAGADO: "+fmtPesos(p.total)+"\n\nDocumento PDF:\n"+p.pdfUrl+"\n\nSaludos,\nComunidad Edificio 12 Norte de Viña del Mar"});
+      if(!j.ok) throw new Error(j.error); showToast("Comprobante reenviado a "+para,"success"); setReenv(null);
+    }catch(e){ showToast("No se pudo reenviar: "+e.message,"error"); setReenv(x=>x&&({...x,env:false})); } };
   const cargar=async()=>{ setErr(""); try{ const d=await gasListar("Pagos"); setLista([...d].sort((a,b)=>String(b.id).localeCompare(String(a.id)))); }catch(e){ setErr(e.message); setLista([]); } };
   useEffect(()=>{ cargar(); },[]);
   const borrar=async p=>{ if(!window.confirm("¿Eliminar el comprobante "+(p.numero||"")+" de "+p.nombre+"?")) return;
@@ -2530,7 +2537,7 @@ function ListaPagos({showToast}){
     </div>
     {!vis.length?<div style={{...card,color:"#64748b",textAlign:"center"}}>No hay comprobantes de pago.</div>:
     <div style={{...card,padding:0,overflow:"hidden"}}>
-      {vis.map((p,i)=>(<div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderTop:i?"1px solid #f1f5f9":"none"}}>
+      {vis.map((p,i)=>(<div key={p.id} onClick={e=>{ if(!e.target.closest("button,a")) setVer(p); }} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderTop:i?"1px solid #f1f5f9":"none",cursor:"pointer"}}>
         <span style={{fontSize:11,fontWeight:700,color:"#1e3a5f",minWidth:58}}>{p.numero||"—"}</span>
         <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{p.nombre}</div>
           <div style={{fontSize:12,color:"#64748b"}}>{p.concepto} · {fmtPesos(p.total)} · {p.fecha}{p.forma?" · "+p.forma:""}</div></div>
@@ -2538,6 +2545,13 @@ function ListaPagos({showToast}){
         <button style={BD(true)} onClick={()=>borrar(p)}>Eliminar</button>
       </div>))}
     </div>}
+    {ver&&<FichaDoc titulo={"Pago "+(ver.numero||"")+" — "+ver.nombre} r={ver} onClose={()=>setVer(null)} pie={<>
+      {ver.pdfUrl&&ver.pdfUrl!=="—"&&<a href={ver.pdfUrl} target="_blank" rel="noreferrer" style={{...BS(true),textDecoration:"none"}}>Ver PDF</a>}
+      {ver.pdfUrl&&ver.pdfUrl!=="—"&&<button style={BP(true)} onClick={()=>{setReenv({r:ver,para:ver.email&&ver.email!=="—"?ver.email:""});setVer(null);}}>✉ Reenviar</button>}</>}/>}
+    {reenv&&<Ventana titulo={"Reenviar comprobante — "+reenv.r.nombre} onClose={()=>setReenv(null)} pie={<><button style={BS(true)} onClick={()=>setReenv(null)}>Cancelar</button><button style={BP(true)} disabled={reenv.env} onClick={reenviar}>{reenv.env?"Enviando…":"Reenviar"}</button></>}>
+      <label style={lbl}>Enviar a</label><input type="email" style={inp} value={reenv.para} onChange={e=>setReenv(x=>({...x,para:e.target.value}))} placeholder="proveedor@correo.com" autoFocus/>
+      <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Va con copia a la administración.</div>
+    </Ventana>}
   </div>);
 }
 
@@ -2904,6 +2918,18 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
   </Ventana>);
 }
 
+// Ficha con todo lo que se registró en un recibo o pago
+const ETQ_DOC=[["numero","N°"],["tipo","Tipo"],["detalle","Detalle"],["nombre","Nombre"],["rut","RUT"],["dir","Dirección"],["depto","Departamento"],["email","Correo"],
+  ["fecha","Fecha"],["periodo","Período"],["concepto","Concepto"],["neto","Neto"],["iva","IVA"],["total","Total"],["forma","Forma de pago"],["creado","Registrado el"]];
+function FichaDoc({titulo,r,onClose,pie}){
+  const val=(k,v)=>["neto","iva","total"].includes(k)?fmtPesos(v):String(v);
+  return(<Ventana titulo={titulo} onClose={onClose} pie={pie}>
+    {ETQ_DOC.filter(([k])=>r[k]!==undefined&&r[k]!==null&&r[k]!==""&&r[k]!=="—").map(([k,l])=>(
+      <div key={k} style={{display:"flex",gap:8,fontSize:13,padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}><span style={{color:"#64748b",minWidth:120}}>{l}</span><span style={{fontWeight:500,wordBreak:"break-word"}}>{val(k,r[k])}</span></div>))}
+    {(!r.email||r.email==="—")&&<div style={{...alrt("warning"),marginTop:10}}>Este documento se registró sin correo.</div>}
+  </Ventana>);
+}
+
 function ListaRecibos({showToast}){
   const [lista,setLista]=useState(null), [err,setErr]=useState(""), [q,setQ]=useState("");
   const cargar=async()=>{ setErr(""); try{ const d=await gasListar("Recibos"); setLista([...d].sort((a,b)=>String(b.id).localeCompare(String(a.id)))); }catch(e){ setErr(e.message); setLista([]); } };
@@ -2911,7 +2937,7 @@ function ListaRecibos({showToast}){
   const borrar=async r=>{ if(!window.confirm("¿Eliminar el recibo de "+r.nombre+" (depto "+r.depto+")?")) return;
     try{ const j=await gasPost({accion:"borrar",hoja:"Recibos",id:r.id}); if(!j.ok) throw new Error(j.error); showToast("Recibo eliminado","success"); cargar(); }catch(e){ showToast("No se pudo eliminar: "+e.message,"error"); } };
   // Reenvía el PDF por correo (usa el envío de correo del servidor; va con copia a la administración)
-  const [reenv,setReenv]=useState(null);
+  const [reenv,setReenv]=useState(null), [ver,setVer]=useState(null);
   const reenviar=async()=>{ const r=reenv.r, para=reenv.para.trim();
     if(!emailValido(para)){ showToast("Correo no válido","error"); return; }
     setReenv(x=>({...x,env:true}));
@@ -2930,7 +2956,7 @@ function ListaRecibos({showToast}){
     </div>
     {!vis.length?<div style={{...card,color:"#64748b",textAlign:"center"}}>No hay recibos.</div>:
     <div style={{...card,padding:0,overflow:"hidden"}}>
-      {vis.map((r,i)=>(<div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderTop:i?"1px solid #f1f5f9":"none"}}>
+      {vis.map((r,i)=>(<div key={r.id} onClick={e=>{ if(!e.target.closest("button,a")) setVer(r); }} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderTop:i?"1px solid #f1f5f9":"none",cursor:"pointer"}}>
         <span style={{fontSize:20}}>{r.tipo==="Llave"?"🔑":"📡"}</span>
         <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:13}}>{r.nombre}</div>
           <div style={{fontSize:12,color:"#64748b"}}>{r.dir} · depto {r.depto} · {r.tipo}{r.detalle?" ("+r.detalle+")":""} · {r.fecha}</div></div>
@@ -2939,6 +2965,9 @@ function ListaRecibos({showToast}){
         <button style={BD(true)} onClick={()=>borrar(r)}>Eliminar</button>
       </div>))}
     </div>}
+    {ver&&<FichaDoc titulo={"Recibo — "+ver.nombre} r={ver} onClose={()=>setVer(null)} pie={<>
+      {ver.pdfUrl&&ver.pdfUrl!=="—"&&<a href={ver.pdfUrl} target="_blank" rel="noreferrer" style={{...BS(true),textDecoration:"none"}}>Ver PDF</a>}
+      {ver.pdfUrl&&ver.pdfUrl!=="—"&&<button style={BP(true)} onClick={()=>{setReenv({r:ver,para:ver.email&&ver.email!=="—"?ver.email:""});setVer(null);}}>✉ Reenviar</button>}</>}/>}
     {reenv&&<Ventana titulo={"Reenviar recibo — "+reenv.r.nombre} onClose={()=>setReenv(null)} pie={<><button style={BS(true)} onClick={()=>setReenv(null)}>Cancelar</button><button style={BP(true)} disabled={reenv.env} onClick={reenviar}>{reenv.env?"Enviando…":"Reenviar"}</button></>}>
       <div style={{fontSize:13,color:"#334155",marginBottom:10}}>{reenv.r.tipo} · {reenv.r.dir} depto {reenv.r.depto} · {reenv.r.fecha}</div>
       <label style={lbl}>Enviar a</label><input type="email" style={inp} value={reenv.para} onChange={e=>setReenv(x=>({...x,para:e.target.value}))} placeholder="residente@correo.com" autoFocus/>

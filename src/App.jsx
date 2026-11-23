@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, Fragment } from "react";
 import { initializeApp, getApps, deleteApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, deleteField, query, orderBy, where } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { ParkingAdmin } from "./Parking.jsx";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // ── Firebase config ─────────────────────────────────────────────────────────
@@ -832,7 +833,7 @@ export default function App(){
             {view==="emergencia"&&<EmergenciaView role={er} showToast={showToast} mob={mob} towers={towers}/>}
             {view==="comprobantes"&&<ComprobantesView showToast={showToast} mob={mob}/>}
             {view==="copropietarios"&&<CopropietariosView showToast={showToast} mob={mob}/>}
-            {view==="parking"&&<SitioIntegrado key="parking" titulo="Parking" url="https://parkadmin-ashy.vercel.app/?ir=personal&embed=1"/>}
+            {view==="parking"&&<ParkingAdmin obtenerToken={()=>fbAuth.currentUser?.getIdToken()} email={fbAuth.currentUser?.email||""}/>}
             {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
             {view==="config"&&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} equipos={equipos} setEquipos={setEquiposDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
           </div>

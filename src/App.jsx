@@ -599,6 +599,9 @@ export default function App(){
     setSession(user);
     if(user.openNewReq) setShowNew(true);
     if(user.rol==="Residente") setView("mis_reqs");
+    else if(vistaInicial){ setView(vistaInicial); }
+    else setView("dashboard");
+    vistaInicial=null;
   };
   const handleLogout=()=>{setAcceso(null);setSession(null);setViewAs(null);setView("dashboard");};
   // Volver al menú de módulos (Incidencias / Parking / Comprobantes) sin cerrar sesión

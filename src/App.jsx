@@ -2339,6 +2339,12 @@ const DIRECCIONES_ED=["3 Oriente 1080","3 Oriente 1060","12 Norte 1054","12 Nort
 const DEPTOS_ED=["A1","B2","C3","D4","E5","E6","F5","F6","G7","H8"];
 const fechaLarga=iso=>{ if(!iso) return ""; const [y,m,d]=iso.split("-"); return parseInt(d)+" de "+["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"][parseInt(m)-1]+" de "+y; };
 
+// RUT chileno: se formatea mientras se escribe (12.345.678-9) y se valida el dígito verificador
+const rutFormato=v=>{ v=String(v||"").replace(/[^0-9kK]/g,"").toUpperCase().slice(0,9); if(v.length<2) return v; return v.slice(0,-1).replace(/\B(?=(\d{3})+(?!\d))/g,".")+"-"+v.slice(-1); };
+const rutValido=v=>{ v=String(v||"").replace(/[^0-9kK]/g,"").toUpperCase(); if(v.length<2) return false; const c=v.slice(0,-1),dv=v.slice(-1); let s=0,m=2;
+  for(let i=c.length-1;i>=0;i--){ s+=parseInt(c[i])*m; m=m===7?2:m+1; } const r=11-(s%11); return dv===(r===11?"0":r===10?"K":String(r)); };
+const emailValido=v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v||"").trim());
+
 // Firma con el dedo o el mouse; entrega la imagen (PNG) o "" si está vacía
 function Firma({onChange}){
   const ref=useRef(null), dib=useRef(false), hay=useRef(false);
@@ -2376,9 +2382,10 @@ function NuevoRecibo({showToast,mob,alGuardar}){
   const [f,setF]=useState(vacio), [err,setErr]=useState({}), [env,setEnv]=useState(false), [k,setK]=useState(0);
   const set=(c,v)=>{ setF(p=>({...p,[c]:v})); setErr(e=>({...e,[c]:false})); };
   const guardar=async()=>{
-    const e={}; ["tipo","nombre","rut","dir","depto"].forEach(c=>{ if(!String(f[c]).trim()) e[c]=true; });
+    const e={}; ["tipo","nombre","rut","dir","depto","email"].forEach(c=>{ if(!String(f[c]).trim()) e[c]=true; });
     if(f.tipo==="llaves"&&!f.tipoLlave) e.tipoLlave=true;
-    if(f.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) e.email=true;
+    if(f.rut&&!rutValido(f.rut)) e.rut=true;
+    if(f.email&&!emailValido(f.email)) e.email=true;
     if(!f.firma) e.firma=true;
     setErr(e); if(Object.keys(e).length){ showToast(e.firma&&Object.keys(e).length===1?"Falta la firma del residente":"Completa los campos marcados","error"); return; }
     setEnv(true);
@@ -2386,7 +2393,7 @@ function NuevoRecibo({showToast,mob,alGuardar}){
       const j=await gasPost({tipo:"recibo",tipoRecibo:f.tipo,nombre:f.nombre.trim(),rut:f.rut.trim(),dir:f.dir,depto:f.depto,email:f.email.trim(),fecha:fechaLarga(f.fecha),
         numControl:f.tipo==="control"?f.numControl:null,tipoLlave:f.tipo==="llaves"?f.tipoLlave:null,firma:f.firma,creado:new Date().toLocaleString("es-CL")});
       if(!j.ok) throw new Error(j.error||"Error");
-      showToast("Recibo guardado"+(f.email?" y enviado por correo al residente":""),"success");
+      showToast("Recibo guardado y enviado a "+f.email.trim()+" (copia a la administración)","success");
       setF(vacio); setK(x=>x+1); alGuardar();
     }catch(ex){ showToast("No se pudo guardar: "+ex.message,"error"); }
     setEnv(false);
@@ -2398,17 +2405,17 @@ function NuevoRecibo({showToast,mob,alGuardar}){
     <div style={{fontSize:24}}>{ico}</div><div style={{fontWeight:700,fontSize:13,color:"#0f172a",marginTop:4}}>{t}</div><div style={{fontSize:11,color:"#64748b"}}>{d}</div></button>);
   return(<div style={{...card,maxWidth:760,padding:16}}>
     <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>Nuevo recibo conforme</div>
-    <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Entrega de llaves o de control remoto. Al guardar se genera el PDF en Drive y, si pones el correo, se le envía al residente.</div>
+    <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Entrega de llaves o de control remoto. Al guardar se genera el PDF en Drive y se le envía una copia al residente por correo.</div>
     <div style={{display:"flex",gap:10,marginBottom:14}}><Opc v="llaves" ico="🔑" t="Entrega de llaves" d="Llave de acceso"/><Opc v="control" ico="📡" t="Control remoto" d="Acceso vehicular"/></div>
     <div style={g2}>
       <div><label style={lbl}>Nombre completo *</label><input style={st("nombre")} value={f.nombre} onChange={e=>set("nombre",e.target.value)} placeholder="Ej: Juan Pérez González"/></div>
-      <div><label style={lbl}>RUT / Cédula *</label><input style={st("rut")} value={f.rut} onChange={e=>set("rut",e.target.value)} placeholder="Ej: 12.345.678-9"/></div>
+      <div><label style={lbl}>RUT / Cédula *</label><input style={st("rut")} value={f.rut} onChange={e=>set("rut",rutFormato(e.target.value))} placeholder="Ej: 12.345.678-9" inputMode="text"/>{err.rut&&f.rut&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>RUT no válido</div>}</div>
       <div><label style={lbl}>Dirección *</label><select style={ss("dir")} value={f.dir} onChange={e=>set("dir",e.target.value)}><option value="">Seleccione…</option>{DIRECCIONES_ED.map(d=><option key={d}>{d}</option>)}</select></div>
       <div><label style={lbl}>Departamento *</label><select style={ss("depto")} value={f.depto} onChange={e=>set("depto",e.target.value)}><option value="">Seleccione…</option>{DEPTOS_ED.map(d=><option key={d}>{d}</option>)}</select></div>
       <div><label style={lbl}>Fecha</label><input type="date" style={inp} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/></div>
       {f.tipo==="control"&&<div><label style={lbl}>Cantidad de controles</label><select style={sel} value={f.numControl} onChange={e=>set("numControl",e.target.value)}><option value="un">Uno (1)</option><option value="dos">Dos (2)</option><option value="tres">Tres (3)</option></select></div>}
       {f.tipo==="llaves"&&<div><label style={lbl}>Tipo de llave *</label><select style={ss("tipoLlave")} value={f.tipoLlave} onChange={e=>set("tipoLlave",e.target.value)}><option value="">Seleccione…</option>{["Bodega","Puerta acceso patio","Mampara","Puerta acceso calle"].map(t=><option key={t}>{t}</option>)}</select></div>}
-      <div style={{gridColumn:"1/-1"}}><label style={lbl}>Correo del residente (opcional)</label><input type="email" style={st("email")} value={f.email} onChange={e=>set("email",e.target.value)} placeholder="residente@correo.com"/></div>
+      <div style={{gridColumn:"1/-1"}}><label style={lbl}>Correo del residente * <span style={{fontWeight:400,color:"#94a3b8"}}>(se le envía su copia en PDF)</span></label><input type="email" style={st("email")} value={f.email} onChange={e=>set("email",e.target.value)} placeholder="residente@correo.com"/></div>
     </div>
     <div style={{marginTop:12}}><label style={{...lbl,color:err.firma?"#ef4444":lbl.color}}>Firma del residente *</label><Firma key={k} onChange={v=>set("firma",v)}/></div>
     <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
@@ -2436,7 +2443,8 @@ function NuevoPago({showToast,mob,alGuardar}){
   const guardar=async()=>{
     const e={}; ["nombre","rut","concepto","desc"].forEach(c=>{ if(!String(f[c]).trim()) e[c]=true; });
     if(!neto) e.neto=true;
-    if(f.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) e.email=true;
+    if(f.rut&&!rutValido(f.rut)) e.rut=true;
+    if(f.email&&!emailValido(f.email)) e.email=true;
     if(!f.firma) e.firma=true;
     setErr(e); if(Object.keys(e).length){ showToast(e.firma&&Object.keys(e).length===1?"Falta la firma de quien autoriza":"Completa los campos marcados","error"); return; }
     setEnv(true);
@@ -2467,7 +2475,7 @@ function NuevoPago({showToast,mob,alGuardar}){
     <div style={g2}>
       <div style={full}><label style={lbl}>Razón social / nombre *</label><input list="provs-pago" style={st("nombre")} value={f.nombre} onChange={e=>elegirNombre(e.target.value)} placeholder="Ej: Servicios Técnicos Ltda."/>
         <datalist id="provs-pago">{provs.map(p=><option key={p.nombre} value={p.nombre}/>)}</datalist></div>
-      <div><label style={lbl}>RUT *</label><input style={st("rut")} value={f.rut} onChange={e=>set("rut",e.target.value)} placeholder="Ej: 76.123.456-7"/></div>
+      <div><label style={lbl}>RUT *</label><input style={st("rut")} value={f.rut} onChange={e=>set("rut",rutFormato(e.target.value))} placeholder="Ej: 76.123.456-7"/>{err.rut&&f.rut&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>RUT no válido</div>}</div>
       <div><label style={lbl}>Giro</label><input style={inp} value={f.giro} onChange={e=>set("giro",e.target.value)} placeholder="Ej: Servicios de mantención"/></div>
       <div><label style={lbl}>Correo</label><input type="email" style={st("email")} value={f.email} onChange={e=>set("email",e.target.value)} placeholder="proveedor@correo.com"/></div>
       <div><label style={lbl}>Cuenta bancaria</label><input style={inp} value={f.banco} onChange={e=>set("banco",e.target.value)} placeholder="Ej: Banco Estado — Cta Cte"/></div>

@@ -365,7 +365,7 @@ function Tabs({tabs,active,onChange,accent}){
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando...</div><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
-function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,er,mob}){
+function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,irAlMenu,er,mob}){
   const navTo = id => { setView(id); setNavOpen(false); };
   const isAct = id => view===id||(view==="detail"&&id==="requests");
   return (
@@ -401,6 +401,7 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
           </div>
         )}
         {viewAs&&<button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir de vista</button>}
+        {!usaServidor(session)&&<button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setNavOpen&&setNavOpen(false);irAlMenu();}}>← Menú de módulos</button>}
         <button style={{...BD(true),width:"100%",justifyContent:"center"}} onClick={handleLogout}>Cerrar sesion</button>
       </div>
     </div>
@@ -409,11 +410,11 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
 
 // ── Login ──────────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
-  const [mode,setMode]=useState(null);
+  const [mode,setMode]=useState(()=>volverAlMenu?"menu_personal":null);
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [load,setLoad]=useState(false); const [err,setErr]=useState("");
   const [resEmail,setResEmail]=useState(""); const [resErr,setResErr]=useState("");
-  const [loggedUser,setLoggedUser]=useState(null); // usuario autenticado esperando elegir módulo
+  const [loggedUser,setLoggedUser]=useState(()=>{ const u=volverAlMenu; volverAlMenu=null; return u; }); // usuario autenticado esperando elegir módulo
 
   const doLogin=async()=>{
     if(!email||!pass){setErr("Ingrese correo y contraseña");return;}
@@ -600,6 +601,21 @@ export default function App(){
     if(user.rol==="Residente") setView("mis_reqs");
   };
   const handleLogout=()=>{setAcceso(null);setSession(null);setViewAs(null);setView("dashboard");};
+  // Volver al menú de módulos (Incidencias / Parking / Comprobantes) sin cerrar sesión
+  const irAlMenu=()=>{ if(!session||usaServidor(session)) return; volverAlMenu=session; setViewAs(null); setView("dashboard"); setSession(null); };
+  // Botón «atrás» del navegador o del celular: primero vuelve al inicio de la app y, desde ahí, al menú de módulos
+  const viewRef=useRef(view); viewRef.current=view;
+  useEffect(()=>{
+    if(!session) return;
+    try{ window.history.pushState({condo:true},""); }catch(_){}
+    const alVolver=()=>{
+      const inicio=usaServidor(session)?"mis_reqs":"dashboard";
+      if(viewRef.current!==inicio){ setView(inicio); try{ window.history.pushState({condo:true},""); }catch(_){} }
+      else irAlMenu();
+    };
+    window.addEventListener("popstate",alVolver);
+    return()=>window.removeEventListener("popstate",alVolver);
+  },[session]);
 
   useEffect(()=>{setLoading(false);},[]);
 
@@ -767,7 +783,7 @@ export default function App(){
       <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
         {mob&&navOpen&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:49}} onClick={()=>setNavOpen(false)}/>}
         {(!mob||navOpen)&&(
-          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} er={er} mob={mob}/>
+          <Sidebar navItems={navItems} view={view} session={session} viewAs={viewAs} setViewAs={setViewAs} setView={setView} setNavOpen={setNavOpen} handleLogout={handleLogout} irAlMenu={irAlMenu} er={er} mob={mob}/>
         )}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8}}>
@@ -2288,6 +2304,7 @@ const MOTIVOS_SIN_ORDEN=["Consulta respondida","Duplicada","Corresponde a un ter
 // Comprobantes (sitio del edificio) y Parking, abiertos dentro de CondoAdmin con la misma sesión:
 // se les envía el token del usuario y lo validan contra su rol en CondoAdmin. No vuelven a pedir clave.
 let vistaInicial=null;
+let volverAlMenu=null; // usuario que vuelve al menú de módulos sin cerrar sesión
 function SitioIntegrado({titulo,url}){
   const ref=useRef(null);
   const origen=new URL(url).origin;

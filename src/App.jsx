@@ -526,12 +526,12 @@ function LoginScreen({onLogin}){
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Incidencias</div><div style={{color:"#c7d2fe",fontSize:12,marginTop:2}}>Gestión de solicitudes y órdenes</div></div>
             <div style={{marginLeft:"auto",color:"#c7d2fe",fontSize:18}}>→</div>
           </button>
-          <button onClick={()=>window.open("https://parkadmin-ashy.vercel.app/?ir=personal","_blank")} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(5,150,105,.4)"}}>
+          <button onClick={()=>{ vistaInicial="parking"; onLogin(loggedUser); }} style={{background:"linear-gradient(135deg,#059669,#047857)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(5,150,105,.4)"}}>
             <div style={{fontSize:32}}>🅿️</div>
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Parking</div><div style={{color:"#a7f3d0",fontSize:12,marginTop:2}}>Gestión de estacionamientos</div></div>
             <div style={{marginLeft:"auto",color:"#a7f3d0",fontSize:18}}>→</div>
           </button>
-          <button onClick={()=>window.open("https://com12norte.github.io/administracion-edificio/","_blank")} style={{background:"linear-gradient(135deg,#b45309,#92400e)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(180,83,9,.4)"}}>
+          <button onClick={()=>{ vistaInicial="comprobantes"; onLogin(loggedUser); }} style={{background:"linear-gradient(135deg,#b45309,#92400e)",border:"none",borderRadius:14,padding:"18px 20px",cursor:"pointer",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 14px rgba(180,83,9,.4)"}}>
             <div style={{fontSize:32}}>🧾</div>
             <div style={{textAlign:"left"}}><div style={{color:"#fff",fontWeight:700,fontSize:16}}>Comprobante y Controles</div><div style={{color:"#fde68a",fontSize:12,marginTop:2}}>Comprobantes de entrega y listado de controles</div></div>
             <div style={{marginLeft:"auto",color:"#fde68a",fontSize:18}}>→</div>
@@ -567,7 +567,8 @@ export default function App(){
   const [session,setSession]=useState(null);
   const [loading,setLoading]=useState(true);
   const [viewAs,setViewAs]=useState(null);
-  const [view,setView]=useState("dashboard");
+  // Si en el menú de módulos eligió Parking o Comprobantes, entra directo a esa sección (con su misma sesión)
+  const [view,setView]=useState(()=>{ const v=vistaInicial; vistaInicial=null; return v||"dashboard"; });
   const [reqs,setReqs]=useState([]);
   const [tasks,setTasks]=useState([]);
   const [atts,setAtts]=useState([]);
@@ -2286,6 +2287,7 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
 const MOTIVOS_SIN_ORDEN=["Consulta respondida","Duplicada","Corresponde a un tercero (Esval, Chilquinta, municipalidad…)","Resuelta en el momento (sin orden)","Otro"];
 // Comprobantes (sitio del edificio) y Parking, abiertos dentro de CondoAdmin con la misma sesión:
 // se les envía el token del usuario y lo validan contra su rol en CondoAdmin. No vuelven a pedir clave.
+let vistaInicial=null;
 function SitioIntegrado({titulo,url}){
   const ref=useRef(null);
   const origen=new URL(url).origin;

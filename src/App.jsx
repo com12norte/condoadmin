@@ -2822,6 +2822,9 @@ function CopropietariosView({showToast,mob}){
   const sincDocs=()=>herramienta("sinc","Sincronizando con el Listado de Documentos…",async()=>{ const r=await cpPost("coprop_sincdocs"); if(!r.ok) throw new Error(r.error); showToast("Listado leído: "+r.filasLeidas+" unidades · "+r.unidadesNuevasSinRegistro+" sin registro · "+r.sinCarpeta+" sin carpeta","success"); cargar(); });
   const indexar=()=>herramienta("idx","Indexando carpetas de Drive…",async()=>{ const r=await cpPost("coprop_indexar"); if(!r.ok) throw new Error(r.error); showToast(r.archivosIndexados+" archivos nuevos en "+r.unidadesRevisadas+" carpetas","success"); cargar(); });
   const traerCorreo=()=>herramienta("mail","Trayendo adjuntos del correo… puede tardar unos minutos",async()=>{ const r=await cpPost("coprop_importarcorreo"); if(!r.ok) throw new Error(r.error); showToast(r.archivosGuardados+" archivos guardados · "+(r.mensaje||""),"success"); cargar(); });
+  const leerTodos=()=>{ if(!window.confirm("Se leerán los certificados de dominio de las unidades que aún no tienen la inscripción cargada. Tarda unos segundos por unidad; si quedan pendientes, vuelve a presionar. ¿Continuar?")) return;
+    herramienta("ocr","Leyendo certificados… puede tardar unos minutos",async()=>{ const r=await cpPost("coprop_leerdominio",{}); if(!r.ok) throw new Error(r.error);
+      showToast("Leídos: "+r.leidos+(r.pendientes?" · quedan "+r.pendientes+" (presiona de nuevo)":"")+(r.sinCertificado?" · sin certificado: "+r.sinCertificado:"")+(r.fallos&&r.fallos.length?" · con error: "+r.fallos.length:""),r.fallos&&r.fallos.length?"error":"success"); cargar(); }); };
   const faltantes=()=>{ const f=(data||[]).filter(r=>(r.faltan||[]).length).sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
     if(!f.length){ showToast("No hay documentos faltantes","success"); return; }
     csvDescargar("documentos_faltantes.csv",[["Dirección","Depto","Propietario","Correo","Estado registro","Documentos que faltan","Observación listado"],...f.map(r=>[r.direccion,r.depto,(r.datos||{}).prop_nombre,cpMail(r),CP_BADGE[estado(r)][0],r.faltan.map(t=>CP_DOC[t]||t).join(" + "),r.obsListado])]); };
@@ -2849,7 +2852,7 @@ function CopropietariosView({showToast,mob}){
   const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
     <div style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>{n}</div><div style={{fontSize:11,color:"#64748b"}}>{tx}</div></button>;
   const herr=[["🔗 Copiar link público",()=>copiarTexto(CP_URL_PUBLICO,()=>showToast("Link público copiado","success")),""],["📧 Recordar a los que deben",recordarTodos,"rec"],["📂 Sincronizar documentos",sincDocs,"sinc"],
-    ["🗂️ Indexar carpetas de Drive",indexar,"idx"],["✉️ Traer adjuntos del correo",traerCorreo,"mail"],["⬇️ Faltantes (CSV)",faltantes,""],["📥 Importar CSV del Form",()=>fileRef.current.click(),"imp"]];
+    ["🗂️ Indexar carpetas de Drive",indexar,"idx"],["✉️ Traer adjuntos del correo",traerCorreo,"mail"],["📄 Leer certificados de dominio",leerTodos,"ocr"],["⬇️ Faltantes (CSV)",faltantes,""],["📥 Importar CSV del Form",()=>fileRef.current.click(),"imp"]];
   return(<div>
     {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:12}}>
@@ -2914,6 +2917,41 @@ function InvitarCoprop({unidad,cambio,showToast,onClose,alTerminar}){
   </Ventana>);
 }
 
+// Datos de la inscripción en el Conservador (leídos del certificado de dominio; se pueden corregir)
+function InscripcionCoprop({r,cargar,showToast}){
+  const vacia={fojas:"",numero:"",anio:"",conservador:"",fechaCertificado:"",titular:""};
+  const [i,setI]=useState({...vacia,...(r.inscripcion||{})}), [ocup,setOcup]=useState(""), [cambio,setCambio]=useState(false);
+  const set=(k,v)=>{ setI(x=>({...x,[k]:v})); setCambio(true); };
+  const tieneCert=(r.docs||[]).some(x=>x.tipo==="dominio"&&x.estado!=="rechazado");
+  const leer=async()=>{ setOcup("leer"); showToast("Leyendo el certificado… puede tardar unos segundos","info");
+    try{ const x=await cpPost("coprop_leerdominio",{id:r.id,forzar:true}); if(!x.ok) throw new Error(x.error);
+      if(x.fallos&&x.fallos.length) throw new Error(x.fallos[0]);
+      if(!x.leidos) throw new Error(x.sinCertificado?"No hay certificado de dominio clasificado en esta unidad":"No se pudo leer");
+      setI({...vacia,...(x.inscripcion||{})}); setCambio(false);
+      const n=["fojas","numero","anio","conservador","fechaCertificado"].filter(k=>(x.inscripcion||{})[k]).length;
+      showToast(n?"Leído: se encontraron "+n+" de 5 datos. Revísalos":"No se reconocieron datos; complétalos a mano",n?"success":"error"); cargar();
+    }catch(e){ showToast("No se pudo leer: "+e.message,"error"); } setOcup(""); };
+  const guardar=async()=>{ setOcup("guardar");
+    try{ const x=await cpPost("coprop_inscripcion",{id:r.id,inscripcion:i}); if(!x.ok) throw new Error(x.error); showToast("Inscripción guardada","success"); setCambio(false); cargar(); }
+    catch(e){ showToast("No se pudo guardar: "+e.message,"error"); } setOcup(""); };
+  const c=(k,l,ph,w)=><div style={{gridColumn:w?"1/-1":"auto"}}><label style={lbl}>{l}</label><input style={{...inp,padding:"6px 8px"}} value={i[k]||""} onChange={e=>set(k,e.target.value)} placeholder={ph}/></div>;
+  return(<div style={{border:"1px solid #e2e8f0",borderRadius:8,padding:10,background:"#f8fafc"}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+      {c("fojas","Fojas","Ej: 4521")}{c("numero","Número","Ej: 5233")}{c("anio","Año","Ej: 2018")}
+      {c("conservador","Conservador de Bienes Raíces de","Ej: Viña del Mar",true)}
+      {c("titular","Titular según certificado","Nombre",true)}
+      <div><label style={lbl}>Fecha del certificado</label><input type="date" style={{...inp,padding:"6px 8px"}} value={i.fechaCertificado||""} onChange={e=>set("fechaCertificado",e.target.value)}/></div>
+    </div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:8}}>
+      <button style={BS(true)} disabled={!!ocup||!tieneCert} title={tieneCert?"":"Primero clasifica un documento como Certificado de dominio"} onClick={leer}>{ocup==="leer"?"⏳ Leyendo…":"📄 Leer del certificado"}</button>
+      <button style={BP(true)} disabled={!!ocup||!cambio} onClick={guardar}>{ocup==="guardar"?"Guardando…":"Guardar"}</button>
+      <span style={{fontSize:11,color:"#94a3b8"}}>{r.inscripcion?.editadoAMano?"Corregido a mano el "+r.inscripcion.editadoEl:r.inscripcion?.leidoDe?"Leído de "+r.inscripcion.leidoDe+" el "+r.inscripcion.leidoEl:"Sin leer todavía"}</span>
+    </div>
+    {i.titular&&(r.datos||{}).prop_nombre&&!String((r.datos||{}).prop_nombre).toLowerCase().split(" ").filter(w=>w.length>2).some(w=>String(i.titular).toLowerCase().includes(w))&&
+      <div style={{...alrt("warning"),marginTop:8}}>El titular del certificado ({i.titular}) no coincide con el propietario registrado ({r.datos.prop_nombre}).</div>}
+  </div>);
+}
+
 function FichaCoprop({r,estado,cargar,showToast,onClose}){
   const [motivo,setMotivo]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null);
   if(!r) return null;
@@ -2958,6 +2996,8 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
           <button style={BS(true)} disabled={ocup} onClick={()=>docAccion(i,"rechazado")}>❌ Rechazar</button>
         </div>
       </div>); })}
+    {sec("Inscripción en el Conservador")}
+    <InscripcionCoprop key={r.id+(r.inscripcion?.leidoEl||"")+(r.inscripcion?.editadoEl||"")} r={r} cargar={cargar} showToast={showToast}/>
     {sec("Propietario")}
     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
       {!(d.prop_rut||d.prop_nombre)?<button style={BS(true)} onClick={()=>setInv("invitar")}>✉ Invitar a registrarse</button>

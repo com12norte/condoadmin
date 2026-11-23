@@ -2328,7 +2328,12 @@ let vistaInicial=null;
 const GAS_EDIFICIO="https://script.google.com/macros/s/AKfycbxKRCFQItt75ZYhqNVhY4y691BYD62uV8wSOxfC3RFN8KJvdNJS_1TbvP-72GXpIAUV/exec";
 // ── Comprobantes (recibos, pagos, controles) ───────────────────────────────
 // Los datos y los PDF los maneja el código de Google del edificio; CondoAdmin le manda la sesión del usuario.
-const gasPost=async payload=>{ const t=await fbAuth.currentUser?.getIdToken(); const r=await fetch(GAS_EDIFICIO,{method:"POST",body:JSON.stringify({...payload,clave:t})}); return r.json(); };
+// El servidor responde {ok:true, resultado:{...}} aunque la operación falle adentro: se revisa también el resultado
+const gasPost=async payload=>{ const t=await fbAuth.currentUser?.getIdToken(); const r=await fetch(GAS_EDIFICIO,{method:"POST",body:JSON.stringify({...payload,clave:t})});
+  let j; try{ j=await r.json(); }catch{ return {ok:false,error:"El servidor no respondió bien ("+r.status+")"}; }
+  const x=j&&j.resultado;
+  if(j&&j.ok&&x&&typeof x==="object"&&(x.ok===false||x.guardado===false||(x.error&&!x.pdfUrl))) return {ok:false,error:x.error||"La operación no se completó",resultado:x};
+  return j; };
 const gasListar=async hoja=>{ const t=await fbAuth.currentUser?.getIdToken(); const j=await (await fetch(GAS_EDIFICIO+"?accion=listar&hoja="+encodeURIComponent(hoja)+"&clave="+encodeURIComponent(t||""))).json(); if(!j.ok) throw new Error(j.error||"No se pudo cargar"); return j.data||[]; };
 const DIRECCIONES_ED=["3 Oriente 1080","3 Oriente 1060","12 Norte 1054","12 Norte 1052","12 Norte 1036","12 Norte 1038","4 Oriente 1061","4 Oriente 1081"];
 const DEPTOS_ED=["A1","B2","C3","D4","E5","E6","F5","F6","G7","H8"];

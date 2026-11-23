@@ -2777,6 +2777,9 @@ const cpMail=r=>{ const d=r.datos||{}; return String(d.prop_mail||d.res_mail||""
 const CP_BADGE={vigente:["✅ Al día","#d1fae5","#065f46"],revisar:["🕐 Por validar","#dbeafe","#1e40af"],devuelto:["↩️ Devuelto","#fef3c7","#92400e"],debe:["❗ Debe actualizar","#fee2e2","#991b1b"],sinreg:["⚪ Sin registro","#e5e7eb","#374151"]};
 const CP_DOC={dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",contrato:"Contrato arriendo",ci_arrendatario:"Cédula arrendatario",mandato:"Mandato corredor"};
 // El servidor pide el certificado de dominio del año en curso: uno de años anteriores cuenta como faltante
+// "No corresponde": archivo que no es del registro (ej. comprobante de gastos comunes traído del correo). Se guarda como rechazado con este motivo y se oculta.
+const MOTIVO_NC="No corresponde (no es un documento del registro)";
+const esNC=x=>x.estado==="rechazado"&&x.motivo===MOTIVO_NC;
 const domVencido=x=>!!x.fecha&&parseInt(String(x.fecha).slice(0,4),10)<new Date().getFullYear();
 const CP_TIPOS_DOC={sin_clasificar:"Sin clasificar",dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",ci_arrendatario:"Cédula arrendatario",contrato:"Contrato arriendo",mandato:"Mandato corredor",otro:"Otro"};
 const CP_ETIQ=[["Propietario",null],["prop_nombre","Nombre"],["prop_rut","RUT"],["prop_fnac","Nacimiento"],["prop_nac","Nacionalidad"],["prop_tel","Teléfono"],["prop_mail","Correo"],["conyuge_nombre","Cónyuge/pareja"],["conyuge_rut","RUT cónyuge"],["uso","Uso de la residencia"],["resid_principal","Residencia principal del dueño"],
@@ -2848,7 +2851,7 @@ function CopropietariosView({showToast,mob}){
   const cnt={vigente:0,revisar:0,devuelto:0,debe:0,sinreg:0,sincorreo:0,faltan:0};
   data.forEach(r=>{ cnt[estado(r)]++; if(!cpMail(r)) cnt.sincorreo++; if((r.faltan||[]).length) cnt.faltan++; });
   const t=q.toLowerCase().replace(/[.\-]/g,"");
-  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sintipo"?!(r.docs||[]).some(x=>(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
+  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sintipo"?!(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
     if(!t) return true; const d=r.datos||{}; return (r.direccion+" "+r.depto+" "+(d.prop_nombre||"")+" "+(d.prop_rut||"")+" "+(d.res_nombre||"")).toLowerCase().replace(/[.\-]/g,"").includes(t); })
     .sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
   const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
@@ -2859,7 +2862,7 @@ function CopropietariosView({showToast,mob}){
     {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:12}}>
       {kpi("todos","Unidades",data.length,"#1e3a5f")}{kpi("vigente","Al día "+anio,cnt.vigente,"#059669")}{kpi("revisar","Por validar",cnt.revisar,"#2563eb")}{kpi("devuelto","Devueltos",cnt.devuelto,"#d97706")}
-      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
+      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
       <input style={{...inp,maxWidth:340}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, depto, nombre o RUT…"/>
@@ -2955,7 +2958,7 @@ function InscripcionCoprop({r,cargar,showToast}){
 }
 
 function FichaCoprop({r,estado,cargar,showToast,onClose}){
-  const [motivo,setMotivo]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null);
+  const [motivo,setMotivo]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null), [verNC,setVerNC]=useState(false);
   if(!r) return null;
   const d=r.datos||{}, b=CP_BADGE[estado(r)];
   const hacer=async(fn)=>{ setOcup(true); try{ await fn(); }catch(e){ showToast("Error: "+e.message,"error"); } setOcup(false); };
@@ -2963,6 +2966,8 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
     hacer(async()=>{ const x=await cpPost("coprop_validar",{id:r.id,decision:dec,motivo:motivo.trim()}); if(!x.ok) throw new Error(x.error);
       showToast((dec==="aprobado"?"Aprobado":"Devuelto")+(x.correoEnviado?" · correo enviado":" · sin correo registrado"),"success"); await cargar(); onClose(); }); };
   const recordar=()=>hacer(async()=>{ const x=await cpPost("coprop_recordar",{ids:[r.id]}); if(!x.ok) throw new Error(x.error); showToast(x.enviados?"Link reenviado":"No se envió (sin correo)",x.enviados?"success":"error"); });
+  const noCorresponde=i=>hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:"otro",estado:"rechazado",motivo:MOTIVO_NC}); if(!x.ok) throw new Error(x.error); showToast("Marcado como \"no corresponde\" y ocultado","success"); await cargar(); });
+  const restaurar=i=>hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:"sin_clasificar",estado:"pendiente",motivo:""}); if(!x.ok) throw new Error(x.error); showToast("Documento restaurado","success"); await cargar(); });
   const docAccion=(i,est)=>{ if(est==="rechazado"&&!motivo.trim()){ showToast("Escribe el motivo abajo para rechazar el documento","error"); return; }
     hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:tipos[i]??r.docs[i].tipo,estado:est,motivo:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast(est?"Documento "+est:"Tipo actualizado","success"); await cargar(); }); };
   const sec=t=><div style={{fontWeight:700,color:"#1e3a5f",margin:"12px 0 4px",fontSize:13}}>{t}</div>;
@@ -2981,8 +2986,8 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
         return (CP_DOC[t]||t)+(v?" (el entregado es de "+String(v.fecha).slice(0,4)+"; se pide uno de "+new Date().getFullYear()+")":""); }).join(", ")}</div>:<div style={{fontSize:12,color:"#059669",marginBottom:4}}>✓ Documentación completa</div>}
     {r.docsEstado&&<div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Según Listado: {Object.entries(r.docsEstado).map(([k,v])=>(CP_DOC[k]||"Ficha")+": "+({ok:"entregado",falta:"pendiente",na:"no corresponde",desconoce:"se desconoce"}[v]||v)).join(" · ")}</div>}
     {r.carpetaUrl&&<div style={{fontSize:12,marginBottom:6}}><a href={r.carpetaUrl} target="_blank" rel="noreferrer">📁 Carpeta en Drive ({r.archivosCarpeta==null?"?":r.archivosCarpeta} archivos)</a></div>}
-    {(r.docs||[]).some(x=>(x.tipo||"sin_clasificar")==="sin_clasificar")&&<div style={{...alrt("warning"),marginBottom:6}}>Hay documentos sin tipo: indica qué documento es cada uno para que cuente como entregado.</div>}
-    {(r.docs||[]).map((x,i)=>{ const est=x.estado||"pendiente", col={validado:"#059669",rechazado:"#dc2626",pendiente:"#2563eb"}[est];
+    {(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar")&&<div style={{...alrt("warning"),marginBottom:6}}>Hay documentos sin tipo: indica qué documento es cada uno para que cuente como entregado.</div>}
+    {(r.docs||[]).map((x,i)=>{ if(esNC(x)) return null; const est=x.estado||"pendiente", col={validado:"#059669",rechazado:"#dc2626",pendiente:"#2563eb"}[est];
       const tipo=tipos[i]??x.tipo??"sin_clasificar", sinTipo=tipo==="sin_clasificar";
       return(<div key={i} style={{border:"1px solid "+(sinTipo?"#fbbf24":"#e2e8f0"),background:sinTipo?"#fffbeb":"#fff",borderRadius:8,padding:8,marginBottom:6,fontSize:12}}>
         <div style={{fontWeight:700,fontSize:13,color:sinTipo?"#b45309":"#0f172a",marginBottom:2}}>{sinTipo?"⚠ Documento sin tipo":CP_TIPOS_DOC[tipo]||tipo}
@@ -2996,8 +3001,14 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
           <span style={{color:col,fontWeight:700}}>{est}</span>{x.motivo&&<span style={{color:"#dc2626"}}>({x.motivo})</span>}
           <button style={BS(true)} disabled={ocup} onClick={()=>{ if(sinTipo){ showToast("Primero indica qué tipo de documento es","error"); return; } docAccion(i,"validado"); }}>✅ Validar</button>
           <button style={BS(true)} disabled={ocup} onClick={()=>docAccion(i,"rechazado")}>❌ Rechazar</button>
+          <button style={{...BS(true),color:"#64748b"}} disabled={ocup} title="No es un documento del registro (ej. comprobante de pago): se oculta" onClick={()=>noCorresponde(i)}>🚫 No corresponde</button>
         </div>
       </div>); })}
+    {(r.docs||[]).some(esNC)&&<div style={{marginTop:4}}>
+      <button onClick={()=>setVerNC(v=>!v)} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:12,padding:0}}>{verNC?"▾":"▸"} {(r.docs||[]).filter(esNC).length} archivo(s) marcados como "no corresponde"</button>
+      {verNC&&(r.docs||[]).map((x,i)=>esNC(x)?<div key={"nc"+i} style={{display:"flex",gap:8,alignItems:"center",fontSize:12,color:"#94a3b8",padding:"3px 0"}}>
+        <a href={x.url} target="_blank" rel="noreferrer" style={{color:"#94a3b8"}}>📎 {x.nombre}</a><button style={BS(true)} disabled={ocup} onClick={()=>restaurar(i)}>Restaurar</button></div>:null)}
+    </div>}
     {sec("Inscripción en el Conservador")}
     <InscripcionCoprop key={r.id+(r.inscripcion?.leidoEl||"")+(r.inscripcion?.editadoEl||"")} r={r} cargar={cargar} showToast={showToast}/>
     {sec("Propietario")}

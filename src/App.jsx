@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { initializeApp, getApps, deleteApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, deleteField, query, orderBy, where } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, signOut } from "firebase/auth";
@@ -365,6 +365,7 @@ function Tabs({tabs,active,onChange,accent}){
 function Loader(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,background:"#f1f5f9"}}><div style={{width:40,height:40,border:"4px solid #e2e8f0",borderTop:"4px solid #3b82f6",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Cargando...</div><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
+const GRUPOS_NAV=["Operación","Edificio","Administración","Sistema"];
 function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,handleLogout,irAlMenu,er,mob}){
   const navTo = id => { setView(id); setNavOpen(false); };
   const isAct = id => view===id||(view==="detail"&&id==="requests");
@@ -377,12 +378,16 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
         </div>
       )}
       <nav style={{padding:"6px 0",flex:1}}>
-        {navItems.map(n=>(
-          <button key={n.id} onClick={()=>navTo(n.id)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:mob?"12px 14px":"10px 14px",cursor:"pointer",fontSize:13,color:isAct(n.id)?"#fff":"#94a3b8",background:isAct(n.id)?"#1e3a5f":"transparent",borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",borderTop:"none",borderRight:"none",borderBottom:"none",fontWeight:isAct(n.id)?600:400,outline:"none"}}>
+        {[...navItems].sort((x,y)=>GRUPOS_NAV.indexOf(x.grupo||"Operación")-GRUPOS_NAV.indexOf(y.grupo||"Operación")).map((n,i,arr)=>(
+          <Fragment key={n.id}>
+          {(i===0||(arr[i-1].grupo||"Operación")!==(n.grupo||"Operación"))&&(navItems.some(x=>x.grupo&&x.grupo!=="Operación"))&&
+            <div style={{color:"#475569",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,padding:i===0?"8px 14px 4px":"14px 14px 4px"}}>{n.grupo||"Operación"}</div>}
+          <button onClick={()=>navTo(n.id)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",padding:mob?"12px 14px":"10px 14px",cursor:"pointer",fontSize:13,color:isAct(n.id)?"#fff":"#94a3b8",background:isAct(n.id)?"#1e3a5f":"transparent",borderLeft:isAct(n.id)?"3px solid #3b82f6":"3px solid transparent",borderTop:"none",borderRight:"none",borderBottom:"none",fontWeight:isAct(n.id)?600:400,outline:"none"}}>
             <span style={{width:20,textAlign:"center",fontSize:15}}>{n.icon}</span>
             <span style={{flex:1}}>{n.label}</span>
             {n.badge>0&&<span title={n.badgeTitle} style={{background:n.badgeRed?"#ef4444":"#334155",color:"#fff",borderRadius:99,fontSize:10,fontWeight:700,padding:"1px 7px"}}>{n.badge}</span>}
           </button>
+          </Fragment>
         ))}
       </nav>
       <div style={{padding:"10px 14px",borderTop:"1px solid #1e293b"}}>
@@ -401,7 +406,6 @@ function Sidebar({navItems,view,session,viewAs,setViewAs,setView,setNavOpen,hand
           </div>
         )}
         {viewAs&&<button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setViewAs(null);setView("dashboard");}}>Salir de vista</button>}
-        {!usaServidor(session)&&<button style={{...BS(true),width:"100%",justifyContent:"center",marginBottom:8}} onClick={()=>{setNavOpen&&setNavOpen(false);irAlMenu();}}>← Menú de módulos</button>}
         <button style={{...BD(true),width:"100%",justifyContent:"center"}} onClick={handleLogout}>Cerrar sesion</button>
       </div>
     </div>
@@ -433,8 +437,8 @@ function LoginScreen({onLogin}){
         if(users.length) break;
       }
       if(!users||users.length===0) throw new Error("Usuario no encontrado o inactivo");
-      setLoggedUser({...users[0],token:auth.access_token});
-      setMode("menu_personal"); // mostrar menú de módulos
+      // Se entra directo a Inicio: Parking y Comprobantes están en el menú lateral
+      onLogin({...users[0],token:auth.access_token});
     }catch(ex){
       const c=ex&&ex.code||"";
       if(c==="auth/invalid-credential"||c==="auth/wrong-password"||c==="auth/user-not-found"||c==="auth/invalid-email"){
@@ -613,8 +617,8 @@ export default function App(){
     try{ window.history.pushState({condo:true},""); }catch(_){}
     const alVolver=()=>{
       const inicio=usaServidor(session)?"mis_reqs":"dashboard";
-      if(viewRef.current!==inicio){ setView(inicio); try{ window.history.pushState({condo:true},""); }catch(_){} }
-      else irAlMenu();
+      if(viewRef.current!==inicio) setView(inicio);
+      try{ window.history.pushState({condo:true},""); }catch(_){}
     };
     window.addEventListener("popstate",alVolver);
     return()=>window.removeEventListener("popstate",alVolver);
@@ -736,13 +740,13 @@ export default function App(){
   const nOrdVenc=tasks.filter(t=>_reqIds.has(t.requestId)&&tareaPend(t)&&diffDue(t)<0).length;
   const nMantVenc=mant.filter(m=>getMantStatus(m)==="Vencida").length;
   const navItems=[
-    {id:"dashboard",label:"Inicio",icon:"🏠"},
-    {id:"mis_reqs",label:"Mis Solicitudes",icon:"📋"},
-    {id:"requests",label:"Solicitudes",icon:"📋",badge:nAbiertas,badgeTitle:"Solicitudes abiertas"},
-    {id:"tasks",label:"Órdenes de trabajo",icon:"🛠️",badge:nOrdVenc,badgeRed:true,badgeTitle:"Órdenes vencidas sin informe"},
-    {id:"misolicitudes",label:"Mis Órdenes",icon:"✅"},{id:"inspections",label:"Novedades",icon:"📝"},{id:"inventory",label:"Inventario",icon:"📦"},
-    {id:"mantencion",label:"Mantención",icon:"🔧",badge:nMantVenc,badgeRed:true,badgeTitle:"Mantenciones vencidas"},
-    {id:"emails",label:"Correos enviados",icon:"✉️"},{id:"emergencia",label:"Plan de emergencia",icon:"🆘"},{id:"comprobantes",label:"Comprobantes y controles",icon:"🧾"},{id:"parking",label:"Parking",icon:"🅿️"},{id:"reports",label:"Reportes",icon:"📊"},{id:"config",label:"Configuración",icon:"⚙️"},
+    {id:"dashboard",grupo:"Operación",label:"Inicio",icon:"🏠"},
+    {id:"mis_reqs",grupo:"Operación",label:"Mis Solicitudes",icon:"📋"},
+    {id:"requests",grupo:"Operación",label:"Solicitudes",icon:"📋",badge:nAbiertas,badgeTitle:"Solicitudes abiertas"},
+    {id:"tasks",grupo:"Operación",label:"Órdenes de trabajo",icon:"🛠️",badge:nOrdVenc,badgeRed:true,badgeTitle:"Órdenes vencidas sin informe"},
+    {id:"misolicitudes",grupo:"Operación",label:"Mis Órdenes",icon:"✅"},{id:"inspections",grupo:"Operación",label:"Novedades",icon:"📝"},{id:"inventory",grupo:"Edificio",label:"Inventario",icon:"📦"},
+    {id:"mantencion",grupo:"Edificio",label:"Mantención",icon:"🔧",badge:nMantVenc,badgeRed:true,badgeTitle:"Mantenciones vencidas"},
+    {id:"emails",grupo:"Sistema",label:"Correos enviados",icon:"✉️"},{id:"emergencia",grupo:"Edificio",label:"Plan de emergencia",icon:"🆘"},{id:"comprobantes",grupo:"Administración",label:"Comprobantes y controles",icon:"🧾"},{id:"parking",grupo:"Administración",label:"Parking",icon:"🅿️"},{id:"copropietarios",grupo:"Administración",label:"Registro de copropietarios",icon:"👥"},{id:"reports",grupo:"Sistema",label:"Reportes",icon:"📊"},{id:"config",grupo:"Sistema",label:"Configuración",icon:"⚙️"},
   ].filter(n=>{
     if(n.id==="config"&&!can(er,"manageConfig")) return false;
     if(n.id==="emails"&&!can(er,"viewEmails")) return false;
@@ -757,7 +761,7 @@ export default function App(){
     if(n.id==="requests"&&er==="Residente") return false;
     if(n.id==="tasks"&&er==="Residente") return false;
     if(n.id==="emergencia"&&!["Administrador","Administrador Edificio","Comite","Conserjeria"].includes(er)) return false;
-    if((n.id==="comprobantes"||n.id==="parking")&&!["Administrador","Administrador Edificio"].includes(er)) return false;
+    if((n.id==="comprobantes"||n.id==="parking"||n.id==="copropietarios")&&!["Administrador","Administrador Edificio"].includes(er)) return false;
     return true;
   });
 
@@ -815,6 +819,7 @@ export default function App(){
             {view==="emails"&&<EmailsView logs={emails} setEmails={setEmails} role={er}/>}
             {view==="emergencia"&&<EmergenciaView role={er} showToast={showToast} mob={mob} towers={towers}/>}
             {view==="comprobantes"&&<SitioIntegrado key="comprobantes" titulo="Comprobantes y controles" url="https://com12norte.github.io/administracion-edificio/?embed=1"/>}
+            {view==="copropietarios"&&<SitioIntegrado key="copropietarios" titulo="Registro de copropietarios" url="https://com12norte.github.io/administracion-edificio/?embed=1#coprop"/>}
             {view==="parking"&&<SitioIntegrado key="parking" titulo="Parking" url="https://parkadmin-ashy.vercel.app/?ir=personal&embed=1"/>}
             {view==="reports"&&<Reports reqs={reqs} tasks={tasks} inventory={inventory} mob={mob}/>}
             {view==="config"&&<ConfigView cats={cats} setCats={setCatsDB} towers={towers} setTowers={setTowersDB} equipos={equipos} setEquipos={setEquiposDB} showToast={showToast} session={session} setUsuarios={setUsuarios}/>}
@@ -2322,12 +2327,8 @@ function SitioIntegrado({titulo,url}){
     return()=>{ window.removeEventListener("message",alRecibir); clearInterval(t); };
   },[url]);
   return(
-    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 90px)"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-        <h2 style={{margin:0,fontSize:18}}>{titulo}</h2>
-        <a href={url.replace(/[?&]embed=1/,"")} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#3b82f6"}}>Abrir en pestaña aparte ↗</a>
-      </div>
-      <iframe ref={ref} src={url} title={titulo} onLoad={enviar} style={{flex:1,width:"100%",border:"1px solid #e2e8f0",borderRadius:10,background:"#fff"}}/>
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 84px)",margin:"-8px -4px 0"}}>
+      <iframe ref={ref} src={url} title={titulo} onLoad={enviar} style={{flex:1,width:"100%",border:"none",borderRadius:10,background:"#f1f5f9"}}/>
     </div>
   );
 }

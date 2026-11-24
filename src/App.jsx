@@ -1896,7 +1896,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                     {myTasks.map(t=><TaskCard key={t.id} task={t} role={role} setTasks={setTasks} deleteTask={deleteTask} showToast={showToast} atts={atts} setAtts={setAtts}/>)}
                   </div>
                 )}
-                {can(role,"createTask")&&r.status!=="Cerrada"&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+                {can(role,"createTask")&&r.status!=="Cerrada"&&<NuevaOrdenPlegable plegado={myTasks.length>0} requestId={r.id} setTasks={setTasks} showToast={showToast} respAssign={respAssign} usuarios={usuarios} req={r}/>}
                 {fotosBloque("avance",r.status!=="Cerrada")}
               </div>
             )}
@@ -1992,7 +1992,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
               );
             });
           })()}
-          {can(role,"createTask")&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>{}} respAssign={respAssign} usuarios={usuarios} req={r} inline={true}/>}
+          {can(role,"createTask")&&<NuevaOrdenPlegable plegado={myTasks.length>0} requestId={r.id} setTasks={setTasks} showToast={showToast} respAssign={respAssign} usuarios={usuarios} req={r}/>}
           {myTasks.length===0&&!can(role,"createTask")&&<Empty msg="Sin órdenes de trabajo"/>}
           {myTasks.length>0&&(
             <div style={{marginTop:8}}>
@@ -2078,6 +2078,22 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
 }
 
 // ── TaskForm ───────────────────────────────────────────────────────────────
+function DescCorta({texto}){
+  const [ver,setVer]=useState(false), largo=String(texto).length>140;
+  return(<div style={{fontSize:12,color:"#374151",marginBottom:10}}>
+    <span style={ver||!largo?{}:{display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{texto}</span>
+    {largo&&<button onClick={()=>setVer(v=>!v)} style={{background:"none",border:"none",color:"#2563eb",cursor:"pointer",fontSize:11,padding:0}}>{ver?"ver menos":"ver más"}</button>}
+  </div>);
+}
+
+// Si la solicitud ya tiene órdenes, el formulario de una nueva queda oculto tras un botón (evita repetir los mismos datos en pantalla)
+function NuevaOrdenPlegable({plegado,...p}){
+  const [abierto,setAbierto]=useState(false);
+  useEffect(()=>{ if(!plegado) setAbierto(false); },[plegado]);
+  if(plegado&&!abierto) return <button style={{...BS(true),marginBottom:10}} onClick={()=>setAbierto(true)}>＋ Agregar otra orden de trabajo</button>;
+  return <TaskForm {...p} inline={!plegado} onClose={()=>setAbierto(false)}/>;
+}
+
 function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
@@ -2150,7 +2166,7 @@ function TaskCard({task,role,setTasks,deleteTask,showToast,atts,setAtts}){
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><PBadge p={task.priority}/><SBadge s={task.status}/></div>
       </div>
-      {task.desc&&<p style={{fontSize:12,color:"#374151",marginBottom:10}}>{task.desc}</p>}
+      {task.desc&&<DescCorta texto={task.desc}/>}
       {safeComments.map((c,i)=>(
         <div key={i} style={{fontSize:11,marginBottom:6,paddingLeft:8,borderLeft:"2px solid #e2e8f0"}}>
           <strong>{c.user}</strong> <span style={{color:"#94a3b8"}}>{fmt(c.date)}</span><br/>{c.text}

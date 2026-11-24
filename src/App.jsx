@@ -732,6 +732,18 @@ export default function App(){
     });
   },[tasks,reqs]);
 
+  // Al cerrar (o rechazar) una solicitud, sus órdenes que seguían pendientes se cancelan:
+  // así no quedan órdenes "abiertas" de un trabajo que ya se dio por terminado.
+  useEffect(()=>{
+    if(!session||usaServidor(session)||!reqs.length||!tasks.length) return;
+    const cerradas=new Map(reqs.filter(r=>r.status==="Cerrada"||r.status==="Rechazada").map(r=>[r.id,r]));
+    const pend=tasks.filter(t=>cerradas.has(t.requestId)&&t.status!=="Completada"&&t.status!=="Cancelada");
+    if(!pend.length) return;
+    const ids=new Set(pend.map(t=>t.id)), now=new Date().toISOString();
+    setTasksDB(p=>p.map(t=>ids.has(t.id)?{...t,status:"Cancelada",canceladaEl:now,
+      comments:[...(t.comments||[]),{id:"c"+uid(),user:"Sistema",date:now,text:"Orden cancelada: la solicitud "+(cerradas.get(t.requestId).code||"")+" se "+(cerradas.get(t.requestId).status==="Rechazada"?"rechazó":"cerró")+" sin que la orden se completara."}]}:t));
+  },[tasks,reqs]);
+
   const openReq=r=>{setSelReq(r);setView("detail");setNavOpen(false);};
 
   const respList=usuarios.length?[...usuarios.filter(u=>u.active&&u.rol!=="Residente").map(u=>u.nombre),"Sin asignar"]:["Sin asignar"];
@@ -2083,7 +2095,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
       )}
       {showTF&&<TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} onClose={()=>setShowTF(false)} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}/>}
       {showEv&&<EvidModal type={showEv} requestId={r.id} role={role} atts={atts} setAtts={setAtts} showToast={showToast} onClose={()=>setShowEv(null)}/>}
-      {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} sinOrden={myTasks.filter(t=>t.status!=="Cancelada").length===0} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
+      {showCl&&<CloseModal req={r} atts={atts} setAtts={setAtts} role={role} sinOrden={myTasks.filter(t=>t.status!=="Cancelada").length===0} pendientes={myTasks.filter(t=>t.status!=="Completada"&&t.status!=="Cancelada").length} onClose={()=>setShowCl(false)} onConfirm={closeFinal} showToast={showToast}/>}
     </div>
   );
 }
@@ -3260,7 +3272,7 @@ function SitioIntegrado({titulo,url}){
   );
 }
 
-function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast,sinOrden}){
+function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast,sinOrden,pendientes=0}){
   const [motSO,setMotSO]=useState(""); const [errSO,setErrSO]=useState(false);
   const closure=atts.filter(a=>a.requestId===req.id&&a.type==="cierre");
   const [showEv,setShowEv]=useState(false);
@@ -3272,6 +3284,7 @@ function CloseModal({req,atts,setAtts,role,onClose,onConfirm,showToast,sinOrden}
       <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:460,padding:"20px",marginTop:16}}>
         <h3 style={{margin:"0 0 4px",fontSize:15}}>Cerrar solicitud {req.code}</h3>
         <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>{tieneCorreo(req)?"Se avisará a "+req.requesterEmail+" y se le preguntará si quedó resuelto.":"Esta solicitud no tiene correo de contacto; no se enviará aviso."}</div>
+        {pendientes>0&&<div style={{...alrt("warning"),marginBottom:10}}>Esta solicitud tiene {pendientes} orden{pendientes>1?"es":""} de trabajo sin completar. Al cerrarla, {pendientes>1?"quedarán":"quedará"} <b>cancelada{pendientes>1?"s":""}</b> (con una nota en la orden).</div>}
         {sinOrden&&<div style={{marginBottom:10}}>
           <label style={lbl}>Se cierra sin orden de trabajo. Motivo *</label>
           <select style={{...sel,width:"100%",...(errSO?{borderColor:"#ef4444",background:"#fef2f2"}:{})}} value={motSO} onChange={ev=>{setMotSO(ev.target.value);setErrSO(false);}}><option value="">Seleccione…</option>{MOTIVOS_SIN_ORDEN.map(m=><option key={m}>{m}</option>)}</select>

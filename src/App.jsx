@@ -3,6 +3,7 @@ import { initializeApp, getApps, deleteApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, deleteField, query, orderBy, where } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { ParkingAdmin } from "./Parking.jsx";
+import QRCode from "qrcode";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // ── Firebase config ─────────────────────────────────────────────────────────
@@ -2906,6 +2907,9 @@ function CopropietariosView({showToast,mob}){
       <button style={BP(true)} disabled={!!ocup} onClick={campana}>{ocup==="camp"?"⏳ ":""}📣 Pedir actualización a todos</button>
       <button style={BS(true)} onClick={()=>setInvitar(true)}>➕ Invitar propietario nuevo</button>
       <button style={BS(true)} onClick={()=>copiarTexto(CP_URL_PUBLICO,()=>showToast("Link para arrendatarios y nuevos copiado","success"))}>🔗 Link para arrendatarios</button>
+      <button style={BS(true)} onClick={()=>{ const u=(data||[]).filter(r=>estado(r)==="sinreg"&&r.token).sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
+        if(!u.length){ showToast("No hay unidades sin registro (o falta actualizar: presiona ↻)","info"); return; }
+        if(window.confirm("Se prepararán "+u.length+" cartas (una por unidad sin registro), cada una con su código QR personal, para dejar en el buzón. ¿Continuar?")) imprimirCartasCoprop(u,anio); }}>🖨 Cartas para los sin registro</button>
     </div>
     {invitar&&<InvitarCoprop showToast={showToast} onClose={()=>setInvitar(false)} alTerminar={cargar}/>}
     <details style={{...card,padding:"8px 12px",marginBottom:10}}>
@@ -2943,6 +2947,44 @@ async function limpiarArchivosCoprop({tipo,id,showToast}){
   const r=await cpPost("coprop_limpiar",{tipo,id}); if(!r.ok) throw new Error(r.error);
   showToast(r.archivos+" archivo(s) eliminados"+(r.sacadosDeCarpeta?" ("+r.sacadosDeCarpeta+" eran de otra cuenta: se sacaron de la carpeta)":"")+(r.errores?" · "+r.errores+" no se pudieron: "+(r.causas||[]).join(" | "):"")+(r.pendientes?" · quedan unidades: presiona de nuevo":""),r.errores?"error":"success");
   return true;
+}
+
+// Cartas para el buzón: una por unidad, con su enlace personal y un código QR (para quienes no tienen correo)
+async function imprimirCartasCoprop(unidades,anio){
+  const esc=t=>String(t||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const w=window.open("","_blank"); if(!w){ alert("Permite las ventanas emergentes para imprimir las cartas"); return; }
+  w.document.write("<p style='font-family:system-ui;padding:20px'>Preparando "+unidades.length+" cartas…</p>");
+  const paginas=[];
+  for(const r of unidades){
+    const url=CP_URL_PUBLICO+"?t="+r.token;
+    const qr=await QRCode.toDataURL(url,{margin:1,width:360,errorCorrectionLevel:"M"});
+    const nom=(r.datos||{}).prop_nombre?nombrePropio(r.datos.prop_nombre):"Propietario(a)";
+    paginas.push(`<section class="pg">
+      <div class="enc"><b>Comunidad Edificio 12 Norte de Viña del Mar</b><span>Administración · ${esc(new Date().toLocaleDateString("es-CL",{day:"numeric",month:"long",year:"numeric"}))}</span></div>
+      <div class="dest">Señor(a) <b>${esc(nom)}</b><br>${esc(r.direccion)} · Departamento <b>${esc(r.depto)}</b></div>
+      <h1>Registro de Copropietarios ${anio}</h1>
+      <p>Estimado(a) propietario(a):</p>
+      <p>La Ley N° 21.442 de Copropiedad Inmobiliaria exige que la administración mantenga actualizado el Registro de Copropietarios con los datos de cada unidad, sus propietarios y ocupantes. Su departamento aún <b>no tiene su registro completo</b>.</p>
+      <p>Le pedimos completarlo en línea (toma unos minutos) escaneando este código con la cámara de su celular o ingresando a la dirección indicada. Tenga a mano su cédula de identidad y el certificado de dominio de la unidad; si la unidad está arrendada, también el contrato de arriendo.</p>
+      <div class="qr"><img src="${qr}" alt="Código QR"><div><b>Enlace personal de su unidad</b><br><span class="url">${esc(url)}</span><br><small>Este enlace es solo para su departamento; no lo comparta.</small></div></div>
+      <p>Si tiene dudas o prefiere hacerlo en papel, escríbanos a <b>com12norte@gmail.com</b>.</p>
+      <p class="firma">Atentamente,<br><b>Administración</b><br>Comunidad Edificio 12 Norte de Viña del Mar</p>
+    </section>`);
+  }
+  w.document.open();
+  w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Cartas Registro de Copropietarios</title><style>
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#0f172a;background:#e2e8f0}
+    .barra{position:sticky;top:0;background:#1e3a5f;color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;font-size:14px}
+    .barra button{background:#fff;color:#1e3a5f;border:0;border-radius:6px;padding:7px 14px;font-weight:700;cursor:pointer}
+    .pg{background:#fff;width:190mm;min-height:270mm;margin:10mm auto;padding:14mm 16mm;box-sizing:border-box;font-size:11.5pt;line-height:1.55;page-break-after:always}
+    .enc{display:flex;justify-content:space-between;border-bottom:2px solid #1e3a5f;padding-bottom:6px;color:#1e3a5f;font-size:10pt}
+    .dest{margin:14mm 0 8mm;font-size:11pt} h1{font-size:15pt;color:#1e3a5f;margin:0 0 10px}
+    .qr{display:flex;gap:16px;align-items:center;border:1.5px solid #cbd5e1;border-radius:10px;padding:12px;margin:14px 0}
+    .qr img{width:42mm;height:42mm} .url{font-family:monospace;font-size:8.5pt;word-break:break-all} small{color:#64748b}
+    .firma{margin-top:14mm}
+    @media print{body{background:#fff}.barra{display:none}.pg{margin:0;width:auto;min-height:auto}}
+  </style></head><body><div class="barra">${unidades.length} cartas listas <button onclick="window.print()">🖨 Imprimir</button></div>${paginas.join("")}</body></html>`);
+  w.document.close();
 }
 
 function InvitarCoprop({unidad,cambio,showToast,onClose,alTerminar}){
@@ -3031,6 +3073,7 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
       <textarea rows={4} style={{...inp,flex:"1 1 100%",resize:"vertical",fontSize:12,background:"#f8fafc"}} value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Motivo (obligatorio para devolver o rechazar un documento)"/>
       <button style={BS(true)} onClick={()=>copiarTexto(CP_URL_PUBLICO+"?t="+r.token,()=>showToast("Link personal copiado","success"))}>🔗 Copiar link personal</button>
       <button style={BS(true)} disabled={ocup} onClick={recordar}>📧 Reenviar link</button>
+      <button style={BS(true)} disabled={!r.token} onClick={()=>imprimirCartasCoprop([r],new Date().getFullYear())}>🖨 Carta con QR</button>
       <button style={{...BS(true),color:"#b45309",borderColor:"#fcd34d"}} disabled={ocup} onClick={()=>validar("devuelto")}>↩️ Devolver</button>
       <button style={BP(true)} disabled={ocup} onClick={()=>validar("aprobado")}>✅ Aprobar</button>
     </>}>

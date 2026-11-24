@@ -2921,7 +2921,7 @@ async function limpiarArchivosCoprop({tipo,id,showToast}){
   if(!prev.archivos){ showToast(tipo==="nc"?"No hay archivos marcados como \"no corresponde\"":"No se encontraron archivos repetidos","success"); return false; }
   if(!window.confirm("Se encontraron "+prev.archivos+" archivo(s) "+nombre+(id?"":" en "+prev.unidades+" unidad(es)")+(prev.pendientes?" (quedan unidades por revisar; repite después)":"")+".\n\n"+(prev.detalle||[]).join("\n")+"\n\nSe enviarán a la papelera de Drive (se pueden recuperar durante 30 días) y se quitarán del registro. ¿Eliminar?")) return false;
   const r=await cpPost("coprop_limpiar",{tipo,id}); if(!r.ok) throw new Error(r.error);
-  showToast(r.archivos+" archivo(s) enviados a la papelera"+(r.errores?" · "+r.errores+" no se pudieron borrar":"")+(r.pendientes?" · quedan unidades: presiona de nuevo":""),r.errores?"error":"success");
+  showToast(r.archivos+" archivo(s) eliminados"+(r.sacadosDeCarpeta?" ("+r.sacadosDeCarpeta+" eran de otra cuenta: se sacaron de la carpeta)":"")+(r.errores?" · "+r.errores+" no se pudieron: "+(r.causas||[]).join(" | "):"")+(r.pendientes?" · quedan unidades: presiona de nuevo":""),r.errores?"error":"success");
   return true;
 }
 

@@ -2787,6 +2787,7 @@ const MOTIVOS_CP=[
   ["datos","Faltan datos de la ficha","Su ficha está incompleta: faltan datos obligatorios del propietario (nombre completo, RUT, teléfono y correo) y/o de los residentes de la unidad. Por favor complete los datos faltantes en su enlace."],
   ["dominio","Falta certificado de dominio","Falta el certificado de dominio vigente de la unidad, emitido por el Conservador de Bienes Raíces, que acredita quién es el propietario. Puede obtenerlo en línea en el sitio del Conservador de Bienes Raíces de Viña del Mar."],
   ["dominio_venc","Certificado de dominio antiguo","El certificado de dominio enviado no está vigente: se requiere uno emitido en "+new Date().getFullYear()+". Por favor adjunte un certificado actualizado."],
+  ["titular","Titular no coincide","El certificado de dominio indica como propietario(a) a {titular}, que no coincide con quien figura en la ficha ({prop}). Si la unidad cambió de dueño, el nuevo propietario debe completar el registro con sus datos; si se trata de un copropietario o cónyuge, indíquelo en la ficha y adjunte el certificado que lo acredite."],
   ["ci","Falta cédula / cédula vencida","Falta la cédula de identidad del propietario, o la enviada está vencida o no se lee completa (ambos lados). Por favor adjunte una copia vigente y legible."],
   ["ilegible","Documento ilegible","El documento enviado no se puede leer (imagen borrosa, cortada o con poca luz). Por favor envíe una copia nítida y completa, de preferencia en PDF o foto tomada de frente."],
   ["no_unidad","No corresponde a la unidad","El documento enviado no corresponde a esta unidad o a su propietario (dirección, departamento o nombre no coinciden). Por favor revise y adjunte el documento correcto."],
@@ -2796,8 +2797,8 @@ const MOTIVOS_CP=[
   ["ocupantes","Faltan datos de ocupantes","Faltan datos de los residentes de la unidad (cantidad de personas, menores, adultos mayores, personas con movilidad reducida o electrodependientes). Esta información se usa para el Plan de Emergencia y Evacuación."],
 ];
 // Arma el texto del motivo con varios puntos numerados y la referencia legal una sola vez al final
-const LEY_IDS=["datos","dominio","dominio_venc","arriendo"];
-const armarMotivo=(ids,nota)=>{ const ms=MOTIVOS_CP.filter(m=>ids.includes(m[0])); if(!ms.length) return nota||"";
+const LEY_IDS=["datos","dominio","dominio_venc","arriendo","titular"];
+const armarMotivo=(ids,nota,ctx={})=>{ const ms=MOTIVOS_CP.filter(m=>ids.includes(m[0])).map(m=>[m[0],m[1],m[2].replace("{titular}",ctx.titular||"otra persona").replace("{prop}",ctx.prop||"el propietario registrado")]); if(!ms.length) return nota||"";
   const cuerpo=ms.length===1?ms[0][2]:"Su registro requiere las siguientes correcciones:\n"+ms.map((m,i)=>(i+1)+". "+m[2]).join("\n");
   return cuerpo+(ms.some(m=>LEY_IDS.includes(m[0]))?"\n\n"+LEY_CP:"")+(nota?"\n\n"+nota:""); };
 // Nombre propio: "JUAN PÉREZ DE LA FUENTE" → "Juan Pérez de la Fuente" (también con guiones: "Pérez-Cotapos")
@@ -3000,11 +3001,12 @@ function InscripcionCoprop({r,cargar,showToast}){
       <span style={{fontSize:11,color:"#94a3b8"}}>{r.inscripcion?.editadoAMano?"Corregido a mano el "+r.inscripcion.editadoEl:r.inscripcion?.leidoDe?"Leído de "+r.inscripcion.leidoDe+" el "+r.inscripcion.leidoEl:"Sin leer todavía"}</span>
     </div>
     {i.titular&&(r.datos||{}).prop_nombre&&!String((r.datos||{}).prop_nombre).toLowerCase().split(" ").filter(w=>w.length>2).some(w=>String(i.titular).toLowerCase().includes(w))&&
-      <div style={{...alrt("warning"),marginTop:8}}>El titular del certificado ({i.titular}) no coincide con el propietario registrado ({r.datos.prop_nombre}).</div>}
+      <div style={{...alrt("warning"),marginTop:8}}>El titular del certificado ({nombrePropio(i.titular)}) no coincide con el propietario registrado ({nombrePropio(r.datos.prop_nombre)}). Para avisarle, marca el motivo <b>"Titular no coincide"</b> y presiona Devolver.</div>}
   </div>);
 }
 
 function FichaCoprop({r,estado,cargar,showToast,onClose}){
+  const ctxM={titular:nombrePropio((r?.inscripcion||{}).titular||""),prop:nombrePropio((r?.datos||{}).prop_nombre||"")};
   const [motivo,setMotivo]=useState(""), [mSel,setMSel]=useState([]), [nota,setNota]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null), [verNC,setVerNC]=useState(false);
   if(!r) return null;
   const d=r.datos||{}, b=CP_BADGE[estado(r)];
@@ -3022,10 +3024,10 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
       <div style={{flex:"1 1 100%"}}>
         <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Motivos (puedes marcar varios; el texto se arma solo):</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{MOTIVOS_CP.map(m=>{ const on=mSel.includes(m[0]);
-          return <button key={m[0]} type="button" onClick={()=>{ const n=on?mSel.filter(x=>x!==m[0]):[...mSel,m[0]]; setMSel(n); setMotivo(armarMotivo(n,nota)); }}
+          return <button key={m[0]} type="button" onClick={()=>{ const n=on?mSel.filter(x=>x!==m[0]):[...mSel,m[0]]; setMSel(n); setMotivo(armarMotivo(n,nota,ctxM)); }}
             style={{fontSize:11,padding:"4px 9px",borderRadius:14,cursor:"pointer",border:"1px solid "+(on?"#1e3a5f":"#cbd5e1"),background:on?"#1e3a5f":"#fff",color:on?"#fff":"#334155"}}>{on?"✓ ":""}{m[1]}</button>; })}</div>
       </div>
-      <input style={{...inp,flex:"1 1 100%",fontSize:12}} value={nota} onChange={e=>{ setNota(e.target.value); setMotivo(armarMotivo(mSel,e.target.value)); }} placeholder="Comentario adicional (opcional)"/>
+      <input style={{...inp,flex:"1 1 100%",fontSize:12}} value={nota} onChange={e=>{ setNota(e.target.value); setMotivo(armarMotivo(mSel,e.target.value,ctxM)); }} placeholder="Comentario adicional (opcional)"/>
       <textarea rows={4} style={{...inp,flex:"1 1 100%",resize:"vertical",fontSize:12,background:"#f8fafc"}} value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Motivo (obligatorio para devolver o rechazar un documento)"/>
       <button style={BS(true)} onClick={()=>copiarTexto(CP_URL_PUBLICO+"?t="+r.token,()=>showToast("Link personal copiado","success"))}>🔗 Copiar link personal</button>
       <button style={BS(true)} disabled={ocup} onClick={recordar}>📧 Reenviar link</button>

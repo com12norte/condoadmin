@@ -2827,6 +2827,7 @@ function CopropietariosView({showToast,mob}){
   const traerCorreo=()=>herramienta("mail","Trayendo adjuntos del correo… puede tardar unos minutos",async()=>{ const r=await cpPost("coprop_importarcorreo"); if(!r.ok) throw new Error(r.error); showToast(r.archivosGuardados+" archivos guardados · "+(r.mensaje||""),"success"); cargar(); });
   const unir=()=>{ if(!window.confirm("Se juntarán las unidades repetidas (misma calle y depto escritos distinto, por ejemplo \"1052\" y \"12 Norte 1052\"). Se conserva la que tiene datos y se le suman documentos y carpeta. ¿Continuar?")) return;
     herramienta("unir","Buscando unidades repetidas…",async()=>{ const r=await cpPost("coprop_unir"); if(!r.ok) throw new Error(r.error); showToast(r.unidos?"Se juntaron "+r.unidos+" unidades repetidas · quedan "+r.total:"No había unidades repetidas","success"); cargar(); }); };
+  const limpiar=tipo=>herramienta(tipo==="nc"?"nc":"rep",tipo==="nc"?"Contando archivos \"no corresponde\"…":"Buscando archivos repetidos… puede tardar unos minutos",async()=>{ if(await limpiarArchivosCoprop({tipo,showToast})) cargar(); });
   const leerTodos=()=>{ if(!window.confirm("Se leerán los certificados de dominio de las unidades que aún no tienen la inscripción cargada. Tarda unos segundos por unidad; si quedan pendientes, vuelve a presionar. ¿Continuar?")) return;
     herramienta("ocr","Leyendo certificados… puede tardar unos minutos",async()=>{ const r=await cpPost("coprop_leerdominio",{}); if(!r.ok) throw new Error(r.error);
       showToast("Leídos: "+r.leidos+(r.pendientes?" · quedan "+r.pendientes+" (presiona de nuevo)":"")+(r.sinCertificado?" · sin certificado: "+r.sinCertificado:"")+(r.fallos&&r.fallos.length?" · con error: "+r.fallos.length:""),r.fallos&&r.fallos.length?"error":"success"); cargar(); }); };
@@ -2857,7 +2858,7 @@ function CopropietariosView({showToast,mob}){
   const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
     <div style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>{n}</div><div style={{fontSize:11,color:"#64748b"}}>{tx}</div></button>;
   const herr=[["🔗 Copiar link público",()=>copiarTexto(CP_URL_PUBLICO,()=>showToast("Link público copiado","success")),""],["📧 Recordar a los que deben",recordarTodos,"rec"],["📂 Sincronizar documentos",sincDocs,"sinc"],
-    ["🗂️ Indexar carpetas de Drive",indexar,"idx"],["✉️ Traer adjuntos del correo",traerCorreo,"mail"],["📄 Leer certificados de dominio",leerTodos,"ocr"],["🧩 Juntar unidades repetidas",unir,"unir"],["⬇️ Faltantes (CSV)",faltantes,""],["📥 Importar CSV del Form",()=>fileRef.current.click(),"imp"]];
+    ["🗂️ Indexar carpetas de Drive",indexar,"idx"],["✉️ Traer adjuntos del correo",traerCorreo,"mail"],["📄 Leer certificados de dominio",leerTodos,"ocr"],["🧩 Juntar unidades repetidas",unir,"unir"],["🗑 Eliminar archivos \"no corresponde\"",()=>limpiar("nc"),"nc"],["🔍 Eliminar archivos repetidos",()=>limpiar("repetidos"),"rep"],["⬇️ Faltantes (CSV)",faltantes,""],["📥 Importar CSV del Form",()=>fileRef.current.click(),"imp"]];
   return(<div>
     {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:12}}>
@@ -2898,6 +2899,17 @@ function CopropietariosView({showToast,mob}){
 
 // Invita a un propietario nuevo: le llega por correo su enlace personal para registrar la unidad.
 // Con "cambio" (venta), los datos del dueño anterior pasan al historial.
+// Limpieza de archivos: primero cuenta (simulación), pide confirmación y luego los manda a la papelera de Drive
+async function limpiarArchivosCoprop({tipo,id,showToast}){
+  const nombre=tipo==="nc"?"marcados como \"no corresponde\"":"repetidos (mismo contenido subido más de una vez)";
+  const prev=await cpPost("coprop_limpiar",{tipo,id,simular:true}); if(!prev.ok) throw new Error(prev.error);
+  if(!prev.archivos){ showToast(tipo==="nc"?"No hay archivos marcados como \"no corresponde\"":"No se encontraron archivos repetidos","success"); return false; }
+  if(!window.confirm("Se encontraron "+prev.archivos+" archivo(s) "+nombre+(id?"":" en "+prev.unidades+" unidad(es)")+(prev.pendientes?" (quedan unidades por revisar; repite después)":"")+".\n\n"+(prev.detalle||[]).join("\n")+"\n\nSe enviarán a la papelera de Drive (se pueden recuperar durante 30 días) y se quitarán del registro. ¿Eliminar?")) return false;
+  const r=await cpPost("coprop_limpiar",{tipo,id}); if(!r.ok) throw new Error(r.error);
+  showToast(r.archivos+" archivo(s) enviados a la papelera"+(r.errores?" · "+r.errores+" no se pudieron borrar":"")+(r.pendientes?" · quedan unidades: presiona de nuevo":""),r.errores?"error":"success");
+  return true;
+}
+
 function InvitarCoprop({unidad,cambio,showToast,onClose,alTerminar}){
   const [f,setF]=useState({dir:"",depto:"",nombre:"",email:""}), [env,setEnv]=useState(false);
   const set=(k,v)=>setF(x=>({...x,[k]:v}));
@@ -3004,8 +3016,10 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
           <button style={{...BS(true),color:"#64748b"}} disabled={ocup} title="No es un documento del registro (ej. comprobante de pago): se oculta" onClick={()=>noCorresponde(i)}>🚫 No corresponde</button>
         </div>
       </div>); })}
+    {(r.docs||[]).length>1&&<div style={{marginTop:4}}><button style={{...BS(true),color:"#64748b"}} disabled={ocup} onClick={()=>hacer(async()=>{ if(await limpiarArchivosCoprop({tipo:"repetidos",id:r.id,showToast})) await cargar(); })}>🔍 Buscar archivos repetidos</button></div>}
     {(r.docs||[]).some(esNC)&&<div style={{marginTop:4}}>
       <button onClick={()=>setVerNC(v=>!v)} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:12,padding:0}}>{verNC?"▾":"▸"} {(r.docs||[]).filter(esNC).length} archivo(s) marcados como "no corresponde"</button>
+      <button style={{...BS(true),marginLeft:8,color:"#b91c1c"}} disabled={ocup} onClick={()=>hacer(async()=>{ if(await limpiarArchivosCoprop({tipo:"nc",id:r.id,showToast})) await cargar(); })}>🗑 Eliminar de Drive</button>
       {verNC&&(r.docs||[]).map((x,i)=>esNC(x)?<div key={"nc"+i} style={{display:"flex",gap:8,alignItems:"center",fontSize:12,color:"#94a3b8",padding:"3px 0"}}>
         <a href={x.url} target="_blank" rel="noreferrer" style={{color:"#94a3b8"}}>📎 {x.nombre}</a><button style={BS(true)} disabled={ocup} onClick={()=>restaurar(i)}>Restaurar</button></div>:null)}
     </div>}

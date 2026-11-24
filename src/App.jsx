@@ -2780,6 +2780,12 @@ const CP_DOC={dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",co
 // "No corresponde": archivo que no es del registro (ej. comprobante de gastos comunes traído del correo). Se guarda como rechazado con este motivo y se oculta.
 const MOTIVO_NC="No corresponde (no es un documento del registro)";
 const esNC=x=>x.estado==="rechazado"&&x.motivo===MOTIVO_NC;
+// Nombre propio: "JUAN PÉREZ DE LA FUENTE" → "Juan Pérez de la Fuente" (también con guiones: "Pérez-Cotapos")
+const nombrePropio=v=>String(v||"").trim().replace(/\s+/g," ").toLowerCase().split(" ").map((w,i)=>
+  i>0&&["de","del","la","las","los","y","e","da","van","von"].includes(w)?w:w.split("-").map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join("-")).join(" ");
+// Fecha de la última revisión (las fichas antiguas solo tienen fechaValidacion)
+const revFecha=r=>r.revisadoEl||r.fechaValidacion||"";
+const fmtFechaCorta=iso=>{ if(!iso) return ""; const d=new Date(iso); return isNaN(d)?String(iso):d.toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"}); };
 const domVencido=x=>!!x.fecha&&parseInt(String(x.fecha).slice(0,4),10)<new Date().getFullYear();
 const CP_TIPOS_DOC={sin_clasificar:"Sin clasificar",dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",ci_arrendatario:"Cédula arrendatario",contrato:"Contrato arriendo",mandato:"Mandato corredor",otro:"Otro"};
 const CP_ETIQ=[["Propietario",null],["prop_nombre","Nombre"],["prop_rut","RUT"],["prop_fnac","Nacimiento"],["prop_nac","Nacionalidad"],["prop_tel","Teléfono"],["prop_mail","Correo"],["conyuge_nombre","Cónyuge/pareja"],["conyuge_rut","RUT cónyuge"],["uso","Uso de la residencia"],["resid_principal","Residencia principal del dueño"],
@@ -2852,7 +2858,7 @@ function CopropietariosView({showToast,mob}){
   const cnt={vigente:0,revisar:0,devuelto:0,debe:0,sinreg:0,sincorreo:0,faltan:0};
   data.forEach(r=>{ cnt[estado(r)]++; if(!cpMail(r)) cnt.sincorreo++; if((r.faltan||[]).length) cnt.faltan++; });
   const t=q.toLowerCase().replace(/[.\-]/g,"");
-  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sintipo"?!(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
+  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sinrevisar"?!!revFecha(r):fil==="sintipo"?!(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
     if(!t) return true; const d=r.datos||{}; return (r.direccion+" "+r.depto+" "+(d.prop_nombre||"")+" "+(d.prop_rut||"")+" "+(d.res_nombre||"")).toLowerCase().replace(/[.\-]/g,"").includes(t); })
     .sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
   const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
@@ -2863,7 +2869,7 @@ function CopropietariosView({showToast,mob}){
     {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:12}}>
       {kpi("todos","Unidades",data.length,"#1e3a5f")}{kpi("vigente","Al día "+anio,cnt.vigente,"#059669")}{kpi("revisar","Por validar",cnt.revisar,"#2563eb")}{kpi("devuelto","Devueltos",cnt.devuelto,"#d97706")}
-      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
+      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sinrevisar","Sin revisar",data.filter(r=>!revFecha(r)).length,"#64748b")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
       <input style={{...inp,maxWidth:340}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, depto, nombre o RUT…"/>
@@ -2890,6 +2896,7 @@ function CopropietariosView({showToast,mob}){
           <span style={{background:b[1],color:b[2],padding:"2px 9px",borderRadius:12,fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>{b[0]}</span>
           <span style={{fontSize:12,color:"#64748b",minWidth:36}}>{r.anio||"—"}</span>
           <span style={{fontSize:12,color:(r.faltan||[]).length?"#b45309":"#059669",minWidth:90}}>{(r.faltan||[]).length?"Faltan "+r.faltan.length:"✓ Docs"}</span>
+          <span title={revFecha(r)?"Revisado por "+(r.revisadoPor||"administración"):"Nunca revisado"} style={{fontSize:11,color:revFecha(r)?"#475569":"#cbd5e1",minWidth:92,whiteSpace:"nowrap"}}>{revFecha(r)?"✔ "+fmtFechaCorta(revFecha(r)):"Sin revisar"}</span>
           {r.carpetaUrl?<a href={r.carpetaUrl} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} title={"Carpeta en Drive ("+(r.archivosCarpeta??"?")+" archivos)"} style={{fontSize:16,textDecoration:"none",minWidth:22}}>📁</a>:<span style={{minWidth:22}}/>}
         </div>); })}
     </div>}
@@ -2937,21 +2944,22 @@ function InvitarCoprop({unidad,cambio,showToast,onClose,alTerminar}){
 // Datos de la inscripción en el Conservador (leídos del certificado de dominio; se pueden corregir)
 function InscripcionCoprop({r,cargar,showToast}){
   const vacia={fojas:"",numero:"",anio:"",conservador:"",fechaCertificado:"",titular:""};
-  const [i,setI]=useState({...vacia,...(r.inscripcion||{})}), [ocup,setOcup]=useState(""), [cambio,setCambio]=useState(false);
+  const conNombre=x=>({...x,titular:nombrePropio(x.titular)});
+  const [i,setI]=useState(conNombre({...vacia,...(r.inscripcion||{})})), [ocup,setOcup]=useState(""), [cambio,setCambio]=useState(false);
   const set=(k,v)=>{ setI(x=>({...x,[k]:v})); setCambio(true); };
   const tieneCert=(r.docs||[]).some(x=>x.tipo==="dominio"&&x.estado!=="rechazado");
   const leer=async()=>{ setOcup("leer"); showToast("Leyendo el certificado… puede tardar unos segundos","info");
     try{ const x=await cpPost("coprop_leerdominio",{id:r.id,forzar:true}); if(!x.ok) throw new Error(x.error);
       if(x.fallos&&x.fallos.length) throw new Error(x.fallos[0]);
       if(!x.leidos) throw new Error(x.sinCertificado?"No hay certificado de dominio clasificado en esta unidad":"No se pudo leer");
-      setI({...vacia,...(x.inscripcion||{})}); setCambio(false);
+      setI(conNombre({...vacia,...(x.inscripcion||{})})); setCambio(!!(x.inscripcion||{}).titular&&nombrePropio(x.inscripcion.titular)!==x.inscripcion.titular);
       const n=["fojas","numero","anio","conservador","fechaCertificado"].filter(k=>(x.inscripcion||{})[k]).length;
       showToast(n?"Leído: se encontraron "+n+" de 5 datos. Revísalos":"No se reconocieron datos; complétalos a mano",n?"success":"error"); cargar();
     }catch(e){ showToast("No se pudo leer: "+e.message,"error"); } setOcup(""); };
   const guardar=async()=>{ setOcup("guardar");
-    try{ const x=await cpPost("coprop_inscripcion",{id:r.id,inscripcion:i}); if(!x.ok) throw new Error(x.error); showToast("Inscripción guardada","success"); setCambio(false); cargar(); }
+    try{ const x=await cpPost("coprop_inscripcion",{id:r.id,inscripcion:conNombre(i)}); if(!x.ok) throw new Error(x.error); showToast("Inscripción guardada","success"); setCambio(false); cargar(); }
     catch(e){ showToast("No se pudo guardar: "+e.message,"error"); } setOcup(""); };
-  const c=(k,l,ph,w)=><div style={{gridColumn:w?"1/-1":"auto"}}><label style={lbl}>{l}</label><input style={{...inp,padding:"6px 8px"}} value={i[k]||""} onChange={e=>set(k,e.target.value)} placeholder={ph}/></div>;
+  const c=(k,l,ph,w)=><div style={{gridColumn:w?"1/-1":"auto"}}><label style={lbl}>{l}</label><input style={{...inp,padding:"6px 8px"}} value={i[k]||""} onChange={e=>set(k,e.target.value)} onBlur={k==="titular"?()=>setI(x=>conNombre(x)):undefined} onPaste={k==="titular"?e=>{ e.preventDefault(); set(k,nombrePropio(e.clipboardData.getData("text"))); }:undefined} placeholder={ph}/></div>;
   return(<div style={{border:"1px solid #e2e8f0",borderRadius:8,padding:10,background:"#f8fafc"}}>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
       {c("fojas","Fojas","Ej: 4521")}{c("numero","Número","Ej: 5233")}{c("anio","Año","Ej: 2018")}
@@ -2990,6 +2998,12 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
       <button style={{...BS(true),color:"#b45309",borderColor:"#fcd34d"}} disabled={ocup} onClick={()=>validar("devuelto")}>↩️ Devolver</button>
       <button style={BP(true)} disabled={ocup} onClick={()=>validar("aprobado")}>✅ Aprobar</button>
     </>}>
+    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",marginBottom:8,fontSize:12}}>
+      <span style={{color:revFecha(r)?"#334155":"#94a3b8"}}>{revFecha(r)?<>✔ Revisado el <b>{fmtFechaCorta(revFecha(r))}</b>{r.revisadoPor?" por "+r.revisadoPor:""}</>:"Esta unidad no ha sido revisada"}</span>
+      <button style={{...BS(true),marginLeft:"auto"}} disabled={ocup} onClick={()=>hacer(async()=>{ const x=await cpPost("coprop_revisado",{id:r.id,nota:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast("Marcada como revisada hoy","success"); await cargar(); })}>✔ Marcar revisado hoy</button>
+    </div>
+    {(r.revisiones||[]).length>0&&<details style={{fontSize:11,color:"#64748b",marginBottom:8}}><summary style={{cursor:"pointer"}}>Historial de revisiones ({r.revisiones.length})</summary>
+      {r.revisiones.map((v,k)=><div key={k} style={{padding:"2px 0"}}>{fmtFechaCorta(v.fecha)} · {v.por} · {v.accion}{v.nota?" — "+v.nota:""}</div>)}</details>}
     <div style={{marginBottom:8}}><span style={{background:b[1],color:b[2],padding:"2px 9px",borderRadius:12,fontWeight:700,fontSize:11}}>{b[0]}</span> <span style={{color:"#64748b",fontSize:12}}>Año {r.anio||"—"}{r.origen==="importado"?" · importado del Form":""}</span></div>
     {r.motivo&&<div style={{...alrt("warning")}}>Motivo devolución: {r.motivo}</div>}
     {CP_ETIQ.map(([k,l])=>l===null?<div key={k}>{sec(k)}</div>:(d[k]!==undefined&&d[k]!=="")?<div key={k} style={{display:"flex",gap:8,fontSize:12,padding:"3px 0",borderBottom:"1px dashed #e2e8f0"}}><span style={{flex:"0 0 40%",color:"#64748b"}}>{l}</span><span>{String(d[k])}</span></div>:null)}

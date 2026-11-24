@@ -2784,17 +2784,22 @@ const esNC=x=>x.estado==="rechazado"&&x.motivo===MOTIVO_NC;
 // Motivos frecuentes para devolver la ficha o rechazar un documento (se pueden editar antes de enviar)
 const LEY_CP="Según la Ley N° 21.442 de Copropiedad Inmobiliaria y su reglamento, la administración debe mantener actualizado el Registro de Copropietarios con la información de cada unidad, sus propietarios y ocupantes.";
 const MOTIVOS_CP=[
-  ["datos","Faltan datos de la ficha","Su ficha está incompleta: faltan datos obligatorios del propietario (nombre completo, RUT, teléfono y correo) y/o de los residentes de la unidad. "+LEY_CP+" Por favor complete los datos faltantes en su enlace."],
-  ["dominio","Falta certificado de dominio","Falta el certificado de dominio vigente de la unidad, emitido por el Conservador de Bienes Raíces, que acredita quién es el propietario. "+LEY_CP+" Puede obtenerlo en línea en el sitio del Conservador de Bienes Raíces de Viña del Mar."],
-  ["dominio_venc","Certificado de dominio antiguo","El certificado de dominio enviado no está vigente: se requiere uno emitido en "+new Date().getFullYear()+". "+LEY_CP+" Por favor adjunte un certificado actualizado."],
+  ["datos","Faltan datos de la ficha","Su ficha está incompleta: faltan datos obligatorios del propietario (nombre completo, RUT, teléfono y correo) y/o de los residentes de la unidad. Por favor complete los datos faltantes en su enlace."],
+  ["dominio","Falta certificado de dominio","Falta el certificado de dominio vigente de la unidad, emitido por el Conservador de Bienes Raíces, que acredita quién es el propietario. Puede obtenerlo en línea en el sitio del Conservador de Bienes Raíces de Viña del Mar."],
+  ["dominio_venc","Certificado de dominio antiguo","El certificado de dominio enviado no está vigente: se requiere uno emitido en "+new Date().getFullYear()+". Por favor adjunte un certificado actualizado."],
   ["ci","Falta cédula / cédula vencida","Falta la cédula de identidad del propietario, o la enviada está vencida o no se lee completa (ambos lados). Por favor adjunte una copia vigente y legible."],
   ["ilegible","Documento ilegible","El documento enviado no se puede leer (imagen borrosa, cortada o con poca luz). Por favor envíe una copia nítida y completa, de preferencia en PDF o foto tomada de frente."],
   ["no_unidad","No corresponde a la unidad","El documento enviado no corresponde a esta unidad o a su propietario (dirección, departamento o nombre no coinciden). Por favor revise y adjunte el documento correcto."],
-  ["arriendo","Falta contrato de arriendo","La unidad está declarada como arrendada, pero falta el contrato de arriendo vigente y/o la cédula del arrendatario. "+LEY_CP+" El propietario debe informar a la administración quiénes ocupan la unidad."],
+  ["arriendo","Falta contrato de arriendo","La unidad está declarada como arrendada, pero falta el contrato de arriendo vigente y/o la cédula del arrendatario. El propietario debe informar a la administración quiénes ocupan la unidad."],
   ["mandato","Falta mandato del corredor","La ficha fue completada por un corredor o tercero, pero falta el mandato o poder que lo autoriza a actuar en nombre del propietario."],
   ["emergencia","Falta contacto de emergencia","Falta el contacto de emergencia (nombre, parentesco y teléfono). Es necesario para el Plan de Emergencia y Evacuación del edificio."],
   ["ocupantes","Faltan datos de ocupantes","Faltan datos de los residentes de la unidad (cantidad de personas, menores, adultos mayores, personas con movilidad reducida o electrodependientes). Esta información se usa para el Plan de Emergencia y Evacuación."],
 ];
+// Arma el texto del motivo con varios puntos numerados y la referencia legal una sola vez al final
+const LEY_IDS=["datos","dominio","dominio_venc","arriendo"];
+const armarMotivo=(ids,nota)=>{ const ms=MOTIVOS_CP.filter(m=>ids.includes(m[0])); if(!ms.length) return nota||"";
+  const cuerpo=ms.length===1?ms[0][2]:"Su registro requiere las siguientes correcciones:\n"+ms.map((m,i)=>(i+1)+". "+m[2]).join("\n");
+  return cuerpo+(ms.some(m=>LEY_IDS.includes(m[0]))?"\n\n"+LEY_CP:"")+(nota?"\n\n"+nota:""); };
 // Nombre propio: "JUAN PÉREZ DE LA FUENTE" → "Juan Pérez de la Fuente" (también con guiones: "Pérez-Cotapos")
 const nombrePropio=v=>String(v||"").trim().replace(/\s+/g," ").toLowerCase().split(" ").map((w,i)=>
   i>0&&["de","del","la","las","los","y","e","da","van","von"].includes(w)?w:w.split("-").map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join("-")).join(" ");
@@ -3000,7 +3005,7 @@ function InscripcionCoprop({r,cargar,showToast}){
 }
 
 function FichaCoprop({r,estado,cargar,showToast,onClose}){
-  const [motivo,setMotivo]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null), [verNC,setVerNC]=useState(false);
+  const [motivo,setMotivo]=useState(""), [mSel,setMSel]=useState([]), [nota,setNota]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null), [verNC,setVerNC]=useState(false);
   if(!r) return null;
   const d=r.datos||{}, b=CP_BADGE[estado(r)];
   const hacer=async(fn)=>{ setOcup(true); try{ await fn(); }catch(e){ showToast("Error: "+e.message,"error"); } setOcup(false); };
@@ -3014,9 +3019,14 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
     hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:tipos[i]??r.docs[i].tipo,estado:est,motivo:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast(est?"Documento "+est:"Tipo actualizado","success"); await cargar(); }); };
   const sec=t=><div style={{fontWeight:700,color:"#1e3a5f",margin:"12px 0 4px",fontSize:13}}>{t}</div>;
   return(<Ventana titulo={r.direccion+" · depto "+r.depto} onClose={onClose} pie={<>
-      <select style={{...sel,flex:"1 1 100%"}} value="" onChange={e=>{ const m=MOTIVOS_CP.find(x=>x[0]===e.target.value); if(m) setMotivo(t=>t&&!MOTIVOS_CP.some(x=>x[2]===t)?t+"\n\n"+m[2]:m[2]); }}>
-        <option value="">Motivo frecuente (se escribe solo; puedes editarlo)…</option>{MOTIVOS_CP.map(m=><option key={m[0]} value={m[0]}>{m[1]}</option>)}</select>
-      <textarea rows={3} style={{...inp,flex:"1 1 100%",resize:"vertical",fontSize:12}} value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Motivo (obligatorio para devolver o rechazar un documento)"/>
+      <div style={{flex:"1 1 100%"}}>
+        <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Motivos (puedes marcar varios; el texto se arma solo):</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{MOTIVOS_CP.map(m=>{ const on=mSel.includes(m[0]);
+          return <button key={m[0]} type="button" onClick={()=>{ const n=on?mSel.filter(x=>x!==m[0]):[...mSel,m[0]]; setMSel(n); setMotivo(armarMotivo(n,nota)); }}
+            style={{fontSize:11,padding:"4px 9px",borderRadius:14,cursor:"pointer",border:"1px solid "+(on?"#1e3a5f":"#cbd5e1"),background:on?"#1e3a5f":"#fff",color:on?"#fff":"#334155"}}>{on?"✓ ":""}{m[1]}</button>; })}</div>
+      </div>
+      <input style={{...inp,flex:"1 1 100%",fontSize:12}} value={nota} onChange={e=>{ setNota(e.target.value); setMotivo(armarMotivo(mSel,e.target.value)); }} placeholder="Comentario adicional (opcional)"/>
+      <textarea rows={4} style={{...inp,flex:"1 1 100%",resize:"vertical",fontSize:12,background:"#f8fafc"}} value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Motivo (obligatorio para devolver o rechazar un documento)"/>
       <button style={BS(true)} onClick={()=>copiarTexto(CP_URL_PUBLICO+"?t="+r.token,()=>showToast("Link personal copiado","success"))}>🔗 Copiar link personal</button>
       <button style={BS(true)} disabled={ocup} onClick={recordar}>📧 Reenviar link</button>
       <button style={{...BS(true),color:"#b45309",borderColor:"#fcd34d"}} disabled={ocup} onClick={()=>validar("devuelto")}>↩️ Devolver</button>

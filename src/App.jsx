@@ -1653,6 +1653,7 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
   const [ns,setNs]=useState(r.status);
   const [asgn,setAsgn]=useState(r.assignedTo||"Sin asignar");
   const [showTF,setShowTF]=useState(false);
+  const [ordenYComenzar,setOrdenYComenzar]=useState(false);
   const [showEv,setShowEv]=useState(null);
   const [showCl,setShowCl]=useState(false);
   const [tab,setTab]=useState("info");
@@ -1887,6 +1888,13 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                 {can(role,"assign")&&selectorProveedor}
               </div>
             )}
+            {etapa==="Asignada"&&ordenYComenzar&&can(role,"createTask")&&(
+              <div style={{marginTop:12}}>
+                <div style={{fontSize:12,color:"#475569",marginBottom:6}}>Revisa la orden propuesta y presiona <b>+ Crear Orden</b>: la solicitud pasa a «En proceso» y se avisa al ejecutor.</div>
+                <TaskForm requestId={r.id} setTasks={setTasks} showToast={showToast} respAssign={respAssign} usuarios={usuarios} req={r} inline={false}
+                  onClose={()=>setOrdenYComenzar(false)} onCreated={()=>{ setOrdenYComenzar(false); moverA("En proceso"); }}/>
+              </div>
+            )}
 
             {etapa==="En proceso"&&(
               <div>
@@ -1927,7 +1935,10 @@ function ReqDetail({req,reqs,tasks,atts,emails,role,setReqs,setTasks,deleteTask,
                 {(estado==="pendiente"||estado==="actual")&&etapa==="Cerrada"&&can(role,"closeCases")&&<button style={BSu(false)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>}
                 {avanzarDesdeActual&&(sig==="Cerrada"
                   ?(can(role,"closeCases")&&<button style={BSu(false)} onClick={()=>setShowCl(true)}>✓ Cerrar solicitud</button>)
-                  :<button style={BP(false)} disabled={etapa==="Asignada"&&sinResp} title={etapa==="Asignada"&&sinResp?"Asigna un responsable primero":""} onClick={()=>moverA(sig)}>Avanzar a «{PASO_LBL[sig]}» →</button>)}
+                  :(etapa==="Asignada"&&sig==="En proceso"&&can(role,"createTask")
+                    ?<>{!ordenYComenzar&&<button onClick={()=>moverA(sig)} disabled={sinResp} style={{background:"none",border:"none",color:"#64748b",cursor:sinResp?"not-allowed":"pointer",fontSize:12,textDecoration:"underline"}} title="Para lo que se resuelve sin orden de trabajo">Avanzar sin orden</button>}
+                      <button style={BP(false)} disabled={sinResp||ordenYComenzar} title={sinResp?"Asigna un responsable primero":""} onClick={()=>setOrdenYComenzar(true)}>Crear orden y comenzar →</button></>
+                    :<button style={BP(false)} disabled={etapa==="Asignada"&&sinResp} title={etapa==="Asignada"&&sinResp?"Asigna un responsable primero":""} onClick={()=>moverA(sig)}>Avanzar a «{PASO_LBL[sig]}» →</button>))}
               </div>
             )}
           </div>
@@ -2094,7 +2105,7 @@ function NuevaOrdenPlegable({plegado,...p}){
   return <TaskForm {...p} inline={!plegado} onClose={()=>setAbierto(false)}/>;
 }
 
-function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline}){
+function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,inline,onCreated}){
   const todos=(usuarios||[]).filter(u=>u.active).map(u=>u.nombre);
   const respAuto=req?.assignedTo&&req.assignedTo!=="Sin asignar"?req.assignedTo:((respAssign&&respAssign[0])||"");
   // Propuesta desde la solicitud: título, descripción, prioridad y fecha límite según el plazo de esa prioridad (editables)
@@ -2116,8 +2127,8 @@ function TaskForm({requestId,setTasks,showToast,onClose,respAssign,usuarios,req,
   const submit=async()=>{
     if(!f.title){showToast("Ingrese titulo","error");return;}
     const newTask={id:"t"+uid(),requestId,comments:[],attachments:[],materials:[],status:"Ingresada",informe:"",tiempoUsado:"",...f};
-    setTasks(p=>[...p,newTask]); showToast("Orden creada");
-    if(inline) setF(initF()); else onClose();
+    setTasks(p=>[...p,newTask]); showToast(onCreated?"Orden creada · solicitud en proceso":"Orden creada");
+    if(onCreated) onCreated(newTask); else if(inline) setF(initF()); else onClose();
     if(f.ejecutor){
       try{
         const _exSnap=await getDocs(query(collection(fbDb,"usuarios"),where("nombre","==",f.ejecutor),where("active","==",true)));

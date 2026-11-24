@@ -2560,6 +2560,7 @@ const ESTADOS_SOL={link_enviado:["📨","Link enviado","#64748b"],datos_enviados
   pendiente:["⏳","Comprobante por revisar","#dc2626"],aprobado:["✅","Aprobada — preparar control","#2563eb"],listo:["📦","Listo para retiro","#059669"],entregado:["🎉","Entregado","#059669"],rechazado:["✗","Rechazada","#94a3b8"]};
 const tipoSolTxt=s=>(s.tipoSol||s.tipo)==="segundo"?"➕ 2° control":"🚨 Pérdida / falla";
 function Ventana({titulo,onClose,children,pie}){
+  useEffect(()=>{ const k=e=>{ if(e.key==="Escape") onClose(); }; window.addEventListener("keydown",k); return ()=>window.removeEventListener("keydown",k); },[onClose]);
   return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}}>
     <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:560,maxHeight:"90vh",display:"flex",flexDirection:"column"}}>
       <div style={{padding:"12px 16px",borderBottom:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",alignItems:"center"}}><b style={{fontSize:14}}>{titulo}</b><button onClick={onClose} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#64748b"}}>✕</button></div>
@@ -2785,6 +2786,11 @@ const nombrePropio=v=>String(v||"").trim().replace(/\s+/g," ").toLowerCase().spl
   i>0&&["de","del","la","las","los","y","e","da","van","von"].includes(w)?w:w.split("-").map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join("-")).join(" ");
 // Fecha de la última revisión (las fichas antiguas solo tienen fechaValidacion)
 const revFecha=r=>r.revisadoEl||r.fechaValidacion||"";
+// Estado de revisión según los documentos: revisada (todos vistos), pendiente (falta alguno), sin revisar (ninguno), sin documentos
+const estadoRevision=r=>{ const docs=(r.docs||[]).filter(x=>!esNC(x)); if(!docs.length) return "sindocs";
+  const vistos=docs.filter(x=>x.estado==="validado"||x.estado==="rechazado").length;
+  return vistos===docs.length?"revisada":vistos?"pendiente":"sinrevisar"; };
+const REV_TXT={revisada:["✔ Revisada","#065f46"],pendiente:["◐ Pendiente","#b45309"],sinrevisar:["○ Sin revisar","#dc2626"],sindocs:["Sin documentos","#94a3b8"]};
 const fmtFechaCorta=iso=>{ if(!iso) return ""; const d=new Date(iso); return isNaN(d)?String(iso):d.toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"}); };
 const domVencido=x=>!!x.fecha&&parseInt(String(x.fecha).slice(0,4),10)<new Date().getFullYear();
 const CP_TIPOS_DOC={sin_clasificar:"Sin clasificar",dominio:"Certificado de dominio",ci_dueno:"Cédula propietario",ci_arrendatario:"Cédula arrendatario",contrato:"Contrato arriendo",mandato:"Mandato corredor",otro:"Otro"};
@@ -2858,7 +2864,7 @@ function CopropietariosView({showToast,mob}){
   const cnt={vigente:0,revisar:0,devuelto:0,debe:0,sinreg:0,sincorreo:0,faltan:0};
   data.forEach(r=>{ cnt[estado(r)]++; if(!cpMail(r)) cnt.sincorreo++; if((r.faltan||[]).length) cnt.faltan++; });
   const t=q.toLowerCase().replace(/[.\-]/g,"");
-  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sinrevisar"?!!revFecha(r):fil==="sintipo"?!(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
+  const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sinrevisar"?estadoRevision(r)!=="sinrevisar":fil==="revpendiente"?estadoRevision(r)!=="pendiente":fil==="sintipo"?!(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
     if(!t) return true; const d=r.datos||{}; return (r.direccion+" "+r.depto+" "+(d.prop_nombre||"")+" "+(d.prop_rut||"")+" "+(d.res_nombre||"")).toLowerCase().replace(/[.\-]/g,"").includes(t); })
     .sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
   const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
@@ -2869,7 +2875,7 @@ function CopropietariosView({showToast,mob}){
     {err&&<div style={alrt("error")}>{err}</div>}
     <div style={{display:"grid",gridTemplateColumns:mob?"repeat(2,1fr)":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:12}}>
       {kpi("todos","Unidades",data.length,"#1e3a5f")}{kpi("vigente","Al día "+anio,cnt.vigente,"#059669")}{kpi("revisar","Por validar",cnt.revisar,"#2563eb")}{kpi("devuelto","Devueltos",cnt.devuelto,"#d97706")}
-      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sinrevisar","Sin revisar",data.filter(r=>!revFecha(r)).length,"#64748b")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
+      {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sinrevisar","Docs sin revisar",data.filter(r=>estadoRevision(r)==="sinrevisar").length,"#dc2626")}{kpi("revpendiente","Revisión pendiente",data.filter(r=>estadoRevision(r)==="pendiente").length,"#b45309")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
       <input style={{...inp,maxWidth:340}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, depto, nombre o RUT…"/>
@@ -2896,7 +2902,9 @@ function CopropietariosView({showToast,mob}){
           <span style={{background:b[1],color:b[2],padding:"2px 9px",borderRadius:12,fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>{b[0]}</span>
           <span style={{fontSize:12,color:"#64748b",minWidth:36}}>{r.anio||"—"}</span>
           <span style={{fontSize:12,color:(r.faltan||[]).length?"#b45309":"#059669",minWidth:90}}>{(r.faltan||[]).length?"Faltan "+r.faltan.length:"✓ Docs"}</span>
-          <span title={revFecha(r)?"Revisado por "+(r.revisadoPor||"administración"):"Nunca revisado"} style={{fontSize:11,color:revFecha(r)?"#475569":"#cbd5e1",minWidth:92,whiteSpace:"nowrap"}}>{revFecha(r)?"✔ "+fmtFechaCorta(revFecha(r)):"Sin revisar"}</span>
+          {(()=>{ const e=estadoRevision(r), docs=(r.docs||[]).filter(x=>!esNC(x)), vistos=docs.filter(x=>x.estado==="validado"||x.estado==="rechazado").length;
+            return <span title={(docs.length?vistos+" de "+docs.length+" documentos revisados":"Sin documentos")+(revFecha(r)?" · última revisión "+fmtFechaCorta(revFecha(r))+" por "+(r.revisadoPor||"administración"):"")}
+              style={{fontSize:11,fontWeight:600,color:REV_TXT[e][1],minWidth:104,whiteSpace:"nowrap"}}>{REV_TXT[e][0]}{e==="revisada"&&revFecha(r)?" "+fmtFechaCorta(revFecha(r)):e==="pendiente"?" "+vistos+"/"+docs.length:""}</span>; })()}
           {r.carpetaUrl?<a href={r.carpetaUrl} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} title={"Carpeta en Drive ("+(r.archivosCarpeta??"?")+" archivos)"} style={{fontSize:16,textDecoration:"none",minWidth:22}}>📁</a>:<span style={{minWidth:22}}/>}
         </div>); })}
     </div>}
@@ -2999,7 +3007,9 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
       <button style={BP(true)} disabled={ocup} onClick={()=>validar("aprobado")}>✅ Aprobar</button>
     </>}>
     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",marginBottom:8,fontSize:12}}>
-      <span style={{color:revFecha(r)?"#334155":"#94a3b8"}}>{revFecha(r)?<>✔ Revisado el <b>{fmtFechaCorta(revFecha(r))}</b>{r.revisadoPor?" por "+r.revisadoPor:""}</>:"Esta unidad no ha sido revisada"}</span>
+      {(()=>{ const e=estadoRevision(r), docs=(r.docs||[]).filter(x=>!esNC(x)), vistos=docs.filter(x=>x.estado==="validado"||x.estado==="rechazado").length;
+        return <span style={{color:REV_TXT[e][1],fontWeight:600}}>{REV_TXT[e][0]}{docs.length?" · "+vistos+" de "+docs.length+" documentos revisados":""}</span>; })()}
+      <span style={{color:"#64748b"}}>{revFecha(r)?<>· última revisión <b>{fmtFechaCorta(revFecha(r))}</b>{r.revisadoPor?" por "+r.revisadoPor:""}</>:"· nunca revisada"}</span>
       <button style={{...BS(true),marginLeft:"auto"}} disabled={ocup} onClick={()=>hacer(async()=>{ const x=await cpPost("coprop_revisado",{id:r.id,nota:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast("Marcada como revisada hoy","success"); await cargar(); })}>✔ Marcar revisado hoy</button>
     </div>
     {(r.revisiones||[]).length>0&&<details style={{fontSize:11,color:"#64748b",marginBottom:8}}><summary style={{cursor:"pointer"}}>Historial de revisiones ({r.revisiones.length})</summary>

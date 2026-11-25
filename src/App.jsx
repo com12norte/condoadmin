@@ -2841,6 +2841,10 @@ const LEY_IDS=["datos","dominio","dominio_venc","arriendo","titular"];
 const armarMotivo=(ids,nota,ctx={})=>{ const ms=MOTIVOS_CP.filter(m=>ids.includes(m[0])).map(m=>[m[0],m[1],m[2].replace("{titular}",ctx.titular||"otra persona").replace("{prop}",ctx.prop||"el propietario registrado")]); if(!ms.length) return nota||"";
   const cuerpo=ms.length===1?ms[0][2]:"Su registro requiere las siguientes correcciones:\n"+ms.map((m,i)=>(i+1)+". "+m[2]).join("\n");
   return cuerpo+(ms.some(m=>LEY_IDS.includes(m[0]))?"\n\n"+LEY_CP:"")+(nota?"\n\n"+nota:""); };
+// Inscripción en el formato del Conservador: "Fojas 4521 Número 5233 Año 2018" (números sin puntos)
+const soloNum=v=>String(v||"").replace(/[^0-9]/g,"");
+const textoInscripcion=i=>{ i=i||{}; const f=soloNum(i.fojas), n=soloNum(i.numero), a=soloNum(i.anio);
+  return (f||n||a)?["Fojas "+(f||"—"),"Número "+(n||"—"),"Año "+(a||"—")].join(" "):""; };
 // Nombre propio: "JUAN PÉREZ DE LA FUENTE" → "Juan Pérez de la Fuente" (también con guiones: "Pérez-Cotapos")
 const nombrePropio=v=>String(v||"").trim().replace(/\s+/g," ").toLowerCase().split(" ").map((w,i)=>
   i>0&&["de","del","la","las","los","y","e","da","van","von"].includes(w)?w:w.split("-").map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join("-")).join(" ");
@@ -2884,6 +2888,17 @@ function CopropietariosView({showToast,mob}){
   const [data,setData]=useState(null), [anio,setAnio]=useState(new Date().getFullYear()), [err,setErr]=useState("");
   const [fil,setFil]=useState("todos"), [q,setQ]=useState(""), [abierto,setAbierto]=useState(null), [ocup,setOcup]=useState(""), [invitar,setInvitar]=useState(false);
   const fileRef=useRef(null);
+  // Cambios de documentos: se ven al instante, se guardan en orden (uno a la vez, para que no se pisen)
+  // y el registro completo se refresca en silencio cuando se deja de hacer cambios.
+  const colaRef=useRef(Promise.resolve()), timerRef=useRef(null), [guardando,setGuardando]=useState(0);
+  const parche=(id,fn)=>setData(d=>(d||[]).map(r=>r.id===id?fn(r):r));
+  const recargarLuego=()=>{ clearTimeout(timerRef.current); timerRef.current=setTimeout(()=>{ cpPost("coprop_listar").then(r=>{ if(r.ok){ setData(r.data||[]); if(r.anio) setAnio(r.anio); } }).catch(()=>{}); },2500); };
+  const encolar=(accion,datos,alFallar)=>{ setGuardando(n=>n+1);
+    colaRef.current=colaRef.current.then(async()=>{
+      try{ const x=await cpPost(accion,datos); if(!x.ok) throw new Error(x.error||"No se guardó"); recargarLuego(); }
+      catch(e){ showToast("No se guardó el cambio: "+e.message+". Se recargó el registro.","error"); if(alFallar) alFallar(); cargar(); }
+      finally{ setGuardando(n=>n-1); } }); };
+  useEffect(()=>()=>clearTimeout(timerRef.current),[]);
   const cargar=async()=>{ setErr(""); try{ const r=await cpPost("coprop_listar"); if(!r.ok) throw new Error(r.error||"Error"); setData(r.data||[]); if(r.anio) setAnio(r.anio); return r.data||[]; }catch(e){ setErr(e.message); setData(d=>d||[]); return null; } };
   useEffect(()=>{ cargar(); },[]);
   const estado=r=>r.estado==="sin_registro"?"sinreg":r.anio===anio&&r.estado==="aprobado"?"vigente":r.anio===anio&&r.estado==="pendiente_revision"?"revisar":r.estado==="devuelto"?"devuelto":"debe";
@@ -2925,7 +2940,7 @@ function CopropietariosView({showToast,mob}){
   data.forEach(r=>{ cnt[estado(r)]++; if(!cpMail(r)) cnt.sincorreo++; if((r.faltan||[]).length) cnt.faltan++; });
   const t=q.toLowerCase().replace(/[.\-]/g,"");
   const vis=data.filter(r=>{ if(fil==="sincorreo"?!!cpMail(r):fil==="faltan"?!(r.faltan||[]).length:fil==="sinrevisar"?estadoRevision(r)!=="sinrevisar":fil==="revpendiente"?estadoRevision(r)!=="pendiente":fil==="sintipo"?!(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar"):(fil!=="todos"&&estado(r)!==fil)) return false;
-    if(!t) return true; const d=r.datos||{}; return (r.direccion+" "+r.depto+" "+(d.prop_nombre||"")+" "+(d.prop_rut||"")+" "+(d.res_nombre||"")).toLowerCase().replace(/[.\-]/g,"").includes(t); })
+    if(!t) return true; const d=r.datos||{}; return (r.direccion+" "+r.depto+" "+(d.prop_nombre||"")+" "+(d.prop_rut||"")+" "+(d.res_nombre||"")+" "+textoInscripcion(r.inscripcion)+" "+((r.inscripcion||{}).titular||"")).toLowerCase().replace(/[.\-]/g,"").includes(t); })
     .sort((a,b)=>(a.direccion+a.depto).localeCompare(b.direccion+b.depto,"es",{numeric:true}));
   const kpi=(k,tx,n,c)=><button key={k} onClick={()=>setFil(fil===k?"todos":k)} style={{textAlign:"left",background:fil===k?"#eff6ff":"#fff",border:"1px solid "+(fil===k?"#93c5fd":"#e2e8f0"),borderLeft:"4px solid "+c,borderRadius:8,padding:"8px 10px",cursor:"pointer"}}>
     <div style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>{n}</div><div style={{fontSize:11,color:"#64748b"}}>{tx}</div></button>;
@@ -2938,7 +2953,7 @@ function CopropietariosView({showToast,mob}){
       {kpi("debe","Deben actualizar",cnt.debe,"#dc2626")}{kpi("sinreg","Sin registro",cnt.sinreg,"#6b7280")}{kpi("faltan","Faltan documentos",cnt.faltan,"#b45309")}{kpi("sincorreo","Sin correo",cnt.sincorreo,"#9ca3af")}{kpi("sinrevisar","Docs sin revisar",data.filter(r=>estadoRevision(r)==="sinrevisar").length,"#dc2626")}{kpi("revpendiente","Revisión pendiente",data.filter(r=>estadoRevision(r)==="pendiente").length,"#b45309")}{kpi("sintipo","Docs sin tipo",data.filter(r=>(r.docs||[]).some(x=>!esNC(x)&&(x.tipo||"sin_clasificar")==="sin_clasificar")).length,"#f59e0b")}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
-      <input style={{...inp,maxWidth:340}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, depto, nombre o RUT…"/>
+      <input style={{...inp,maxWidth:340}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar dirección, depto, nombre, RUT o fojas/número…"/>
       <span style={{fontSize:12,color:"#64748b"}}>{vis.length} de {data.length}</span>
       <button style={{...BS(true),marginLeft:"auto"}} onClick={cargar}>↻ Actualizar</button>
     </div>
@@ -2971,7 +2986,7 @@ function CopropietariosView({showToast,mob}){
           {r.carpetaUrl?<a href={r.carpetaUrl} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} title={"Carpeta en Drive ("+(r.archivosCarpeta??"?")+" archivos)"} style={{fontSize:16,textDecoration:"none",minWidth:22}}>📁</a>:<span style={{minWidth:22}}/>}
         </div>); })}
     </div>}
-    {abierto&&<FichaCoprop r={data.find(x=>x.id===abierto)} estado={estado} cargar={cargar} showToast={showToast} onClose={()=>setAbierto(null)}/>}
+    {abierto&&<FichaCoprop r={data.find(x=>x.id===abierto)} estado={estado} cargar={cargar} showToast={showToast} onClose={()=>setAbierto(null)} parche={parche} encolar={encolar} guardando={guardando}/>}
   </div>);
 }
 
@@ -3055,7 +3070,7 @@ function InscripcionCoprop({r,cargar,showToast}){
   const vacia={fojas:"",numero:"",anio:"",conservador:"",fechaCertificado:"",titular:""};
   const conNombre=x=>({...x,titular:nombrePropio(x.titular)});
   const [i,setI]=useState(conNombre({...vacia,...(r.inscripcion||{})})), [ocup,setOcup]=useState(""), [cambio,setCambio]=useState(false);
-  const set=(k,v)=>{ setI(x=>({...x,[k]:v})); setCambio(true); };
+  const set=(k,v)=>{ if(["fojas","numero","anio"].includes(k)) v=soloNum(v).slice(0,k==="anio"?4:7); setI(x=>({...x,[k]:v})); setCambio(true); };
   const tieneCert=(r.docs||[]).some(x=>x.tipo==="dominio"&&x.estado!=="rechazado");
   const leer=async()=>{ setOcup("leer"); showToast("Leyendo el certificado… puede tardar unos segundos","info");
     try{ const x=await cpPost("coprop_leerdominio",{id:r.id,forzar:true}); if(!x.ok) throw new Error(x.error);
@@ -3076,6 +3091,10 @@ function InscripcionCoprop({r,cargar,showToast}){
       {c("titular","Titular según certificado","Nombre",true)}
       <div><label style={lbl}>Fecha del certificado</label><input type="date" style={{...inp,padding:"6px 8px"}} value={i.fechaCertificado||""} onChange={e=>set("fechaCertificado",e.target.value)}/></div>
     </div>
+    {textoInscripcion(i)&&<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,background:"#fff",border:"1px solid #cbd5e1",borderRadius:6,padding:"6px 10px"}}>
+      <b style={{fontSize:13,letterSpacing:.2}}>{textoInscripcion(i)}</b>
+      <button style={{...BS(true),marginLeft:"auto"}} onClick={()=>copiarTexto(textoInscripcion(i),()=>showToast("Copiado: "+textoInscripcion(i),"success"))}>📋 Copiar para buscar</button>
+    </div>}
     <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:8}}>
       <button style={BS(true)} disabled={!!ocup||!tieneCert} title={tieneCert?"":"Primero clasifica un documento como Certificado de dominio"} onClick={leer}>{ocup==="leer"?"⏳ Leyendo…":"📄 Leer del certificado"}</button>
       <button style={BP(true)} disabled={!!ocup||!cambio} onClick={guardar}>{ocup==="guardar"?"Guardando…":"Guardar"}</button>
@@ -3086,7 +3105,7 @@ function InscripcionCoprop({r,cargar,showToast}){
   </div>);
 }
 
-function FichaCoprop({r,estado,cargar,showToast,onClose}){
+function FichaCoprop({r,estado,cargar,showToast,onClose,parche,encolar,guardando=0}){
   const ctxM={titular:nombrePropio((r?.inscripcion||{}).titular||""),prop:nombrePropio((r?.datos||{}).prop_nombre||"")};
   const [motivo,setMotivo]=useState(""), [mSel,setMSel]=useState([]), [nota,setNota]=useState(""), [ocup,setOcup]=useState(false), [tipos,setTipos]=useState({}), [inv,setInv]=useState(null), [verNC,setVerNC]=useState(false);
   if(!r) return null;
@@ -3096,10 +3115,15 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
     hacer(async()=>{ const x=await cpPost("coprop_validar",{id:r.id,decision:dec,motivo:motivo.trim()}); if(!x.ok) throw new Error(x.error);
       showToast((dec==="aprobado"?"Aprobado":"Devuelto")+(x.correoEnviado?" · correo enviado":" · sin correo registrado"),"success"); await cargar(); onClose(); }); };
   const recordar=()=>hacer(async()=>{ const x=await cpPost("coprop_recordar",{ids:[r.id]}); if(!x.ok) throw new Error(x.error); showToast(x.enviados?"Link reenviado":"No se envió (sin correo)",x.enviados?"success":"error"); });
-  const noCorresponde=i=>hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:"otro",estado:"rechazado",motivo:MOTIVO_NC}); if(!x.ok) throw new Error(x.error); showToast("Marcado como \"no corresponde\" y ocultado","success"); await cargar(); });
-  const restaurar=i=>hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:"sin_clasificar",estado:"pendiente",motivo:""}); if(!x.ok) throw new Error(x.error); showToast("Documento restaurado","success"); await cargar(); });
+  // Cambia un documento al instante en pantalla y deja el guardado en la cola
+  const cambiarDoc=(i,campos,msg)=>{
+    parche(r.id,u=>({...u,docs:(u.docs||[]).map((x,k)=>k===i?{...x,...campos,fechaValidacion:campos.estado&&campos.estado!=="pendiente"?new Date().toISOString().slice(0,10):x.fechaValidacion}:x),revisadoEl:campos.estado?new Date().toISOString():u.revisadoEl}));
+    encolar("coprop_docvalidar",{id:r.id,idx:i,tipo:campos.tipo??r.docs[i].tipo,estado:campos.estado===undefined?null:campos.estado,motivo:campos.motivo||""});
+    if(msg) showToast(msg,"success"); };
+  const noCorresponde=i=>cambiarDoc(i,{tipo:"otro",estado:"rechazado",motivo:MOTIVO_NC},"Marcado como \"no corresponde\"");
+  const restaurar=i=>cambiarDoc(i,{tipo:"sin_clasificar",estado:"pendiente",motivo:""},"Documento restaurado");
   const docAccion=(i,est)=>{ if(est==="rechazado"&&!motivo.trim()){ showToast("Escribe el motivo abajo para rechazar el documento","error"); return; }
-    hacer(async()=>{ const x=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:tipos[i]??r.docs[i].tipo,estado:est,motivo:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast(est?"Documento "+est:"Tipo actualizado","success"); await cargar(); }); };
+    cambiarDoc(i,{tipo:tipos[i]??r.docs[i].tipo,estado:est,motivo:est==="rechazado"?motivo.trim():""},"Documento "+est); };
   const sec=t=><div style={{fontWeight:700,color:"#1e3a5f",margin:"12px 0 4px",fontSize:13}}>{t}</div>;
   return(<Ventana titulo={r.direccion+" · depto "+r.depto} onClose={onClose} pie={<>
       <div style={{flex:"1 1 100%"}}>
@@ -3120,7 +3144,8 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
       {(()=>{ const e=estadoRevision(r), docs=(r.docs||[]).filter(x=>!esNC(x)), vistos=docs.filter(x=>x.estado==="validado"||x.estado==="rechazado").length;
         return <span style={{color:REV_TXT[e][1],fontWeight:600}}>{REV_TXT[e][0]}{docs.length?" · "+vistos+" de "+docs.length+" documentos revisados":""}</span>; })()}
       <span style={{color:"#64748b"}}>{revFecha(r)?<>· última revisión <b>{fmtFechaCorta(revFecha(r))}</b>{r.revisadoPor?" por "+r.revisadoPor:""}</>:"· nunca revisada"}</span>
-      <button style={{...BS(true),marginLeft:"auto"}} disabled={ocup} onClick={()=>hacer(async()=>{ const x=await cpPost("coprop_revisado",{id:r.id,nota:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast("Marcada como revisada hoy","success"); await cargar(); })}>✔ Marcar revisado hoy</button>
+      <span style={{fontSize:11,color:guardando?"#b45309":"#16a34a",marginLeft:"auto"}}>{guardando?"⏳ Guardando "+guardando+"…":"✓ Guardado"}</span>
+      <button style={BS(true)} disabled={ocup} onClick={()=>hacer(async()=>{ const x=await cpPost("coprop_revisado",{id:r.id,nota:motivo.trim()}); if(!x.ok) throw new Error(x.error); showToast("Marcada como revisada hoy","success"); await cargar(); })}>✔ Marcar revisado hoy</button>
     </div>
     {(r.revisiones||[]).length>0&&<details style={{fontSize:11,color:"#64748b",marginBottom:8}}><summary style={{cursor:"pointer"}}>Historial de revisiones ({r.revisiones.length})</summary>
       {r.revisiones.map((v,k)=><div key={k} style={{padding:"2px 0"}}>{fmtFechaCorta(v.fecha)} · {v.por} · {v.accion}{v.nota?" — "+v.nota:""}</div>)}</details>}
@@ -3142,7 +3167,7 @@ function FichaCoprop({r,estado,cargar,showToast,onClose}){
         {x.asunto&&<div style={{color:"#64748b"}}>Asunto: {x.asunto}</div>}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:5}}>
           <span style={{color:"#64748b"}}>Tipo de documento:</span>
-          <select style={{...sel,width:"auto",padding:"4px 6px",...(sinTipo?{borderColor:"#f59e0b"}:{})}} value={tipo} onChange={e=>{ const v=e.target.value; setTipos(t=>({...t,[i]:v})); hacer(async()=>{ const y=await cpPost("coprop_docvalidar",{id:r.id,idx:i,tipo:v,estado:null,motivo:""}); if(!y.ok) throw new Error(y.error); showToast("Tipo actualizado","success"); await cargar(); }); }}>
+          <select style={{...sel,width:"auto",padding:"4px 6px",...(sinTipo?{borderColor:"#f59e0b"}:{})}} value={tipo} onChange={e=>{ const v=e.target.value; setTipos(t=>({...t,[i]:v})); cambiarDoc(i,{tipo:v}); }}>
             {Object.entries(CP_TIPOS_DOC).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
           <span style={{color:col,fontWeight:700}}>{est}</span>{x.motivo&&<span style={{color:"#dc2626"}}>({x.motivo})</span>}
           <button style={BS(true)} disabled={ocup} onClick={()=>{ if(sinTipo){ showToast("Primero indica qué tipo de documento es","error"); return; } docAccion(i,"validado"); }}>✅ Validar</button>

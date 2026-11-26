@@ -81,9 +81,23 @@ const errCuenta = ex => ({
   "auth/too-many-requests": "Demasiados intentos. Espera unos minutos.",
 }[ex && ex.code] || ("No se pudo crear la cuenta: " + ((ex && ex.message) || ex)));
 
+// Achica una foto en el celular antes de subirla (máx. 1600 px, JPEG): de 3-8 MB pasa a ~200-400 KB
+const fotoLiviana = (file, max=1600, q=0.8) => new Promise(resolve=>{
+  if(!file||!/^image\/(jpe?g|png|webp|heic|heif)/i.test(file.type||"")||file.size<350*1024) return resolve(file);
+  const url=URL.createObjectURL(file), img=new Image();
+  img.onerror=()=>{ URL.revokeObjectURL(url); resolve(file); };
+  img.onload=()=>{
+    const k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement("canvas"); c.width=Math.round(img.naturalWidth*k); c.height=Math.round(img.naturalHeight*k);
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+    c.toBlob(b=>resolve(b&&b.size<file.size?b:file),"image/jpeg",q);
+  };
+  img.src=url;
+});
 const uploadImg = async (file, path) => {
-  const r = storageRef(fbStorage, "imagenes/" + path);
-  await uploadBytes(r, file, { contentType: file.type || "image/jpeg" });
+  const liv = await fotoLiviana(file);
+  const r = storageRef(fbStorage, "imagenes/" + (liv!==file ? path.replace(/\.(png|heic|heif|webp)$/i,".jpg") : path));
+  await uploadBytes(r, liv, { contentType: liv.type || file.type || "image/jpeg" });
   return getDownloadURL(r);
 };
 
@@ -2318,7 +2332,7 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
   const fileRef=useRef();
   const handleFiles=ev=>{
     const files=Array.from(ev.target.files);
-    files.forEach(fi=>{const rd=new FileReader();rd.onload=e2=>setPrev(p=>[...p,{name:fi.name,url:e2.target.result}]);rd.readAsDataURL(fi);});
+    files.forEach(fi=>setPrev(p=>[...p,{name:fi.name,url:URL.createObjectURL(fi)}]));
     setRawFiles(p=>[...p,...files]);
   };
   const save=async()=>{
@@ -2327,8 +2341,10 @@ function EvidModal({type,requestId,role,atts,setAtts,showToast,onClose,taskId,se
     try{
       const uploaded=await Promise.all(previews.map(async(pv,i)=>{
         const path=requestId+"/"+type+"/"+uid()+"_"+pv.name;
-        let url=pv.url;
-        try{if(rawFiles[i])url=await uploadImg(rawFiles[i],path);}catch(_){}
+        let url=null;
+        try{ if(rawFiles[i]) url=await uploadImg(rawFiles[i],path); }catch(_){}
+        // Si no se pudo subir al almacenamiento, se guarda una versión chica (no la foto completa)
+        if(!url&&rawFiles[i]) url=await achicarFoto(rawFiles[i],1024,0.6);
         return{id:"a"+uid(),requestId,type,name:pv.name,date:new Date().toISOString(),user:role,comment,preview:url};
       }));
       setAtts(prev=>[...prev,...uploaded]);
